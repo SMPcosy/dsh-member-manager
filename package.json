@@ -1,0 +1,42 @@
+{
+  "name": "dsh-plugin-member-manager",
+  "version": "0.1.1",
+  "type": "module",
+  "description": "DSH 成员管理插件：团队组织架构、成员增删、重命名（中文显示名）、岗位职责与技能赋予。宿主端工具 + Web GUI 面板。",
+  "keywords": ["deepseek-harness", "dsh", "dsh-plugin", "agent-team", "member", "org-chart"],
+  "license": "MIT",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "locale",
+    "cordis.patch.yml",
+    "docs",
+    "test"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/registry-core.test.mjs test/store-and-service.test.mjs test/host-plugin.test.mjs test/client-bundle.test.mjs",
+    "check": "node --check lib/index.js && node --check lib/client.js && node --check src/shared/registry-core.mjs && node --check src/shared/registry-store.mjs && node --check src/shared/team-service.mjs"
+  },
+  "engines": {
+    "node": ">=22.19"
+  }
+}

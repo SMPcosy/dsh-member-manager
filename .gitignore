@@ -1,0 +1,15 @@
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 本地开发备份（不参与发布）
+backup/
+
+# editor/OS
+.DS_Store
+Thumbs.db
+*.log
+
+# 运行期数据（插件运行时在 ~/.dsh 生成，不入仓库）
+storages/
+*.probe

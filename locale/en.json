@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Member Manager",
+    "description": "Maintain team org structure, Chinese display names, job duties and skills. DSH members cannot be renamed or removed natively; this plugin keeps a separate overlay registry."
+  }
+}
