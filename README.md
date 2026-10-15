@@ -1,8 +1,6 @@
 <!--
-  dsh-plugin-member-manager · README (bilingual / 中英双语)
-  v0.1.1
-  语言切换：页面顶部的按钮/链接会切换显示「中文」与「English」两块内容（JavaScript）。
-  若在不支持 JS 的渲染器（如某些纯文本/静态托管的 GitHub 预览）里，两块内容会同时显示，信息不丢失。
+  dsh-plugin-member-manager · README (bilingual / 中英双语) · v0.1.1
+  语言切换：使用原生 <details> 折叠组件实现，GitHub 等不支持 JavaScript 的渲染器也能正常工作。
 -->
 
 <div align="center">
@@ -15,48 +13,15 @@
 
 `dsh-plugin-member-manager` · **v0.1.1** · License: MIT
 
+点击下方标题可查看 **中文** 或 **English**（GitHub 原生折叠，无需脚本）。
+Click a heading below to view **English** or **中文** (native `<details>`, no script needed).
+
 </div>
 
-<script>
-(function () {
-  // 语言切换：默认中文。按钮点击后显示对应语言块、隐藏另一块。
-  function init() {
-    var zh = document.getElementById("lang-zh");
-    var en = document.getElementById("lang-en");
-    var bz = document.getElementById("btn-zh");
-    var be = document.getElementById("btn-en");
-    if (!zh || !en || !bz || !be) return;
-    var cur = "zh";
-    function show(which) {
-      cur = which;
-      zh.style.display = which === "zh" ? "" : "none";
-      en.style.display = which === "en" ? "" : "none";
-      bz.style.fontWeight = which === "zh" ? "bold" : "normal";
-      be.style.fontWeight = which === "en" ? "bold" : "normal";
-    }
-    bz.onclick = function () { show("zh"); };
-    be.onclick = function () { show("en"); };
-    show("zh");
-  }
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
-})();
-</script>
+---
 
-<div align="center" style="margin: 8px 0; font-size: 15px;">
-  <button id="btn-zh" style="margin:0 8px;padding:4px 14px;cursor:pointer;border-radius:6px;border:1px solid #888;">🀄 中文</button>
-  <button id="btn-en" style="margin:0 8px;padding:4px 14px;cursor:pointer;border-radius:6px;border:1px solid #888;">🌐 English</button>
-  <!-- 超链接形式切换（锚点跳转，与按钮等价） -->
-  · <a href="#lang-zh">中文</a> / <a href="#lang-en">English</a>
-</div>
-
-<hr />
-
-<!-- ============================== 中文 ============================== -->
-<div id="lang-zh">
+<details open>
+<summary><b>🀄 中文（默认打开）</b></summary>
 
 ## 简介
 
@@ -192,12 +157,12 @@ MIT
 
 ---
 
-*README 语言：中文 / English · 语言切换由顶部脚本实现；无需 JS 时两块内容全部可见。*
+</details>
 
-</div>
+---
 
-<!-- ============================== English ============================== -->
-<div id="lang-en">
+<details>
+<summary><b>🌐 English</b></summary>
 
 ## Overview
 
@@ -333,10 +298,8 @@ MIT
 
 ---
 
-*README language: Chinese / English · toggled by the script at the top; if JS is unavailable both sections are shown.*
+</details>
 
-</div>
-
-<hr />
+---
 
 <div align="center"><sub>DSH Member Manager · © 2026 · Made for DeepSeek Harness</sub></div>
