@@ -15,7 +15,7 @@ Click a heading below to view **English** or **中文** .
 
 ---
 
-<details>
+<details open>
 
 <summary><b>🀄 中文（默认打开）</b></summary>
 
@@ -72,7 +72,17 @@ Click a heading below to view **English** or **中文** .
 
 ## 安装
 
-### 方式 A：本地源码加载（开发/自用）
+### 方式 A：从插件市场安装
+
+```bash
+dsh-plugin-member-manager
+```
+复制上述插件名，在DSH进行如下操作
+
+<img width="2558" height="1640" alt="member-manager​安装示例" src="https://github.com/user-attachments/assets/79bf2b9e-6e24-4d95-b0e2-5f5c5f4c7688" />
+
+
+### 方式 B：本地源码加载（开发/自用）
 
 ```bash
 # 在插件源码所在目录的上一级执行
@@ -82,11 +92,7 @@ dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 > 安装后**必须重启 DSH**（该插件不支持热重载）：  
 > 重启桌面应用，或退出重进。刷新 GUI 后在设置页 / 侧栏即可看到「成员管理」。
 
-### 方式 B：从插件市场安装（打包上架后）
 
-```bash
-dsh plugin --profile desktop add dsh-plugin-member-manager
-```
 
 ### 卸载
 
@@ -226,7 +232,17 @@ MIT
 
 ## Installation
 
-### Option A: load from local source (dev / self‑hosted)
+### Option A: install from the plugin registry (after publishing)
+
+```bash
+dsh-plugin-member-manager
+```
+Copy the plugin name dsh-plugin-member-manager, then in DSH perform the following steps:
+
+<img width="2558" height="1640" alt="member-manager​安装示例" src="https://github.com/user-attachments/assets/79bf2b9e-6e24-4d95-b0e2-5f5c5f4c7688" />
+
+
+### Option B: load from local source (dev / self‑hosted)
 
 ```bash
 # run from the folder that contains the plugin source directory
@@ -235,12 +251,6 @@ dsh plugin --profile desktop add link:"<absolute path to this repo>"
 
 > **Restart DSH afterwards** (this plugin does not hot‑reload):  
 > restart the desktop app, or exit and re‑enter. After the GUI refreshes you'll find "Member Manager" in Settings / the sidebar.
-
-### Option B: install from the plugin registry (after publishing)
-
-```bash
-dsh plugin --profile desktop add dsh-plugin-member-manager
-```
 
 ### Uninstall
 
