@@ -6,6 +6,10 @@
   "keywords": ["deepseek-harness", "dsh", "dsh-plugin", "agent-team", "member", "org-chart"],
   "license": "MIT",
   "icon": "./icon.png",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SMPcosy/dsh-plugin-member-manager.git"
+  },
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
