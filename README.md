@@ -1,8 +1,3 @@
-<!--
-  dsh-plugin-member-manager · README (bilingual / 中英双语) · v0.1.1
-  语言切换：使用原生 <details> 折叠组件实现，GitHub 等不支持 JavaScript 的渲染器也能正常工作。
--->
-
 <div align="center">
 
 # 📇 DSH Member Manager / 成员管理
@@ -13,14 +8,15 @@
 
 `dsh-plugin-member-manager` · **v0.1.1** · License: MIT
 
-点击下方标题可查看 **中文** 或 **English**（GitHub 原生折叠，无需脚本）。
+点击下方标题可查看 **中文** 或 **English**（GitHub 原生折叠，无需脚本）。  
 Click a heading below to view **English** or **中文** (native `<details>`, no script needed).
 
 </div>
 
 ---
 
-<details open>
+<details>
+
 <summary><b>🀄 中文（默认打开）</b></summary>
 
 ## 简介
@@ -38,11 +34,11 @@ Click a heading below to view **English** or **中文** (native `<details>`, no 
 
 > 截图由你在真实 DSH 界面中截取（见下方说明），并把图片放到仓库的 `docs/assets/` 目录后，替换下面 3 行路径。
 
-| 说明 | 图片路径 |
-|------|----------|
+| 说明                                 | 图片路径                                           |
+| ---------------------------------- | ---------------------------------------------- |
 | 图 1 · DSH 主界面，红框标出「成员管理」入口（侧栏/设置页） | `docs/assets/screenshot-01-main-interface.png` |
-| 图 2 · 插件主界面（组织架构视图） | `docs/assets/screenshot-02-panel.png` |
-| 图 3 · 成员编辑界面（岗位/职责/技能/模型） | `docs/assets/screenshot-03-edit.png` |
+| 图 2 · 插件主界面（组织架构视图）                | `docs/assets/screenshot-02-panel.png`          |
+| 图 3 · 成员编辑界面（岗位/职责/技能/模型）          | `docs/assets/screenshot-03-edit.png`           |
 
 > 图 1 拍摄步骤：打开 DSH 主界面 → 找到侧栏「👥 成员管理」图标或设置页里「成员管理」分区 → 用红框圈出入口。
 
@@ -70,7 +66,7 @@ Click a heading below to view **English** or **中文** (native `<details>`, no 
 dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 ```
 
-> 安装后**必须重启 DSH**（该插件不支持热重载）：
+> 安装后**必须重启 DSH**（该插件不支持热重载）：  
 > 重启桌面应用，或退出重进。刷新 GUI 后在设置页 / 侧栏即可看到「成员管理」。
 
 ### 方式 B：从插件市场安装（打包上架后）
@@ -97,41 +93,41 @@ dsh plugin --profile desktop add dsh-plugin-member-manager
 
 在 DSH 插件配置里可用字段（均为可选，省略即用默认）：
 
-| 字段 | 默认值 | 说明 |
-|------|--------|------|
-| `dataDir` | `~/.dsh/storages/member-manager` | 名册目录 |
-| `registryFile` | `{dataDir}/registry.json` | 名册文件路径 |
-| `scanLocalSkills` | `true` | 是否直接扫盘补充本地技能目录（`~/.dsh/skills` 等） |
-| `extraSkillRoots` | `[]` | 追加的技能扫描根目录（绝对路径数组） |
+| 字段                | 默认值                              | 说明                                |
+| ----------------- | -------------------------------- | --------------------------------- |
+| `dataDir`         | `~/.dsh/storages/member-manager` | 名册目录                              |
+| `registryFile`    | `{dataDir}/registry.json`        | 名册文件路径                            |
+| `scanLocalSkills` | `true`                           | 是否直接扫盘补充本地技能目录（`~/.dsh/skills` 等） |
+| `extraSkillRoots` | `[]`                             | 追加的技能扫描根目录（绝对路径数组）                |
 
 ---
 
 ## 工具一览（12 个）
 
-| 工具 | 作用 |
-|------|------|
-| `member_list` | 输出组织架构视图（小组 → 成员），含显示名/岗位/技能/状态 |
-| `member_add` | 登记一名成员（可带显示名、分组、岗位、技能） |
-| `member_rename` | 设置中文显示名 / 别名（`target` 不变） |
-| `member_remove` | 停用（软删除）或 `restore:true` 恢复 |
-| `member_set_role` | 设置岗位名称与职责条目 |
-| `member_set_skills` | 整体覆盖或增量增删技能 |
-| `member_set_model` | 设置/清除该成员的 `provider/model` 覆盖（空串＝清除） |
-| `group_manage` | 小组 create / rename / delete / assign |
-| `member_sync` | 把核心当前成员批量登记进名册 |
-| `member_diagnose` | 诊断运行状态（目录可写、服务可用、路由注册、缓存与告警） |
-| `skill_list` | 列出本机已安装技能（名称 + 描述 + 来源 + 是否可被模型调用） |
-| `model_list` | 列出可用 provider 与模型目录 |
+| 工具                  | 作用                                   |
+| ------------------- | ------------------------------------ |
+| `member_list`       | 输出组织架构视图（小组 → 成员），含显示名/岗位/技能/状态      |
+| `member_add`        | 登记一名成员（可带显示名、分组、岗位、技能）               |
+| `member_rename`     | 设置中文显示名 / 别名（`target` 不变）            |
+| `member_remove`     | 停用（软删除）或 `restore:true` 恢复           |
+| `member_set_role`   | 设置岗位名称与职责条目                          |
+| `member_set_skills` | 整体覆盖或增量增删技能                          |
+| `member_set_model`  | 设置/清除该成员的 `provider/model` 覆盖（空串＝清除） |
+| `group_manage`      | 小组 create / rename / delete / assign |
+| `member_sync`       | 把核心当前成员批量登记进名册                       |
+| `member_diagnose`   | 诊断运行状态（目录可写、服务可用、路由注册、缓存与告警）         |
+| `skill_list`        | 列出本机已安装技能（名称 + 描述 + 来源 + 是否可被模型调用）   |
+| `model_list`        | 列出可用 provider 与模型目录                  |
 
 ---
 
 ## Web 面板入口
 
-| 插槽 | 入口 |
-|------|------|
-| `settings.section` | 设置页 →「成员管理」分区 |
-| `sidebar.panellist` | 侧栏「👥 成员管理」图标 |
-| `main` | 独立主页面（keyed 面板） |
+| 插槽                  | 入口              |
+| ------------------- | --------------- |
+| `settings.section`  | 设置页 →「成员管理」分区   |
+| `sidebar.panellist` | 侧栏「👥 成员管理」图标   |
+| `main`              | 独立主页面（keyed 面板） |
 
 后端 HTTP 路由：`/api/dsh-plugin-member-manager/{state, op, skills, models, overrides, health}`。
 
@@ -162,6 +158,7 @@ MIT
 ---
 
 <details>
+
 <summary><b>🌐 English</b></summary>
 
 ## Overview
@@ -179,11 +176,11 @@ MIT
 
 > Capture these from your real DSH interface (see note below), drop the images into the repo `docs/assets/` folder, and update the three paths below.
 
-| Figure | Image path |
-|--------|------------|
+| Figure                                                                                  | Image path                                     |
+| --------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | 1 · DSH main interface with the "Member Manager" entry highlighted (sidebar / settings) | `docs/assets/screenshot-01-main-interface.png` |
-| 2 · Plugin main panel (org‑chart view) | `docs/assets/screenshot-02-panel.png` |
-| 3 · Member edit form (role / duties / skills / model) | `docs/assets/screenshot-03-edit.png` |
+| 2 · Plugin main panel (org‑chart view)                                                  | `docs/assets/screenshot-02-panel.png`          |
+| 3 · Member edit form (role / duties / skills / model)                                   | `docs/assets/screenshot-03-edit.png`           |
 
 > Figure 1: open the DSH main UI → find the "👥 Member Manager" sidebar icon or the "Member Manager" section in Settings → circle the entry with a red box.
 
@@ -211,7 +208,7 @@ MIT
 dsh plugin --profile desktop add link:"<absolute path to this repo>"
 ```
 
-> **Restart DSH afterwards** (this plugin does not hot‑reload):
+> **Restart DSH afterwards** (this plugin does not hot‑reload):  
 > restart the desktop app, or exit and re‑enter. After the GUI refreshes you'll find "Member Manager" in Settings / the sidebar.
 
 ### Option B: install from the plugin registry (after publishing)
@@ -238,41 +235,41 @@ Remove the plugin entry from the profile's `cordis.patch.yml` / bundle list, the
 
 All options are optional (omitted ⇒ default):
 
-| Field | Default | Description |
-|-------|---------|-------------|
-| `dataDir` | `~/.dsh/storages/member-manager` | Roster directory |
-| `registryFile` | `{dataDir}/registry.json` | Roster file path |
-| `scanLocalSkills` | `true` | Also scan disk to complete the local skill catalog (`~/.dsh/skills` etc.) |
-| `extraSkillRoots` | `[]` | Extra skill scan roots (array of absolute paths) |
+| Field             | Default                          | Description                                                               |
+| ----------------- | -------------------------------- | ------------------------------------------------------------------------- |
+| `dataDir`         | `~/.dsh/storages/member-manager` | Roster directory                                                          |
+| `registryFile`    | `{dataDir}/registry.json`        | Roster file path                                                          |
+| `scanLocalSkills` | `true`                           | Also scan disk to complete the local skill catalog (`~/.dsh/skills` etc.) |
+| `extraSkillRoots` | `[]`                             | Extra skill scan roots (array of absolute paths)                          |
 
 ---
 
 ## Tools (12)
 
-| Tool | Purpose |
-|------|---------|
-| `member_list` | Output the org‑chart view (group → member) with display name / role / skills / status |
-| `member_add` | Register a member (with display name, group, role, skills) |
-| `member_rename` | Set Chinese display name / aliases (`target` unchanged) |
-| `member_remove` | Retire (soft delete) or `restore:true` to restore |
-| `member_set_role` | Set job title and duties |
-| `member_set_skills` | Replace skills entirely, or add/remove incrementally |
-| `member_set_model` | Set / clear a member's `provider/model` override (empty string = clear) |
-| `group_manage` | Groups: create / rename / delete / assign |
-| `member_sync` | Bulk‑register the current core members into the roster |
-| `member_diagnose` | Diagnose runtime health (dir writable, services, routes, cache, warnings) |
-| `skill_list` | List installed skills (name + description + source + model‑invocable) |
-| `model_list` | List available providers and their model catalogs |
+| Tool                | Purpose                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| `member_list`       | Output the org‑chart view (group → member) with display name / role / skills / status |
+| `member_add`        | Register a member (with display name, group, role, skills)                            |
+| `member_rename`     | Set Chinese display name / aliases (`target` unchanged)                               |
+| `member_remove`     | Retire (soft delete) or `restore:true` to restore                                     |
+| `member_set_role`   | Set job title and duties                                                              |
+| `member_set_skills` | Replace skills entirely, or add/remove incrementally                                  |
+| `member_set_model`  | Set / clear a member's `provider/model` override (empty string = clear)               |
+| `group_manage`      | Groups: create / rename / delete / assign                                             |
+| `member_sync`       | Bulk‑register the current core members into the roster                                |
+| `member_diagnose`   | Diagnose runtime health (dir writable, services, routes, cache, warnings)             |
+| `skill_list`        | List installed skills (name + description + source + model‑invocable)                 |
+| `model_list`        | List available providers and their model catalogs                                     |
 
 ---
 
 ## Web panel entry points
 
-| Slot | Entry |
-|------|-------|
-| `settings.section` | Settings → "Member Manager" section |
-| `sidebar.panellist` | "👥 Member Manager" sidebar icon |
-| `main` | Standalone main page (keyed panel) |
+| Slot                | Entry                               |
+| ------------------- | ----------------------------------- |
+| `settings.section`  | Settings → "Member Manager" section |
+| `sidebar.panellist` | "👥 Member Manager" sidebar icon    |
+| `main`              | Standalone main page (keyed panel)  |
 
 Backend HTTP routes: `/api/dsh-plugin-member-manager/{state, op, skills, models, overrides, health}`.
 
