@@ -8,8 +8,8 @@
 
 `dsh-plugin-member-manager` · **v0.1.1** · License: MIT
 
-点击下方标题可查看 **中文** 或 **English**（GitHub 原生折叠，无需脚本）。  
-Click a heading below to view **English** or **中文** (native `<details>`, no script needed).
+点击下方标题可查看 **中文** 或 **English**。  
+Click a heading below to view **English** or **中文** .
 
 </div>
 
@@ -32,27 +32,40 @@ Click a heading below to view **English** or **中文** (native `<details>`, no 
 
 ## 截图
 
-> 截图由你在真实 DSH 界面中截取（见下方说明），并把图片放到仓库的 `docs/assets/` 目录后，替换下面 3 行路径。
 
-| 说明                                 | 图片路径                                           |
-| ---------------------------------- | ---------------------------------------------- |
-| 图 1 · DSH 主界面，红框标出「成员管理」入口（侧栏/设置页） | `docs/assets/screenshot-01-main-interface.png` |
-| 图 2 · 插件主界面（组织架构视图）                | `docs/assets/screenshot-02-panel.png`          |
-| 图 3 · 成员编辑界面（岗位/职责/技能/模型）          | `docs/assets/screenshot-03-edit.png`           |
+<img width="2186" height="1640" alt="DSH Member Manager01" src="https://github.com/user-attachments/assets/12b22bc4-97dc-41a7-a04c-3e6d1af3c5e6" />
 
-> 图 1 拍摄步骤：打开 DSH 主界面 → 找到侧栏「👥 成员管理」图标或设置页里「成员管理」分区 → 用红框圈出入口。
+<img width="2186" height="1640" alt="DSH Member Manager07" src="https://github.com/user-attachments/assets/d9858133-c497-4640-9919-0aa9696ff2c7" />
+
+<img width="2186" height="1640" alt="DSH Member Manager02" src="https://github.com/user-attachments/assets/7ac1a139-412d-4922-b599-a2e59c583bf9" />
 
 ---
-
 ## 功能特性
 
 - 🧑‍🤝‍🧑 **组织架构**：两级结构「小组 → 成员」，可新建 / 重命名 / 排序小组，成员一键归组。
+
 - 🏷️ **中文显示名与别名**：显示名独立存储，`target` 保持不变。
+
 - 🛠️ **岗位职责**：岗位名称（title）+ 职责条目列表（duties）。
-- ⭐ **技能赋予**：从本机技能目录选择（可搜索多选），也支持自定义标签。
+
 - 🔄 **停用 / 恢复**：软删除，保留历史记录，随时恢复。
+
+<img width="2186" height="1640" alt="DSH Member Manager03" src="https://github.com/user-attachments/assets/c6a603a8-b4fa-4495-a785-0fb65a66ae90" />
+
+- ⭐ **技能赋予**：从本机技能目录选择（可搜索多选），也支持自定义标签。
+
+<img width="2186" height="1640" alt="DSH Member Manager05" src="https://github.com/user-attachments/assets/d544aa19-6aae-4186-9560-fd9e56193696" />
+
+<img width="2186" height="1640" alt="DSH Member Manager06" src="https://github.com/user-attachments/assets/78bd87d1-8922-4dd2-8fde-d6457ac73dc6" />
+
+
 - 🧠 **按成员模型覆盖**：每个成员可单独指定 `provider/model`，下一次请求即生效；清空即恢复默认。这是通过官方 `agent/request` 水位接缝实现，**真生效**。
+
+<img width="2186" height="1640" alt="DSH Member Manager04" src="https://github.com/user-attachments/assets/b40fe472-cf54-4a8e-b27c-f17cae4c41b6" />
+
+
 - 📊 **Web 面板**：组织架构、行内编辑、未登记成员一键登记、诊断信息。
+
 - 🛰️ **丰富工具**：12 个宿主端工具，Agent 可完整读写名册。
 
 ---
@@ -174,27 +187,39 @@ MIT
 
 ## Screenshots
 
-> Capture these from your real DSH interface (see note below), drop the images into the repo `docs/assets/` folder, and update the three paths below.
+<img width="2186" height="1640" alt="DSH Member Manager01" src="https://github.com/user-attachments/assets/12b22bc4-97dc-41a7-a04c-3e6d1af3c5e6" />
 
-| Figure                                                                                  | Image path                                     |
-| --------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| 1 · DSH main interface with the "Member Manager" entry highlighted (sidebar / settings) | `docs/assets/screenshot-01-main-interface.png` |
-| 2 · Plugin main panel (org‑chart view)                                                  | `docs/assets/screenshot-02-panel.png`          |
-| 3 · Member edit form (role / duties / skills / model)                                   | `docs/assets/screenshot-03-edit.png`           |
+<img width="2186" height="1640" alt="DSH Member Manager07" src="https://github.com/user-attachments/assets/d9858133-c497-4640-9919-0aa9696ff2c7" />
 
-> Figure 1: open the DSH main UI → find the "👥 Member Manager" sidebar icon or the "Member Manager" section in Settings → circle the entry with a red box.
+<img width="2186" height="1640" alt="DSH Member Manager02" src="https://github.com/user-attachments/assets/7ac1a139-412d-4922-b599-a2e59c583bf9" />
 
 ---
-
 ## Features
 
+
 - 🧑‍🤝‍🧑 **Org structure**: two‑level "group → member"; create / rename / reorder groups, drag members into groups.
+
 - 🏷️ **Chinese display name & aliases**: stored separately; `target` stays untouched.
+
 - 🛠️ **Roles & duties**: job title (`title`) + a list of duties.
-- ⭐ **Skills**: pick from the local skill catalog (searchable multi‑select), or type custom tags.
+
 - 🔄 **Retire / restore**: soft deletes keep history; restore anytime.
+
+<img width="2186" height="1640" alt="DSH Member Manager03" src="https://github.com/user-attachments/assets/c6a603a8-b4fa-4495-a785-0fb65a66ae90" />
+
+- ⭐ **Skills**: pick from the local skill catalog (searchable multi‑select), or type custom tags.
+
+<img width="2186" height="1640" alt="DSH Member Manager05" src="https://github.com/user-attachments/assets/d544aa19-6aae-4186-9560-fd9e56193696" />
+
+<img width="2186" height="1640" alt="DSH Member Manager06" src="https://github.com/user-attachments/assets/78bd87d1-8922-4dd2-8fde-d6457ac73dc6" />
+
 - 🧠 **Per‑member model override**: set a `provider/model` for each member that takes effect on the next request; clearing reverts to default. Implemented through the official `agent/request` waterfall seam — it **really works**.
+
+<img width="2186" height="1640" alt="DSH Member Manager04" src="https://github.com/user-attachments/assets/b40fe472-cf54-4a8e-b27c-f17cae4c41b6" />
+
+
 - 📊 **Web panel**: org‑chart view, inline editing, one‑click registration of unregistered members, diagnostics.
+
 - 🛰️ **Rich tools**: 12 host tools; agents can read and write the roster completely.
 
 ---
