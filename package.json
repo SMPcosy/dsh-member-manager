@@ -5,6 +5,7 @@
   "description": "DSH 成员管理插件：团队组织架构、成员增删、重命名（中文显示名）、岗位职责与技能赋予。宿主端工具 + Web GUI 面板。",
   "keywords": ["deepseek-harness", "dsh", "dsh-plugin", "agent-team", "member", "org-chart"],
   "license": "MIT",
+  "icon": "./icon.png",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
@@ -18,7 +19,8 @@
     "locale",
     "cordis.patch.yml",
     "docs",
-    "test"
+    "test",
+    "icon.png"
   ],
   "dsh": {
     "bundle": {
