@@ -1,7 +1,7 @@
 <div align="center">
 
 # 📇 DSH Member Manager / 成员管理
-
+# 已发布到官方NPM
 **A DeepSeek Harness plugin for team org structure, Chinese display names, roles, skills and per‑member model overrides.**
 
 **一个管理团队组织架构、中文显示名、岗位职责、技能，以及按成员模型覆盖的 DSH 插件。**
@@ -77,9 +77,9 @@ Click a heading below to view **English** or **中文** .
 ```bash
 dsh-plugin-member-manager
 ```
-复制上述插件名，在DSH进行如下操作
+复制上述插件名dsh-plugin-member-manager，在DSH进行如下操作
 
-<img width="2558" height="1640" alt="member-manager​安装示例" src="https://github.com/user-attachments/assets/79bf2b9e-6e24-4d95-b0e2-5f5c5f4c7688" />
+<img width="2558" height="1640" alt="member-manager​安装图示" src="https://github.com/user-attachments/assets/b0b211a3-898f-4dc2-9a17-d13a4671581a" />
 
 
 ### 方式 B：本地源码加载（开发/自用）
@@ -181,6 +181,7 @@ MIT
 <summary><b>🌐 English</b></summary>
 
 ## Overview
+# It has been published to the official npm registry.
 
 **Member Manager** is a DeepSeek Harness (DSH) plugin that lets you manage your team as a two‑level **group → member** org structure, and attach extra metadata to each member — **Chinese display name, job title & duties, skill tags, active/retired status** — and optionally set a **per‑member model override**.
 
@@ -239,7 +240,7 @@ dsh-plugin-member-manager
 ```
 Copy the plugin name dsh-plugin-member-manager, then in DSH perform the following steps:
 
-<img width="2558" height="1640" alt="member-manager​安装示例" src="https://github.com/user-attachments/assets/79bf2b9e-6e24-4d95-b0e2-5f5c5f4c7688" />
+<img width="2558" height="1640" alt="member-manager​安装图示" src="https://github.com/user-attachments/assets/b0b211a3-898f-4dc2-9a17-d13a4671581a" />
 
 
 ### Option B: load from local source (dev / self‑hosted)
