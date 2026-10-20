@@ -29,6 +29,7 @@
   "files": [
     "lib",
     "src",
+    "prompts",
     "locale",
     "cordis.patch.yml",
     "docs",
@@ -53,7 +54,8 @@
     "node": ">=22.19"
   },
   "scripts": {
-    "test": "node --test test/",
-    "check": "node --check lib/index.js && node --check lib/client.js && node --check src/shared/registry-core.mjs && node --check src/shared/registry-store.mjs && node --check src/shared/team-service.mjs && node --check src/shared/group-brief.mjs && node --check src/shared/backups.mjs && node --check src/host/workflow.mjs && node --check src/host/updater.mjs && node --check scripts/apply-pending.mjs"
+    "test": "node --test \"test/*.test.mjs\"",
+    "check": "node --check lib/index.js && node --check lib/client.js && node --check src/shared/registry-core.mjs && node --check src/shared/registry-store.mjs && node --check src/shared/team-service.mjs && node --check src/shared/group-brief.mjs && node --check src/shared/backups.mjs && node --check src/shared/company-config.mjs && node --check src/shared/company-org.mjs && node --check src/shared/company-ledger.mjs && node --check src/shared/company-router.mjs && node --check src/shared/company-store.mjs && node --check src/host/workflow.mjs && node --check src/host/updater.mjs && node --check src/host/company-compat.mjs && node --check src/host/company-employees.mjs && node --check src/host/company-dispatcher.mjs && node --check src/host/company-scheduler.mjs && node --check src/host/company-runtime.mjs && node --check scripts/apply-pending.mjs && node --check scripts/verify-company.mjs && node --check scripts/switch-to-dsh-member-manager.mjs && node --check scripts/rollback-to-dsh-plugin-member-manager.mjs && node --check test/company-package.test.mjs",
+    "verify": "node scripts/verify-company.mjs"
   }
 }

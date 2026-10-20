@@ -167,12 +167,25 @@ test("宿主插件导出合法的 Cordis 插件形状", () => {
   assert.equal(typeof PLUGIN.apply, "function");
 });
 
-test("apply() 注册 16 个工具，且参数 schema 结构合法", () => {
+test("apply() 注册 29 个工具（16 名册 + 13 公司化），且参数 schema 结构合法", () => {
   const { ctx, tools } = mockCtx();
   PLUGIN.apply(ctx);
 
   const names = [...tools.keys()].sort();
   assert.deepEqual(names, [
+    "company_accept",
+    "company_admin",
+    "company_ask",
+    "company_ask_help",
+    "company_assign",
+    "company_borrow",
+    "company_cancel",
+    "company_escalate",
+    "company_hire",
+    "company_order",
+    "company_report",
+    "company_review",
+    "company_status",
     "group_manage",
     "member_add",
     "member_backup",
@@ -207,6 +220,11 @@ test("apply() 注册 HTTP 路由，content-type 为 utf-8 JSON", async () => {
   PLUGIN.apply(ctx);
   assert.deepEqual([...routes.keys()].sort(), [
     "/api/dsh-member-manager/backups",
+    "/api/dsh-member-manager/company/board",
+    "/api/dsh-member-manager/company/costs",
+    "/api/dsh-member-manager/company/orders",
+    "/api/dsh-member-manager/company/org",
+    "/api/dsh-member-manager/company/overview",
     "/api/dsh-member-manager/health",
     "/api/dsh-member-manager/models",
     "/api/dsh-member-manager/op",
@@ -614,17 +632,17 @@ test("核心集成：agent/created 事件路径也能刷新缓存", async () => 
 
 /* ================== 装载韧性 ================== */
 
-test("韧性：webServer 服务缺失时，16 个工具仍全部注册", () => {
+test("韧性：webServer 服务缺失时，29 个工具仍全部注册", () => {
   const { ctx, tools, routes } = mockCtx({ webServer: null });
   assert.doesNotThrow(() => PLUGIN.apply(ctx));
-  assert.equal(tools.size, 16);
+  assert.equal(tools.size, 29);
   assert.equal(routes.size, 0, "没有 webServer 就不该有路由");
 });
 
 test("韧性：webServer.register 抛错时，插件仍加载且工具可用", async () => {
   const { ctx, tools } = mockCtx({ webServerThrows: true });
   assert.doesNotThrow(() => PLUGIN.apply(ctx));
-  assert.equal(tools.size, 16);
+  assert.equal(tools.size, 29);
   const add = await tools.get("member_add").execute({ target: "still-works" });
   assert.equal(add.ok, true, "面板路由挂了也不该影响工具");
 });
@@ -634,7 +652,7 @@ test("韧性：缺少 ctx.config 时使用默认数据目录且不抛错", () =>
   const m = mockCtx({ dir });
   delete m.ctx.config;
   assert.doesNotThrow(() => PLUGIN.apply(m.ctx));
-  assert.equal(m.tools.size, 16);
+  assert.equal(m.tools.size, 29);
 });
 
 test("group_manage：assign 传空字符串表示移出小组", async () => {
@@ -775,8 +793,8 @@ test("回归：ctx 访问未声明属性即抛错时，apply 仍能完整执行�
   // 关键：这里连 ctx.config 都会抛错（config 不在 inject 列表里）。
   // 早期实现写了 `ctx.config`，导致 apply 在第一行后中断、工具与路由全部注册不上。
   assert.doesNotThrow(() => PLUGIN.apply(ctx, {  dataDir: dir }));
-  assert.equal(tools.size, 16, "16 个工具都应注册（真实故障时这里是 0）");
-  assert.equal(routes.size, 10, "10 条路由都应注册（真实故障时这里是 0）");
+  assert.equal(tools.size, 29, "29 个工具（16 名册 + 13 公司化）都应注册（真实故障时这里是 0）");
+  assert.equal(routes.size, 15, "15 条路由（10 名册 + 5 公司化只读）都应注册（真实故障时这里是 0）");
 });
 
 test("回归：不给 config 且 ctx 会抛错时，回退默认目录且不崩溃", () => {
@@ -797,8 +815,8 @@ test("回归：不给 config 且 ctx 会抛错时，回退默认目录且不崩�
     },
   });
   assert.doesNotThrow(() => PLUGIN.apply(ctx)); // 无第二个参数
-  assert.equal(tools.size, 16);
-  assert.equal(routes.size, 10);
+  assert.equal(tools.size, 29);
+  assert.equal(routes.size, 15);
 });
 
 test("配置取自第二个参数（与官方 apply(ctx, config) 一致），优先于 ctx.config", async () => {

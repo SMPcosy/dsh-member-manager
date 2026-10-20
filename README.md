@@ -6,7 +6,7 @@
 
 **一个管理团队组织架构、中文显示名、岗位职责、技能，以及按成员模型覆盖的 DSH 插件。**
 
-`dsh-plugin-member-manager` · **v0.3.0** · License: MIT
+`dsh-member-manager` · **v0.3.0** · License: MIT
 
 点击下方标题可查看 **中文** 或 **English**。  
 Click a heading below to view **English** or **中文** .
@@ -30,11 +30,28 @@ Click a heading below to view **English** or **中文** .
 
 ## v0.3.0 更新要点
 
-- 🎯 **只显示当前任务**：组织架构图从「全团队」改为**任务作用域**——一个 root 会话就是一个任务，图上只出现这个任务真正需要的参与者（大总管 + `parentSession` 指向它的成员），不再把整个名册都铺出来。
-- 🔽 **任务下拉切换**：右栏 tab 顶部新增任务选择器（由 `GET /orgmap` 返回的 `tasks[]` 驱动，带运行中标记与人数），切任务即换图；没有任何任务时显示空态并禁用下拉。
-- 🧭 布局不变：仍是并联横向 / 串联纵向的三层视图（大总管 → 分组色块 → 组内成员），工作区卡片、结构线与动态引导线保留；任务内成员的 token / 用时只统计该任务各会话的用量。
+- 🏷️ **品牌重整（不破坏数据）**：包名 / 插件 id / 客户端命名空间 / 面板 API 前缀统一为 `dsh-member-manager`（原 `dsh-plugin-member-manager`）；版本号仍为 **0.3.0**。名册数据目录与 `registry.json` 格式不变，旧名安装可直接切换、可回滚。
+- 🏢 **公司化运行时（本版核心）**：在名册覆盖层之上，把成员当作「公司」来编排——**部门、工单（order）、派工凭证（attempt）、回报与验收、审计流水、token 成本归因**。全部建立在 `ctx.agents` / `ctx.subagents` 的会话能力之上，**不依赖原生 team 层**。
+- 🧵 **四条工具线自动隔离**：窗口线（`company_order` / `company_status` / `company_ask` / `company_cancel`）只能下单、查询、催办；经理线（`company_assign` / `company_review` / `company_borrow` / `company_report` / `company_escalate` 等 11 个）管理派工与验收；员工线（`company_accept` / `company_report` / `company_ask_help`）只做自己的活；管理线（`company_hire` / `company_admin`）仅 owner 可用。越权调用返回 `E_TOOL_LINE`，隔离由 `tools.restrict` 白名单 + 同步 `tools.guard` + 执行体 `exec.agent.session.id` 反查三道共同保证。
+- 🪪 **attempt 凭证防串单**：`company_report` 必带 `attemptId`，陈旧 attempt 直接拒绝；`company_order` 支持 `clientOrderId` 幂等重放；工单依赖完成后才解锁下游。
+- 💰 **成本与审计**：员工/经理会话的 token 与请求数按「员工 / 部门 / 工单」聚合（`GET /company/costs`）；组织与账本落 `company.json`，审计追加到 `audit.jsonl`（append-only、加载时对账重放）。`company_admin` 当前支持 `createDepartment` / `createEmployee` / `setRoutingRules`。
+- 🧯 **全链路降级**：宿主没有 `agents` / `subagents` 服务时，公司化工具返回 `E_NO_AGENTS`，名册覆盖层（既有 16 个名册工具 + 面板 + 路由）不受影响；Agent 启动失败只记 warning，不阻断插件加载。
+- 🧩 **新增 Web 只读接口**：`GET /company/{overview,org,board,costs,orders}`，统一 `{ ok: true, data }` 信封；`GET /state` 附带 `company` 摘要。
+- 🎯 **组织架构图任务视角（并入本版）**：组织架构图从「全团队」改为**任务作用域**——一个 root 会话就是一个任务，图上只出现这个任务真正需要的参与者（大总管 + `parentSession` 指向它的成员），不再把整个名册都铺出来。
+- 🔽 **任务下拉切换（并入本版）**：右栏 tab 顶部新增任务选择器（由 `GET /orgmap` 返回的 `tasks[]` 驱动，带运行中标记与人数），切任务即换图；没有任何任务时显示空态并禁用下拉。
+- 🧭 布局不变（并入本版）：仍是并联横向 / 串联纵向的三层视图（大总管 → 分组色块 → 组内成员），工作区卡片、结构线与动态引导线保留；任务内成员的 token / 用时只统计该任务各会话的用量。
 - 🔌 `GET /orgmap` 契约升级到 `version: 2`：新增 `tasks` / `task` / `lead` / `groups` / `members` / `dispatch` / `dependency` / `totals`，支持 `?task=<rootSessionId>` 指定任务；未指定或指定失效时回落到最近活跃任务。
-- 🧪 测试 228 → **230**（host：任务作用域与 `?task=` 回退；client-bundle：任务下拉 / 切换 / 空态）。
+- 🧪 测试：既有测试全部保留并通过，新增公司化纯函数（org / ledger / router / store / config）、运行时 fake 闭环、打包元数据等用例（最终数量以仓库内 `npm test` 输出为准）。
+
+## 公司化运行时怎么用
+
+1. 确认名册里有成员（`member_list` / 面板）。
+2. 首次需要时调用 `company_admin({ action: "createDepartment" | "createEmployee" | "setRoutingRules" })` 建组织，或直接 `company_order`：运行时会在 boot 时创建根级 owner 会话，并按配置建立部门与经理会话。
+3. 在任意前台会话里 `company_order({ type, title, dept?, acceptance? })` 下单；经理线用 `company_assign` 派工，员工收到唤醒消息后干活，并**必须** `company_report({ orderId, attemptId, status, summary })` 回报。
+4. 用 `company_status` 或面板/`GET /company/board` 看工单与工位；`GET /company/costs` 看成本。
+5. 停机/卸载时运行时按「停派工 → 等 idle（超时）→ cancel → drainChildren → dispose owner」顺序优雅收尾，审计落盘。
+
+> 公司化数据只写 `~/.dsh/storages/member-manager/`（`company.json`、`ledger/`、`audit/`），绝不写入插件目录或工作区。配置见下一节「公司化配置」。
 
 ## v0.2.4 更新要点
 
@@ -125,9 +142,9 @@ Click a heading below to view **English** or **中文** .
 ### 方式 A：从插件市场安装
 
 ```bash
-dsh-plugin-member-manager
+dsh-member-manager
 ```
-复制上述插件名dsh-plugin-member-manager，在DSH进行如下操作
+复制上述插件名dsh-member-manager，在DSH进行如下操作
 
 <img width="2558" height="1640" alt="member-manager​安装图示" src="https://github.com/user-attachments/assets/b0b211a3-898f-4dc2-9a17-d13a4671581a" />
 
@@ -171,12 +188,22 @@ dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 | `backups`         | `{enabled:true, keep:20, dailyKeep:7}` | 名册自动备份：保留最近 keep 份 ∪ 最近 dailyKeep 个实际日期每天最后一份 ∪ 兜底 3 份 |
 | `update`          | `{enabled:true, checkOnBoot:false, autoStage:false, allowOnlineApply:false, registryUrl, installDir}` | 分阶段更新：检查/暂存/离线应用；`installDir` 一般不用填 |
 | `workflow`        | `{enabled:true, persistMs:5000, retentionHours:6, tasksPollMs:3000}` | 可视化工作流采集：落盘间隔、保留时长、任务板轮询 |
+| `enabled` / `company.enabled` | `true`                | 公司化运行时总开关；`false` 时 `company_*` 工具返回 `E_DISABLED`、名册功能不受影响 |
+| `company.autoBoot` | `true`                          | 是否在插件 apply 后自动 boot 公司运行时（非阻塞；失败只 warning） |
+| `company.defaultSessionPolicy` | `"per_task"`         | 员工会话策略：`per_task`（一单一会话）或 `resident`（常驻经理） |
+| `company.managerActsAsStaff` | `false`             | 经理是否可被派活 |
+| `company.defaultOrderMode` | `"async"`            | 下单默认模式：`async` 立即返回 / `wait` 等验收 |
+| `company.requireManagerReview` | `true`         | 带验收标准的工单是否需要经理 review 才 done |
+| `company.limits` | `{maxConcurrentPerProvider:4, maxTemps:4, budgetTokensPerDay:5000000, attemptTimeoutMs:1800000, lostReportGraceMs:120000, staleAttemptMs:3600000}` | 容量/预算/超时配置（结构校验 + 非法值回退默认并产生 warning；`staleAttemptMs` 用作调度 tick 周期；并发/预算闸门为后续里程碑，当前仅校验与展示） |
+| `company.departments` | `[]`                    | 种子部门：`[{id,name,manager,skills,capacity}]` |
+| `company.routingRules` | `[]`                  | 下单路由规则：`[{match, dept}]`（按标题/类型匹配部门） |
+| `company.toolPolicies` | `{}`                   | 每条线的工具策略覆盖：`{window:{allow,deny}, manager:{...}, staff:{...}}` |
 
 > 自动更新默认**不**在启动时自动检查（`checkOnBoot:false`），且**永远不会**在进程运行中替换自身：面板的「应用」会拒绝并给出命令，需退出 DSH 后在终端运行 `node scripts/apply-pending.mjs --data-dir ... --install-dir ... --yes`。只有显式设置 `allowOnlineApply:true` 才允许在线应用（不推荐）。
 
 ---
 
-## 工具一览（16 个）
+## 工具一览（16 个名册工具 + 13 个公司化工具）
 
 | 工具                  | 作用                                   |
 | ------------------- | ------------------------------------ |
@@ -197,6 +224,26 @@ dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 | `member_workflow`   | 读取可视化工作流的聚合摘要（成员状态 / token / 用时 / 任务） |
 | `member_update`     | 分阶段更新：status / check / stage / apply / rollback |
 
+### 公司化工具（13 个，按工具线隔离）
+
+| 工具 | 线 | 作用 |
+| --- | --- | --- |
+| `company_order` | 窗口 | 下单：`{type,title,dept?,priority?,deps?,acceptance?,clientOrderId?,mode?}` → `{orderId,state}` |
+| `company_status` | 窗口 | 查询工单/员工/部门视图：`{orderId?,project?,dept?}` |
+| `company_ask` | 窗口 | 催办：`{orderId,question}` |
+| `company_cancel` | 窗口 | 取消工单：`{orderId}` |
+| `company_assign` | 经理 | 派工：`{orderId,employeeId}` → `{attemptId,sessionId}` |
+| `company_review` | 经理 | 验收：`{orderId,pass:true|false}`（`true` 验收通过，`false` 打回重做） |
+| `company_borrow` | 经理 | 借调共享员工：`{orderId,sharedEmployeeId}` → `{attemptId}` |
+| `company_report` | 经理/员工 | 回报（必带 `attemptId`，陈旧 attempt 拒绝）：`{orderId?,attemptId,status,summary,artifacts?,acceptanceResults?}` |
+| `company_escalate` | 经理 | 升级：`{orderId,reason?}`，记录 `escalatedAt/reason` 并转发 owner |
+| `company_accept` | 员工 | 接受派工：`{attemptId}` |
+| `company_ask_help` | 员工 | 求助：`{attemptId,question?}`，落账并转发经理 |
+| `company_hire` | OWNER | 新增员工：`{id,displayName?,department?,role?,kind?}` |
+| `company_admin` | OWNER | 控制面：`{action:"createDepartment"|"createEmployee"|"setRoutingRules",args}` |
+
+> 越权调用（例如员工线调 `company_assign`）返回 `{ ok:false, code:"E_TOOL_LINE" }`；公司运行时未就绪（宿主缺 `agents`/`subagents`）返回 `{ ok:false, code:"E_NO_AGENTS" }`。
+
 ---
 
 ## Web 面板入口
@@ -207,7 +254,8 @@ dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 | `sidebar.panellist` | 侧栏「👥 成员管理」图标   |
 | `main`              | 独立主页面（keyed 面板） |
 
-后端 HTTP 路由：`/api/dsh-plugin-member-manager/{state, op, skills, models, overrides, health, backups, update, workflow}`。
+后端 HTTP 路由：`/api/dsh-member-manager/{state, op, skills, models, overrides, health, backups, update, workflow}`；
+公司化只读路由：`/api/dsh-member-manager/company/{overview, org, board, costs, orders}`（返回 `{ ok: true, data }` 信封）。
 
 ---
 
@@ -217,7 +265,7 @@ dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 # 语法校验
 npm run check
 
-# 运行全部 225 个单元/集成测试
+# 运行全部单元/集成测试
 npm test
 ```
 
@@ -251,11 +299,18 @@ MIT
 
 ## v0.3.0 highlights
 
-- 🎯 **Current task only**: the org chart is now **task-scoped** — one root session is one task, and the chart shows only that task's participants (the lead plus members whose `parentSession` points at it), instead of the whole roster.
-- 🔽 **Task switcher**: a selector at the top of the sidebar tab is driven by `tasks[]` from `GET /orgmap` (with a running marker and member count); switching re-renders the chart. With no tasks it shows an empty state and disables the picker.
-- 🧭 Layout is unchanged: the three-level parallel-across / serial-down view (lead → group chips → members) keeps its workspace cards, structural lines and animated guide lines; token/elapsed numbers count only that task's sessions.
+- 🏷️ **Rebrand without data loss**: package name / plugin id / client namespace / API prefix are now `dsh-member-manager` (was `dsh-plugin-member-manager`); version stays **0.3.0**. Roster data dir and `registry.json` format are unchanged, so an old install can switch over and roll back.
+- 🏢 **Company runtime (the core of this release)**: on top of the roster overlay, members can be orchestrated like a company — **departments, orders, attempt credentials, reports & acceptance, audit trail, token cost attribution** — built entirely on `ctx.agents` / `ctx.subagents` session APIs, **no native team layer required**.
+- 🧵 **Four auto-isolated tool lines**: window line (`company_order` / `company_status` / `company_ask` / `company_cancel`) can only place, inspect and chase orders; manager line (11 tools incl. `company_assign` / `company_review` / `company_borrow` / `company_report` / `company_escalate`) dispatches and accepts; staff line (`company_accept` / `company_report` / `company_ask_help`) only does its own work; the owner line (`company_hire` / `company_admin`) is owner-only. Cross-line calls return `E_TOOL_LINE`, enforced by a `tools.restrict` allow-list, a synchronous `tools.guard` and an execution-time `exec.agent.session.id` lookup.
+- 🪪 **Attempt credentials prevent double-reporting**: `company_report` must carry `attemptId`; stale attempts are rejected. `company_order` accepts `clientOrderId` for idempotent retries, and downstream orders unlock only after their `deps` are done.
+- 💰 **Cost & audit**: employee/manager session tokens and request counts are aggregated per employee / department / order (`GET /company/costs`); org and ledger live in `company.json` while an append-only `audit.jsonl` is replayed on load. `company_admin` currently supports `createDepartment` / `createEmployee` / `setRoutingRules`.
+- 🧯 **Degrades everywhere**: with no `agents` / `subagents` service the company tools answer `E_NO_AGENTS` while the roster overlay (existing 16 roster tools, panel, routes) keeps working; agent boot failures only log a warning and never break plugin load.
+- 🧩 **New read-only web routes**: `GET /company/{overview,org,board,costs,orders}` in a uniform `{ ok: true, data }` envelope; `GET /state` carries a `company` summary.
+- 🎯 **Task-scoped org chart (folded into this release)**: the chart shows only the current task's participants (lead + members whose `parentSession` points at it) instead of the whole roster.
+- 🔽 **Task switcher (folded into this release)**: a selector driven by `tasks[]` from `GET /orgmap` (running marker + member count); empty state disables the picker.
+- 🧭 Layout unchanged: the three-level parallel-across / serial-down view (lead → group chips → members) keeps its workspace cards, structural lines and animated guide lines; token/elapsed numbers count only that task's sessions.
 - 🔌 `GET /orgmap` is now contract `version: 2` with `tasks` / `task` / `lead` / `groups` / `members` / `dispatch` / `dependency` / `totals`, and accepts `?task=<rootSessionId>`; an unknown/absent id falls back to the most recently active task.
-- 🧪 Tests 228 → **230** (host: task scoping and `?task=` fallback; client-bundle: picker / switching / empty state).
+- 🧪 Tests: all existing tests stay green, plus new company unit tests (org / ledger / router / store / config), fake-host closed-loop runtime tests and package-metadata tests (final count follows `npm test` in this repo).
 
 ## v0.2.4 highlights
 
@@ -345,9 +400,9 @@ MIT
 ### Option A: install from the plugin registry (after publishing)
 
 ```bash
-dsh-plugin-member-manager
+dsh-member-manager
 ```
-Copy the plugin name dsh-plugin-member-manager, then in DSH perform the following steps:
+Copy the plugin name dsh-member-manager, then in DSH perform the following steps:
 
 <img width="2558" height="1640" alt="member-manager​安装图示" src="https://github.com/user-attachments/assets/b0b211a3-898f-4dc2-9a17-d13a4671581a" />
 
@@ -389,12 +444,22 @@ All options are optional (omitted ⇒ default):
 | `backups`         | `{enabled:true, keep:20, dailyKeep:7}` | Automatic roster backups: `keep` copies, `dailyKeep` days            |
 | `update`          | `{enabled:true, checkOnBoot:false, autoStage:false, allowOnlineApply:false, registryUrl, installDir}` | Staged update: check / stage / offline apply |
 | `workflow`        | `{enabled:true, persistMs:5000, retentionHours:6, tasksPollMs:3000}` | Visual workflow collection: persist interval, retention, task poll |
+| `enabled` / `company.enabled` | `true`            | Master switch for the company runtime; `false` makes `company_*` answer `E_DISABLED` while the roster keeps working |
+| `company.autoBoot` | `true`                          | Boot the company runtime right after plugin apply (non-blocking; failures only warn) |
+| `company.defaultSessionPolicy` | `"per_task"`         | Staff session policy: `per_task` or `resident` |
+| `company.managerActsAsStaff` | `false`             | Whether managers can be assigned work |
+| `company.defaultOrderMode` | `"async"`            | Default order mode: `async` (return at once) or `wait` (until accepted) |
+| `company.requireManagerReview` | `true`         | Orders with acceptance criteria need manager review before `done` |
+| `company.limits` | `{maxConcurrentPerProvider:4, maxTemps:4, budgetTokensPerDay:5000000, attemptTimeoutMs:1800000, lostReportGraceMs:120000, staleAttemptMs:3600000}` | Capacity / budget / timeout gates (invalid values fall back with a warning) |
+| `company.departments` | `[]`                    | Seed departments: `[{id,name,manager,skills,capacity}]` |
+| `company.routingRules` | `[]`                  | Order routing rules: `[{match, dept}]` |
+| `company.toolPolicies` | `{}`                   | Per-line tool policy overrides: `{window:{allow,deny}, manager:{...}, staff:{...}}` |
 
 > Auto-update does **not** check on boot by default (`checkOnBoot:false`) and **never** replaces the running plugin in-process: the panel's Apply refuses with a command; quit DSH and run `node scripts/apply-pending.mjs --data-dir ... --install-dir ... --yes`. Only `allowOnlineApply:true` (not recommended) enables in-process apply.
 
 ---
 
-## Tools (16)
+## Tools (16 roster + 13 company)
 
 | Tool                | Purpose                                                                               |
 | ------------------- | ------------------------------------------------------------------------------------- |
@@ -415,6 +480,26 @@ All options are optional (omitted ⇒ default):
 | `member_workflow`   | Aggregated workflow summary (member status / tokens / elapsed / tasks)                |
 | `member_update`     | Staged update: status / check / stage / apply / rollback                              |
 
+### Company tools (13, isolated per tool line)
+
+| Tool | Line | Purpose |
+| --- | --- | --- |
+| `company_order` | window | Place an order: `{type,title,dept?,priority?,deps?,acceptance?,clientOrderId?,mode?}` → `{orderId,state}` |
+| `company_status` | window | Inspect orders / employees / departments: `{orderId?,project?,dept?}` |
+| `company_ask` | window | Chase an order: `{orderId,question}` |
+| `company_cancel` | window | Cancel an order: `{orderId}` |
+| `company_assign` | manager | Dispatch: `{orderId,employeeId}` → `{attemptId,sessionId}` |
+| `company_review` | manager | Accept/return: `{orderId,pass:true|false}` (`true` accepts, `false` sends it back) |
+| `company_borrow` | manager | Borrow a shared employee: `{orderId,sharedEmployeeId}` → `{attemptId}` |
+| `company_report` | manager/staff | Report (must carry `attemptId`; stale attempts rejected): `{orderId?,attemptId,status,summary,artifacts?,acceptanceResults?}` |
+| `company_escalate` | manager | Escalate: `{orderId,reason?}` records `escalatedAt/reason` and forwards to the owner |
+| `company_accept` | staff | Accept a dispatch: `{attemptId}` |
+| `company_ask_help` | staff | Ask for help: `{attemptId,question?}` records and forwards to the manager |
+| `company_hire` | OWNER | Add an employee: `{id,displayName?,department?,role?,kind?}` |
+| `company_admin` | OWNER | Control plane: `{action:"createDepartment"|"createEmployee"|"setRoutingRules",args}` |
+
+> Cross-line calls (e.g. a staff session calling `company_assign`) return `{ ok:false, code:"E_TOOL_LINE" }`; when the host lacks `agents`/`subagents` the company tools return `{ ok:false, code:"E_NO_AGENTS" }`.
+
 ---
 
 ## Web panel entry points
@@ -425,7 +510,8 @@ All options are optional (omitted ⇒ default):
 | `sidebar.panellist` | "👥 Member Manager" sidebar icon    |
 | `main`              | Standalone main page (keyed panel)  |
 
-Backend HTTP routes: `/api/dsh-plugin-member-manager/{state, op, skills, models, overrides, health, backups, update, workflow}`.
+Backend HTTP routes: `/api/dsh-member-manager/{state, op, skills, models, overrides, health, backups, update, workflow}`;
+company read-only routes: `/api/dsh-member-manager/company/{overview, org, board, costs, orders}` (wrapped in `{ ok: true, data }`).
 
 ---
 
@@ -435,7 +521,7 @@ Backend HTTP routes: `/api/dsh-plugin-member-manager/{state, op, skills, models,
 # Syntax check
 npm run check
 
-# Run all 225 unit / integration tests
+# Run all unit / integration tests
 npm test
 ```
 

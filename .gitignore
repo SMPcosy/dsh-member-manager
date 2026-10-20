@@ -13,3 +13,5 @@ Thumbs.db
 # 运行期数据（插件运行时在 ~/.dsh 生成，不入仓库）
 storages/
 *.probe
+# 集成测试临时宿主目录（测试创建，不参与发布）
+test/.tmp-host/

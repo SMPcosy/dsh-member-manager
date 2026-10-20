@@ -138,6 +138,13 @@ test("isOrderReady 基于 deps 完成状态", () => {
   ({ ledger: l } = createOrder(l, { type: "code_impl", title: "main", deps: [depId] }, NOW));
   const mainId = l.orders[1].id;
   assert.equal(isOrderReady(l, mainId), false);
+  // 冻结测试冲突裁决（Lead，2026-10-20，记录于 docs/11 §1.4）：
+  // 本用例原先直接 `queued -> done`，与上一个用例「非法转移」明确要求的
+  // `assert.throws(queued -> done)` 互斥。按「显式状态机用例优先」裁定：
+  // 状态机保持严格（只有 running 可进 done），本用例改为走完整合法路径，
+  // 断言意图（deps 完成后 isOrderReady 才为 true）不变。
+  l = transitionOrder(l, depId, "routed");
+  l = transitionOrder(l, depId, "running");
   l = transitionOrder(l, depId, "done");
   assert.equal(isOrderReady(l, mainId), true);
 });
