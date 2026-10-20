@@ -820,9 +820,9 @@ test("CompanyOrgPanel：成本归因区渲染总量 + 三列（姓名+工号 / �
   assert.match(text, /按部门/);
   assert.match(text, /按工单/);
 
-  // 员工列：姓名 + 工号
-  assert.match(text, /插件工程师 E0002/);
-  assert.match(text, /插件组负责人 E0001/);
+  // 员工列：姓名 · 工号（docs/16 §5.1-5）
+  assert.match(text, /插件工程师 · E0002/);
+  assert.match(text, /插件组负责人 · E0001/);
   // 部门列：编号 + 名称；未知部门 id 回落成 key 本身
   assert.match(text, /D01 插件组/);
   assert.match(text, /D02 文档组/);
@@ -852,18 +852,18 @@ test("CompanyOrgPanel：三列各按 tokens 降序只展示 top5", () => {
   const text = treeText(exports.__internals.CompanyOrgPanel({ t }));
 
   // 降序：员工1(600) → 员工5(200) 渲染；员工6(100) 被截掉
-  const i1 = text.indexOf("员工1 E9001");
-  const i2 = text.indexOf("员工2 E9002");
-  const i5 = text.indexOf("员工5 E9005");
+  const i1 = text.indexOf("员工1 · E9001");
+  const i2 = text.indexOf("员工2 · E9002");
+  const i5 = text.indexOf("员工5 · E9005");
   assert.ok(i1 >= 0 && i2 >= 0 && i5 >= 0, "top5 应包含员工1/2/5");
   assert.ok(i1 < i2 && i2 < i5, "员工列应按 tokens 降序");
-  assert.equal(text.includes("员工6 E9006"), false, "第 6 名不应出现在 top5 里");
+  assert.equal(text.includes("员工6 · E9006"), false, "第 6 名不应出现在 top5 里");
 
   // 纯函数保留完整降序列表，截断只发生在渲染层
   const view = exports.__internals.buildCompanyOrgView(data);
   assert.equal(view.costs.byEmployee.length, 6);
   assert.equal(view.costs.byEmployee.map((row) => row.tokens).join(","), "600,500,400,300,200,100");
-  assert.equal(view.costs.byEmployee[0].label, "员工1 E9001");
+  assert.equal(view.costs.byEmployee[0].label, "员工1 · E9001");
 });
 
 test("CompanyOrgPanel：旧宿主没有 costs/board → 成本空态与 0 KPI，不崩", () => {
@@ -892,9 +892,9 @@ test("buildCompanyOrgView：board 与 costs 归一为有序数组，并保留缺
   assert.equal(view.costs.requests, 42);
   assert.equal(view.costs.hasData, true);
 
-  // 按员工：tokens 降序，0 值行被丢弃，标签 = 姓名 + 工号
+  // 按员工：tokens 降序，0 值行被丢弃，标签 = 姓名 · 工号
   assert.equal(view.costs.byEmployee.length, 3, "0 值成本行应被过滤");
-  assert.equal(view.costs.byEmployee.map((row) => row.label).join("|"), "插件工程师 E0002|插件组负责人 E0001|文档工程师 E0003");
+  assert.equal(view.costs.byEmployee.map((row) => row.label).join("|"), "插件工程师 · E0002|插件组负责人 · E0001|文档工程师 · E0003");
   assert.equal(view.costs.byEmployee.map((row) => row.tokens).join(","), "6000,1000,900");
 
   // 按部门：编号 + 名称；未知部门回落 key
