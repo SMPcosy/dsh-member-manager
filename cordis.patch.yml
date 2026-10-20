@@ -1,5 +1,5 @@
 # ============================================================================
-# dsh-plugin-member-manager —— DSH bundle patch
+# dsh-member-manager —— DSH bundle patch
 # ============================================================================
 # 这是插件的「挂载声明」。DSH 启动时按 bundle 层栈叠加各插件 patch，
 # 本文件把成员管理插件插入当前 profile 的配置树（宿主半侧 + Web 客户端半侧）。
@@ -7,11 +7,11 @@
 # 安装方式（无需手工改 profile）：
 #   dsh plugin --profile desktop add link:<本目录绝对路径>
 # 或发布后：
-#   dsh plugin --profile desktop add dsh-plugin-member-manager
+#   dsh plugin --profile desktop add dsh-member-manager
 #
 # 卸载：把本条目从 profile 的 cordis.patch.yml / bundle 列表中移除后重启 DSH。
 # ============================================================================
 
 - insert:
-    - id: dsh-plugin-member-manager
-      name: dsh-plugin-member-manager
+    - id: dsh-member-manager
+      name: dsh-member-manager

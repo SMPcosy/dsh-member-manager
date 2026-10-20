@@ -11,7 +11,7 @@
  *
  * 缺省值：
  *   --data-dir     %USERPROFILE%\.dsh\storages\member-manager
- *   --install-dir  自动探测 %DSH_HOME%\profiles\*\node_modules\dsh-plugin-member-manager
+ *   --install-dir  自动探测 %DSH_HOME%\profiles\*\node_modules\dsh-member-manager
  *
  * 退出码：
  *   0 成功 / 2 需要 --yes 确认 / 1 失败（含 JUNCTION_INSTALL 等闸门）
@@ -71,7 +71,7 @@ function printHelp() {
       "",
       "  --data-dir <dir>      数据目录（默认 %USERPROFILE%\\.dsh\\storages\\member-manager）",
       "  --install-dir <dir>   插件安装目录（默认自动探测 profiles/*/node_modules/<pkg>）",
-      "  --package-name <name> 包名（默认 dsh-plugin-member-manager）",
+      "  --package-name <name> 包名（默认 dsh-member-manager）",
       "  --yes                 确认已退出 DSH 并执行应用",
       "",
       "安全闸门：junction/link 安装、包名不符、staged 内容非法都会被拒绝，且不改动任何文件。",

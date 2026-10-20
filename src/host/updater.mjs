@@ -25,7 +25,7 @@ import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
 
-export const PACKAGE_NAME = "dsh-plugin-member-manager";
+export const PACKAGE_NAME = "dsh-member-manager";
 export const REGISTRY_URL = "https://registry.npmjs.org/";
 export const DEFAULT_TIMEOUT_MS = 8000;
 export const DEFAULT_STAGE_TIMEOUT_MS = 30000;

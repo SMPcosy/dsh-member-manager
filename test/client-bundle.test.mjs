@@ -114,8 +114,8 @@ function mockClientCtx() {
 
 test("client bundle：固定壳格式正确，window.__ModuleLoader__.load 被调用且 id 为包名", () => {
   const { id, exports } = loadBundle(makeReact());
-  assert.equal(id, "dsh-plugin-member-manager");
-  assert.equal(exports.name, "dsh-plugin-member-manager");
+  assert.equal(id, "dsh-member-manager");
+  assert.equal(exports.name, "dsh-member-manager");
   // 注意：vm 沙箱里的数组与宿主 realm 不同源，deepStrictEqual 会因原型不同而失败，故用 join 比较
   assert.equal(exports.inject.join(","), "slots,locale");
   assert.equal(typeof exports.apply, "function");
@@ -127,7 +127,7 @@ test("apply()：注册中文字典（zh 与 en 都齐全且 key 一一对应）"
   const { ctx, locales } = mockClientCtx();
   exports.apply(ctx);
 
-  const dict = locales.get("dsh-plugin-member-manager");
+  const dict = locales.get("dsh-member-manager");
   assert.ok(dict, "未注册 locale 字典");
   assert.ok(dict.zh && dict.en);
   assert.deepEqual(Object.keys(dict.zh).sort(), Object.keys(dict.en).sort(), "中英文字典 key 必须一致");
@@ -145,12 +145,12 @@ test("apply()：注册三个插槽，kind 对应的 id/key 参数正确", () => 
 
   const byName = Object.fromEntries(slots.map((s) => [s.options.name, s]));
   // list kind 必须有 id
-  assert.equal(byName["settings.section"].options.id, "dsh-plugin-member-manager");
-  assert.equal(byName["sidebar.panellist"].options.id, "dsh-plugin-member-manager");
+  assert.equal(byName["settings.section"].options.id, "dsh-member-manager");
+  assert.equal(byName["sidebar.panellist"].options.id, "dsh-member-manager");
   // keyed kind 必须有 key
-  assert.equal(byName["main"].options.key, "dsh-plugin-member-manager");
+  assert.equal(byName["main"].options.key, "dsh-member-manager");
   for (const s of slots) {
-    assert.equal(s.options.locale, "dsh-plugin-member-manager", `${s.options.name} 应带 locale`);
+    assert.equal(s.options.locale, "dsh-member-manager", `${s.options.name} 应带 locale`);
     assert.equal(typeof s.Component, "function");
   }
   // 列表型插槽需要 label（main 是 keyed 面板，label 由侧栏入口提供）
@@ -1019,7 +1019,7 @@ test("组织架构图：无窗口框、无位置按钮的层级视图（并联�
   const overlay = exports.__internals.OrgChartOverlay({
     document: doc,
     window: win,
-    apiBase: "/api/dsh-plugin-member-manager",
+    apiBase: "/api/dsh-member-manager",
     t: (k) => k,
     pollMs: 60000,
     reportError: (what, err) => errors.push(what + ": " + err),
@@ -1201,7 +1201,7 @@ test("组织架构图：注册为右侧边栏 tab（类型 / 正文 / header 入
   exports.apply(ctx);
 
   assert.equal(tabs.length, 1, "应注册一个 tab 类型");
-  assert.equal(tabs[0].id, "dsh-plugin-member-manager/orgmap");
+  assert.equal(tabs[0].id, "dsh-member-manager/orgmap");
   assert.equal(tabs[0].kind, "member-orgmap");
   assert.equal(tabs[0].keepMounted, false, "关掉 tab 即卸载，避免后台继续轮询");
   assert.equal(typeof tabs[0].title, "function");
@@ -1210,8 +1210,8 @@ test("组织架构图：注册为右侧边栏 tab（类型 / 正文 / header 入
   assert.ok(names.includes("sidebar.right.pane.tab"), "应注册右栏 tab 正文：" + names.join(","));
   assert.ok(names.includes("conversation.session.header.actions"), "应注册 header 重新打开入口");
   const body = slots.find((s) => s.options.name === "sidebar.right.pane.tab");
-  assert.equal(body.options.key, "dsh-plugin-member-manager/orgmap", "keyed seat 的 key 应与定义 id 一致");
-  assert.equal(body.options.locale, "dsh-plugin-member-manager");
+  assert.equal(body.options.key, "dsh-member-manager/orgmap", "keyed seat 的 key 应与定义 id 一致");
+  assert.equal(body.options.locale, "dsh-member-manager");
   assert.equal(typeof body.Component, "function");
 
   assert.deepEqual(opened, ["member-orgmap"], "首次接线应自动打开一次右栏 tab");

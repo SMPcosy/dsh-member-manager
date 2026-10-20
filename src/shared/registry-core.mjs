@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-member-manager · 名册层核心逻辑（纯函数，零 DSH 依赖）
+ * dsh-member-manager · 名册层核心逻辑（纯函数，零 DSH 依赖）
  *
  * 设计要点（见 docs/00-需求与设计决策.md）：
  *  - DSH 核心的 target 是唯一键且只读；本模块只维护「覆盖层」字段。

@@ -1,13 +1,15 @@
 {
-  "name": "dsh-plugin-member-manager",
+  "name": "dsh-member-manager",
   "version": "0.3.0",
   "type": "module",
-  "description": "Manage the DSH member roster from a local registry overlay: org chart, roles, skills, model overrides, backups, staged updates, one-sentence group creation, a visual workflow panel and a draggable org-chart overlay.",
+  "description": "Manage the DSH member roster from a local registry overlay AND run members like a company: departments, order dispatch, attempt credentials, audit ledger and cost accounting on top of ctx.agents/subagents — no native team layer required.",
   "keywords": [
     "deepseek-harness",
     "dsh",
     "dsh-plugin",
     "agent-team",
+    "company",
+    "agent-runtime",
     "member",
     "org-chart"
   ],
@@ -15,7 +17,7 @@
   "icon": "./icon.png",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SMPcosy/dsh-plugin-member-manager.git"
+    "url": "git+https://github.com/SMPcosy/dsh-member-manager.git"
   },
   "main": "lib/index.js",
   "exports": {
@@ -51,7 +53,7 @@
     "node": ">=22.19"
   },
   "scripts": {
-    "test": "node --test test/registry-core.test.mjs test/store-and-service.test.mjs test/host-plugin.test.mjs test/client-bundle.test.mjs test/group-brief.test.mjs test/backups.test.mjs test/workflow.test.mjs test/updater.test.mjs",
+    "test": "node --test test/",
     "check": "node --check lib/index.js && node --check lib/client.js && node --check src/shared/registry-core.mjs && node --check src/shared/registry-store.mjs && node --check src/shared/team-service.mjs && node --check src/shared/group-brief.mjs && node --check src/shared/backups.mjs && node --check src/host/workflow.mjs && node --check src/host/updater.mjs && node --check scripts/apply-pending.mjs"
   }
 }

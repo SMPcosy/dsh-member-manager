@@ -29,7 +29,7 @@ import {
   UpdateService,
 } from "../src/host/updater.mjs";
 
-const PACKAGE = "dsh-plugin-member-manager";
+const PACKAGE = "dsh-member-manager";
 
 /* ------------------------------------------------------------------------- */
 /* tar.gz 生成 helper                                                          */
