@@ -604,6 +604,15 @@ test("源码：v5 总架构结构——默认 company、管理层节点、/compa
   assert.match(src, /api\("\/company\/overview"\)/);
   assert.match(src, /setInterval\(pull, CP_POLL_MS\)/);
   assert.match(src, /clearInterval\(timer\)/);
+
+  // v5.1：总架构页去掉自动刷新（胶囊 + setInterval），只剩员工中心页保留 5s 轮询
+  assert.equal(
+    (src.match(/setInterval\(pull, CP_POLL_MS\)/g) || []).length,
+    1,
+    "setInterval 只应在员工中心页保留",
+  );
+  assert.equal(src.includes("cpRefreshHint"), false, "cpRefreshHint 文案键应删除");
+  assert.equal(src.includes("每 5 秒自动刷新"), false, "自动刷新胶囊文案应删除");
   assert.match(src, /api\("\/company\/op"/);
   assert.match(src, /JSON\.stringify\(\{ action: action, args: args \|\| \{\} \}\)/);
 
@@ -1504,39 +1513,77 @@ test("cpParseBrief：解析一句话建部门的名称/编制/说明；解析失
 
 /* ==================== ⑥ 轮询 ==================== */
 
-test("轮询：打开拉一次 + 5 秒 setInterval，卸载后 clearInterval 且不再请求", async () => {
+test("总架构页：打开拉一次、不注册自动轮询定时器，手动刷新再拉一次（v5.1）", async () => {
   const calls = [];
   const timers = [];
-  const cleared = [];
-  const fakeSetInterval = (fn, ms) => {
-    timers.push({ fn, ms });
-    return timers.length;
-  };
-  const fakeClearInterval = (id) => cleared.push(id);
-
   const react = makeReactLive([null, null, false, null]);
-  const { exports } = loadBundle(react, { fetch: companyFetch(calls), setInterval: fakeSetInterval, clearInterval: fakeClearInterval });
+  const { exports } = loadBundle(react, {
+    fetch: companyFetch(calls),
+    setInterval: (fn, ms) => {
+      timers.push({ fn, ms });
+      return timers.length;
+    },
+    clearInterval: () => {},
+  });
   const t = translator("zh");
+  react.reset();
   const tree = exports.__internals.CompanyOrgPanel({ t });
   assert.match(treeText(tree), new RegExp(t("cpLoading")), "首屏未拉到数据时显示加载中");
+  assert.equal(treeText(tree).includes("每 5 秒自动刷新"), false, "不应再有自动刷新胶囊");
 
-  const cleanups = react.flushEffects();
-  assert.equal(timers.length, 1, "应注册一个轮询定时器");
-  assert.equal(timers[0].ms, exports.__internals.CP_POLL_MS);
-  assert.equal(timers[0].ms, 5000);
+  react.flushEffects();
+  assert.equal(timers.length, 0, "总架构页不应注册自动轮询定时器");
   await tick();
   assert.equal(calls.filter((c) => c.url.endsWith("/company/overview")).length, 1, "打开时拉一次");
 
-  await timers[0].fn();
+  react.reset();
+  const loaded = exports.__internals.CompanyOrgPanel({ t });
+  assert.equal(treeText(loaded).includes("每 5 秒自动刷新"), false, "拉到数据后仍无自动刷新胶囊");
+  const refresh = collectButtons(loaded).find((button) => button.label === t("cpRefresh"));
+  assert.ok(refresh, "应有手动刷新按钮");
+  refresh.onClick();
   await tick();
-  assert.equal(calls.filter((c) => c.url.endsWith("/company/overview")).length, 2, "轮询触发第二次请求");
+  assert.equal(calls.filter((c) => c.url.endsWith("/company/overview")).length, 2, "手动刷新触发第二次请求");
+  assert.equal(timers.length, 0, "手动刷新也不应创建定时器");
+});
 
-  // 卸载清理
-  cleanups[0]();
-  assert.deepEqual(cleared, [1], "卸载应 clearInterval");
-  await timers[0].fn();
-  await tick();
-  assert.equal(calls.filter((c) => c.url.endsWith("/company/overview")).length, 2, "清理后定时器再触发也不请求");
+test("总架构工具栏：标题 → 新建部门 → 从名册同步 → 刷新 → 更新于（全部左对齐）", () => {
+  const react = makeReactLive([overviewFixture(), null, false, 1700000000000]);
+  const { exports } = loadBundle(react, { fetch: companyFetch([]) });
+  const t = translator("zh");
+  react.reset();
+  const tree = exports.__internals.CompanyOrgPanel({ t });
+
+  const labels = collectButtons(tree).map((button) => String(button.label));
+  const start = labels.indexOf(t("cpNewDept"));
+  assert.ok(start >= 0, "工具栏应有新建部门按钮");
+  assert.deepEqual(
+    labels.slice(start, start + 3),
+    [t("cpNewDept"), t("cpSyncRoster"), t("cpRefresh")],
+    "按钮顺序应为 新建部门 → 从名册同步 → 刷新",
+  );
+
+  const text = treeText(tree);
+  assert.equal(text.includes("每 5 秒自动刷新"), false, "不应有自动刷新胶囊");
+  assert.ok(text.indexOf(t("cpTitle")) < text.indexOf(t("cpNewDept")), "标题应在按钮之前");
+  assert.ok(text.search(/更新于/) > text.indexOf(t("cpRefresh")), "更新于文本应在刷新按钮之后");
+  const toolbarNode = collectElements(
+    tree,
+    (node) =>
+      node.type === "div" &&
+      node.props &&
+      node.props.style &&
+      node.props.style.marginBottom === 10 &&
+      node.props.style.gap === 10,
+  )[0];
+  assert.ok(toolbarNode, "应能定位总架构工具栏");
+  assert.equal(
+    toolbarNode.children.some(
+      (child) => child && child.props && child.props.style && child.props.style.marginLeft === "auto",
+    ),
+    false,
+    "工具栏不应再有 marginLeft:auto 的 spacer（按钮全部左对齐）",
+  );
 });
 
 /* ==================== ⑦ 从名册同步 / 删除部门（docs/16 §4.4 v4.1） ==================== */

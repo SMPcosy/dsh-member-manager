@@ -71,6 +71,12 @@
 - **面板**：总架构图移除「员工中心」按钮节点（员工中心仍为独立页签），最高层改为「管理层」虚拟节点（M 通道人数徽章，点击打开只读弹层；**只用于展示，不改变员工部门归属与代码层级**），竖直连接线向下接各部门；员工行按通道各显示一枚等级徽章（M 琥珀 / P 蓝）；部门弹层成员详情新增通道编辑（M/P 复选框 + 等级下拉，至少保留一个，`window`/`manager` 的 M 受限），保存走 `POST /company/op {action:"setChannels"}`。
 - **测试**：shared 双通道与通道归一往返用例（`test/company-levels.test.mjs` 33 用例）、host 运行时（`test/company-runtime.test.mjs` 36 用例）、面板（`test/company-panel.test.mjs` 55 用例）、客户端集成（`test/client-bundle.test.mjs` 39 用例）；全量 **442/442**，`node scripts/verify-company.mjs` **19/19**。
 
+### 变更：总架构页去掉自动刷新、工具栏左对齐（v5.1）
+
+- **自动刷新**：总架构页删除「每 5 秒自动刷新」胶囊，并在代码层移除该页的 `setInterval` 轮询——打开拉一次 + 手动「刷新」；`CP_POLL_MS` 常量与员工中心页的 5s 轮询保持不变（员工中心页仍自动刷新）。删除 `cpRefreshHint` 文案键（zh/en），`cpSubtitle` 同步去掉失效措辞。
+- **工具栏**：改为全左对齐固定顺序 `总架构`（标题）→「新建部门」→「从名册同步」→「刷新」→`更新于 …`；移除 `toolbarSpacer` 右推布局。
+- **测试**：`test/company-panel.test.mjs` 56 用例（新增「总架构页无自动轮询」「工具栏顺序与左对齐」断言）；全量 443/443。
+
 ### 修复（真实宿主端到端验证发现）
 
 - **派工 provider 名**：`company.provider` 默认值由错误的 `"default"` 改为宿主真实注册名 `"spawn"`（`"default"` 会让 `subagents.startActivation` 抛 `NO_PROVIDER`）；配置支持 `company.provider`，非法值回退默认并 warning。
