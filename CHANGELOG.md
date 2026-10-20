@@ -18,7 +18,7 @@
 - 用工：共享员工借调（`company_borrow`）、员工升级（`company_escalate`）、求助（`company_ask_help`）均落账并转发经理/owner。
 - 稳态：token / 请求数成本按「员工 / 部门 / 工单」拆分统计（`/company/costs`）、单实例文件锁（`E_COMPANY_LOCKED`）、开机自举失败退避重试、shutdown 优雅停工七步（停派工 → 停工 followup → whenIdle 超时 → cancel → drainChildren → dispose owner → 审计）。
 - Web：`/api/dsh-member-manager/company/*` 只读接口（overview / org / board / costs / orders）。
-- 新增测试：共享内核纯函数（org / ledger / router / store / config）、host 运行时 fake 闭环（dispatcher / employees / runtime）、打包/元数据与切换回滚脚本用例（临时 profile），全量 369 用例。
+- 新增测试：共享内核纯函数（org / ledger / router / store / config）、host 运行时 fake 闭环（dispatcher / employees / runtime）、打包/元数据与切换回滚脚本用例（临时 profile），全量 370 用例。
 - 交付自检：`node scripts/verify-company.mjs`（19 项：元数据/文件/语法/导出契约/M/P 等级与面板/全量测试/测试不污染用户数据），切换/回滚脚本默认 dry-run。
 
 ### 新增：M/P 双通道等级、编号与公司架构面板
@@ -43,6 +43,7 @@
 - **派工失败回滚**：会话创建失败时订单回滚到 queued（不再留下 running 无 attempt 的僵单），并写 `assign_failed` 审计。
 - **owner/员工模型路由**：插件自建的根级 owner Agent 不经过 GUI 会话创建路径，拿不到会话默认模型；改为启动时读取宿主 `agent-default-model` 服务的默认 provider/model 写入 owner 的 `agentOptions`，子会话继承。此前会导致子会话首轮请求前抛 `agent "..." has no provider/model`，表现为「派工成功但员工毫无动静、costs 为 0」。
 - **员工静默失败可见化**：owner 与每个员工会话注册 `agent/error` 监听，把错误写进 boot.log（此前 agent loop 会吞掉首轮错误，看起来像卡住）。
+- **补号审计计数**：`company.codes.backfilled` 的 `count` 原取 `ensureCompanyCodes(...).warnings.length`；但「缺号」是无 warning 直接补的，历史员工编号又已在 `store.load` 的 `normalizeCompany` 阶段补好，导致真实补号时 count 恒为 0。现改为「load 阶段迁移数 + boot 阶段实际变更编号数」，新增回归用例锁定历史数据补 2 个编号（部门 D01 + 员工 E0001）时 count=2。
 
 ### 保留
 

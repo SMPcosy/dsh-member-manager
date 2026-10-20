@@ -445,12 +445,18 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
       bootWarnings.push("ctx.subagents 不可用，运行时降级");
     }
     let loadedCompany = null;
+    let loadCodeMigrations = 0;
     try {
       const loaded = await store.load();
       runtime.company = loaded.company || runtime.company;
       runtime.ledger = loaded.ledger || runtime.ledger;
       loadedCompany = loaded.company || null;
-      if (loaded.warnings) bootWarnings.push(...loaded.warnings);
+      if (loaded.warnings) {
+        bootWarnings.push(...loaded.warnings);
+        // store.load 内部的 normalizeCompany 已为历史员工补号（不经过下面的 ensureCompanyCodes），
+        // 审计计数必须把这一部分算进去。
+        loadCodeMigrations = loaded.warnings.filter((w) => String(w).includes("自动补号")).length;
+      }
     } catch (err) {
       bootWarnings.push(`store.load 失败: ${err.message}`);
     }
@@ -462,13 +468,15 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     }
     // 自动补号（历史数据迁移）
     try {
+      const beforeCompany = runtime.company;
       const before = JSON.stringify(runtime.company);
       const ensured = ensureCompanyCodes(runtime.company, { levels: runtime.config.levels, numbering: runtime.config.numbering });
       runtime.company = ensured.company;
       if (ensured.warnings.length > 0) bootWarnings.push(...ensured.warnings);
       if (JSON.stringify(runtime.company) !== before) {
         await store.saveCompany(runtime.company);
-        await store.appendAudit({ type: "company.codes.backfilled", count: ensured.warnings.length });
+        const count = loadCodeMigrations + countNewCodes(beforeCompany, runtime.company);
+        await store.appendAudit({ type: "company.codes.backfilled", count });
       }
     } catch (err) {
       bootWarnings.push(`补号失败: ${err.message}`);
@@ -640,6 +648,22 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
   };
   if (fake) api.fakeServices = fakeServices;
   return api;
+}
+
+/**
+ * 统计补号动作实际新增/变更的编号数量（部门 + 员工各自独立）。
+ * 用于审计 `company.codes.backfilled` 的 count：不能直接用 ensureCompanyCodes
+ * 的 warnings.length，因为「缺号」是无 warning 直接补的（只有非法/重复才 warning）。
+ */
+function countNewCodes(before, after) {
+  let count = 0;
+  for (const key of ["departments", "employees"]) {
+    const prev = new Map((Array.isArray(before?.[key]) ? before[key] : []).map((item) => [item?.id, item?.code]));
+    for (const item of Array.isArray(after?.[key]) ? after[key] : []) {
+      if (prev.get(item?.id) !== item?.code) count += 1;
+    }
+  }
+  return count;
 }
 
 async function createOwnerAgent(runtime) {

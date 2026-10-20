@@ -307,6 +307,38 @@ test("boot 自动为历史无 code 数据补号并持久化", async () => {
   await rt2.shutdown();
 });
 
+test("boot 补号审计 count 反映实际补号数量（历史数据）", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-codes-audit-${Date.now()}`;
+  const { mkdir, writeFile, readFile } = await import("node:fs/promises");
+  await mkdir(`${dataDir}/company`, { recursive: true });
+  await writeFile(
+    `${dataDir}/company/company.json`,
+    JSON.stringify({
+      company: {
+        version: 1,
+        status: "idle",
+        departments: [{ id: "legacy", name: "老部门" }],
+        employees: [{ id: "old", displayName: "老员工", role: "staff", kind: "permanent", department: "legacy" }],
+      },
+    }),
+    "utf8",
+  );
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const dept = rt.view().org.departments.find((d) => d.id === "legacy");
+  const emp = rt.view().org.employees.find((e) => e.id === "old");
+  assert.equal(dept.code, "D01");
+  assert.equal(emp.code, "E0001");
+  await rt.shutdown();
+  const rows = (await readFile(`${dataDir}/company/audit.jsonl`, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const backfilled = rows.find((r) => r.type === "company.codes.backfilled");
+  assert.ok(backfilled, "应写补号审计");
+  assert.equal(backfilled.count, 2, "部门 + 员工各补 1 个编号");
+});
+
 test("company_hire 指向不存在部门返回 E_NOT_FOUND 且不写文件/员工数不变", async () => {
   const dataDir = `/tmp/test-dsh-member-manager-hire-dept-${Date.now()}`;
   const rt = createCompanyRuntime(makeCtx(), {
