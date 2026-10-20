@@ -460,7 +460,7 @@ function findModal(tree) {
     (n) => n.type === "div" && n.props.style && n.props.style.position === "fixed" && n.props.style.zIndex === 2147483000,
   )[0];
   const card = overlay
-    ? collectElements(overlay, (n) => n.type === "div" && n.props.style && n.props.style.width === "min(1100px, 95vw)")[0]
+    ? collectElements(overlay, (n) => n.type === "div" && n.props.style && n.props.style.width === "min(940px, 92vw)")[0]
     : null;
   return { overlay: overlay || null, card: card || null };
 }
@@ -775,7 +775,7 @@ test("字典：v5 文案 zh/en 严格对称，中文与 docs/21 §4.3 一致", (
 
   // 部门弹层与写操作
   assert.equal(zh.cpModalChart, "部门架构图");
-  assert.equal(zh.cpModalMembers, "成员详情列表");
+  assert.equal(zh.cpModalMembers, "成员详情");
   assert.equal(zh.cpHire, "招聘员工");
   assert.equal(zh.cpPromote, "晋升");
   assert.equal(zh.cpFire, "停用");
