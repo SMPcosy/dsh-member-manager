@@ -137,13 +137,48 @@ before(async () => {
  * 有了这道守卫，同类问题会在测试结束时直接报错，而不是悄悄改坏用户数据。 */
 
 const REAL_REGISTRY = path.join(process.env.DSH_HOME || path.join(os.homedir(), ".dsh"), "storages", "member-manager", "registry.json");
+
+/* 公司化 boot 是异步 setTimeout：个别用例（cordisLikeCtx 不提供 config，走默认目录回退）
+ * 会把 company/audit.jsonl 写进「默认数据目录」。把 DSH_HOME 指到测试临时根之后，
+ * 任何回退路径都只会落到 TMP_ROOT，绝不触碰真实 ~/.dsh（REAL_REGISTRY 已在上面按真实位置算好）。 */
+process.env.DSH_HOME = TMP_ROOT;
+
+const REAL_COMPANY_DIR = path.join(path.dirname(REAL_REGISTRY), "company");
+
+function snapshotCompanyDir() {
+  const out = [];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else {
+        try {
+          out.push([path.relative(REAL_COMPANY_DIR, p).split(path.sep).join("/"), fs.readFileSync(p, "utf8")]);
+        } catch {
+          out.push([path.relative(REAL_COMPANY_DIR, p).split(path.sep).join("/"), "<unreadable>"]);
+        }
+      }
+    }
+  };
+  walk(REAL_COMPANY_DIR);
+  return out;
+}
+
 let realRegistrySnapshot;
+let realCompanySnapshot;
 before(() => {
   try {
     realRegistrySnapshot = fs.readFileSync(REAL_REGISTRY, "utf8");
   } catch {
     realRegistrySnapshot = null; // 不存在也算一种初始状态
   }
+  realCompanySnapshot = snapshotCompanyDir();
 });
 after(() => {
   let now = null;
@@ -153,7 +188,9 @@ after(() => {
     /* 与初始状态比较即可 */
   }
   assert.equal(now, realRegistrySnapshot, `测试污染了真实名册 ${REAL_REGISTRY} —— 所有用例必须只写临时目录`);
+  assert.deepEqual(snapshotCompanyDir(), realCompanySnapshot, `测试污染了真实公司数据目录 ${REAL_COMPANY_DIR} —— 公司化 boot 必须只写临时目录`);
 });
+
 
 after(() => {
   fs.rmSync(TMP_ROOT, { recursive: true, force: true });

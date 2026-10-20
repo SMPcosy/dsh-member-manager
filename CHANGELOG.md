@@ -19,7 +19,7 @@
 - 稳态：token / 请求数成本按「员工 / 部门 / 工单」拆分统计（`/company/costs`）、单实例文件锁（`E_COMPANY_LOCKED`）、开机自举失败退避重试、shutdown 优雅停工七步（停派工 → 停工 followup → whenIdle 超时 → cancel → drainChildren → dispose owner → 审计）。
 - Web：`/api/dsh-member-manager/company/*` 只读接口（overview / org / board / costs / orders）。
 - 新增测试：共享内核纯函数（org / ledger / router / store / config）、host 运行时 fake 闭环（dispatcher / employees / runtime）、打包/元数据与切换回滚脚本用例（临时 profile），全量 315 用例。
-- 交付自检：`node scripts/verify-company.mjs`（16 项：元数据/文件/语法/导出契约/全量测试），切换/回滚脚本默认 dry-run。
+- 交付自检：`node scripts/verify-company.mjs`（17 项：元数据/文件/语法/导出契约/全量测试/测试不污染用户数据），切换/回滚脚本默认 dry-run。
 
 ### 保留
 

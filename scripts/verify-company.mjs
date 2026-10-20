@@ -7,13 +7,14 @@
  *   node scripts/verify-company.mjs --skip-tests   # 跳过测试（给 company-package.test.mjs 内部调用）
  *
  * 退出码：0 = 全部通过；1 = 至少一项失败。
- * 只读脚本：不改任何文件、不写 profile、不碰 ~/.dsh。
+ * 只读脚本：不改任何文件、不写 profile；仅在跑完测试后校验 ~/.dsh 公司数据目录没有被测试追加。
  */
 
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -167,6 +168,17 @@ await check("插件入口导出", async () => {
 // ---------------------------------------------------------------------------
 // 5. 全量测试
 // ---------------------------------------------------------------------------
+const HOME_DATA_DIR = path.join(process.env.DSH_HOME || path.join(os.homedir(), ".dsh"), "storages", "member-manager");
+const REAL_AUDIT = path.join(HOME_DATA_DIR, "company", "audit.jsonl");
+function fakeOwnerCount() {
+  try {
+    return readFileSync(REAL_AUDIT, "utf8").split(/\r?\n/).filter((l) => l.includes('"fake-owner"')).length;
+  } catch {
+    return 0;
+  }
+}
+const fakeBefore = fakeOwnerCount();
+
 if (SKIP_TESTS) {
   results.push({ name: "全量测试", ok: true, detail: "已跳过（--skip-tests）" });
 } else {
@@ -180,6 +192,14 @@ if (SKIP_TESTS) {
     const m = out.match(/(?:#|ℹ) pass (\d+)/);
     must(m, "测试输出中找不到 pass 计数");
     return `${m[1]} pass`;
+  });
+  await check("测试不污染用户数据目录", () => {
+    const fakeAfter = fakeOwnerCount();
+    must(
+      fakeAfter === fakeBefore,
+      `测试向 ${REAL_AUDIT} 追加了 ${fakeAfter - fakeBefore} 条 fake-owner 审计（测试必须只用临时目录）`
+    );
+    return `${REAL_AUDIT} 无新增`;
   });
 }
 
