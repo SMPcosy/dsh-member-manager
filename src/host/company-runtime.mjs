@@ -910,13 +910,15 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         const deptB = deptMap.get(b.department);
         const codeA = deptA?.code ?? "\uFFFF";
         const codeB = deptB?.code ?? "\uFFFF";
-        if (codeA !== codeB) return String(codeA).localeCompare(String(codeB));
+        // 用 numeric 比较：部门/员工编号与等级代号出现两位数（D10、E0010、M10）时字典序会错。
+        const NUM = { numeric: true };
+        if (codeA !== codeB) return String(codeA).localeCompare(String(codeB), undefined, NUM);
         const mA = a.channels.find((c) => c.channel === "M")?.level ?? "";
         const mB = b.channels.find((c) => c.channel === "M")?.level ?? "";
-        if (mA !== mB) return String(mB).localeCompare(String(mA));
+        if (mA !== mB) return String(mB).localeCompare(String(mA), undefined, NUM);
         const codeEmpA = a.code ?? "";
         const codeEmpB = b.code ?? "";
-        return String(codeEmpA).localeCompare(String(codeEmpB));
+        return String(codeEmpA).localeCompare(String(codeEmpB), undefined, NUM);
       })
       .map((e) => {
         const dept = deptMap.get(e.department);

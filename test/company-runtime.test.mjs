@@ -659,6 +659,19 @@ test("view 返回 channels 与 management 聚合（含双通道排序）", async
   await rt.shutdown();
 });
 
+test("view().management 按部门编号数值排序（D9 在 D10 之前，而非字典序）", async () => {
+  const rt = createCompanyRuntime(makeCtx(), { dataDir: `/tmp/test-dsh-member-manager-view-num-${Date.now()}`, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d9", name: "九部", code: "D9" } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d10", name: "十部", code: "D10" } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "e9", displayName: "九", department: "d9", role: "manager" } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "e10", displayName: "十", department: "d10", role: "manager" } });
+  const ids = rt.view().management.employees.map((e) => e.id);
+  assert.deepEqual(ids, ["e9", "e10"]);
+  await rt.shutdown();
+});
+
 test("company_hire 支持 channels 配置", async () => {
   const dataDir = `/tmp/test-dsh-member-manager-hire-channels-${Date.now()}`;
   const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
