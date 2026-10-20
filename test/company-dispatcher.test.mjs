@@ -88,3 +88,34 @@ test("acceptance 字符串归一为数组，不再被账本丢弃", async () => 
   const order = runtime.ledger.orders.find((o) => o.id === place.orderId);
   assert.deepEqual(order.acceptance, ["summary 含 sum=5"]);
 });
+
+test("派工失败（NO_PROVIDER）回滚订单到 queued，不留 running 无 attempt 僵单", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-disp4-${Date.now()}`;
+  const ctx = makeCtx();
+  ctx.get = (name) => {
+    if (name === "subagents") {
+      return {
+        async startActivation() {
+          const err = new Error('no subagent provider registered for "default"');
+          err.code = "NO_PROVIDER";
+          throw err;
+        },
+      };
+    }
+    if (name === "agents") return { get() { return null; } };
+    return undefined;
+  };
+  const runtime = makeRuntime(ctx);
+  runtime.dataDir = dataDir;
+  const store = new CompanyStore(dataDir, { now: () => "2026-01-01T00:00:00.000Z" });
+  await store.saveCompany(runtime.company);
+  const employeeManager = createEmployeeSessionManager({ runtime, logger: console });
+  const dispatcher = createDispatcher({ runtime, store, employeeManager, logger: console });
+  const place = await dispatcher.placeOrder({ type: "code_impl", title: "x" });
+  const res = await dispatcher.assignAndWake(place.orderId, "e1");
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "NO_PROVIDER");
+  const order = runtime.ledger.orders.find((o) => o.id === place.orderId);
+  assert.equal(order.state, "queued");
+  assert.deepEqual(order.attempts, []);
+});

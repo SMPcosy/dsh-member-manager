@@ -112,14 +112,29 @@ export function createDispatcher({ runtime, store, employeeManager, logger }) {
         runtime.ledger = transitionOrder(runtime.ledger, orderId, ORDER_STATES.RUNNING);
       }
 
-      const session = await employeeManager.ensureSession({
-        employee: emp,
-        parentAgent: runtime.ownerAgent,
-        provider: runtime.provider,
-        config: runtime.config,
-        cwd: runtime.dataDir,
-        orderId,
-      });
+      let session;
+      try {
+        session = await employeeManager.ensureSession({
+          employee: emp,
+          parentAgent: runtime.ownerAgent,
+          provider: runtime.provider,
+          config: runtime.config,
+          cwd: runtime.dataDir,
+          orderId,
+        });
+      } catch (error) {
+        // 派工失败（provider 未注册、会话创建失败等）必须把订单回滚到 queued，
+        // 不能留下「running 且无 attempt」的僵单。
+        const code = error?.code || "E_DISPATCH_FAILED";
+        const message = String(error?.message || error);
+        if (getOrder(runtime.ledger, orderId)?.state === ORDER_STATES.RUNNING) {
+          runtime.ledger = transitionOrder(runtime.ledger, orderId, ORDER_STATES.FAILED);
+          runtime.ledger = transitionOrder(runtime.ledger, orderId, ORDER_STATES.QUEUED);
+        }
+        await persist();
+        await append("assign_failed", { orderId, employeeId, code, message });
+        return { ok: false, code, message };
+      }
 
       const { ledger, attempt } = assignAttempt(runtime.ledger, orderId, employeeId, session.sessionId);
       runtime.ledger = ledger;
