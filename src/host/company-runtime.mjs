@@ -184,7 +184,10 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
             return { ok: false, code: "E_TOOL_LINE", message: "该工具不在当前岗位白名单中" };
           }
         }
-        return await fn(args, exec);
+        // 宿主工具签名是 execute(args, executionContext)；公司工具的处理函数按
+        // { exec } 解构使用执行上下文（真实宿主没有 ctx.exec 这一层）。这里做一次
+        // 形状归一，避免 sid/agent 取不到导致身份校验永远失败。
+        return await fn(args, { exec });
       } catch (err) {
         logger.warn(`company tool error: ${err.message}`);
         return { ok: false, code: err.code || "E_INTERNAL", message: err.message };

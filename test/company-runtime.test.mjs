@@ -38,7 +38,7 @@ test("工具在无 agents 时返回 E_NO_AGENTS", async () => {
   const rt = createCompanyRuntime(makeCtx(), { dataDir: "/tmp/test-dsh-member-manager" });
   await rt.boot();
   const tool = rt.tools.find((t) => t.name === "company_order");
-  const res = await tool.execute({ type: "code_impl", title: "x" }, { exec: {} });
+  const res = await tool.execute({ type: "code_impl", title: "x" }, {});
   assert.equal(res.ok, false);
   assert.equal(res.code, "E_NO_AGENTS");
   await rt.shutdown();
@@ -96,7 +96,7 @@ test("fake 模式跑通「下单→路由→建 attempt→唤醒→回报→验�
   const reportTool = rt.tools.find((t) => t.name === "company_report");
   const reviewTool = rt.tools.find((t) => t.name === "company_review");
 
-  const ownerExec = { exec: { agent: { session: { id: rt.ownerSessionId } } } };
+  const ownerExec = { agent: { session: { id: rt.ownerSessionId } } };
 
   await hireManager.execute({ id: "m1", displayName: "经理A", role: "manager", kind: "permanent", department: "dev" }, ownerExec);
   await hireStaff.execute({ id: "e1", displayName: "员工A", role: "staff", kind: "permanent", department: "dev" }, ownerExec);
@@ -110,7 +110,7 @@ test("fake 模式跑通「下单→路由→建 attempt→唤醒→回报→验�
   const attemptId = assign.attemptId;
   assert.ok(attemptId);
 
-  const report = await reportTool.execute({ attemptId, status: "done", summary: "已修复" }, { exec: { agent: { session: { id: assign.sessionId } } } });
+  const report = await reportTool.execute({ attemptId, status: "done", summary: "已修复" }, { agent: { session: { id: assign.sessionId } } });
   assert.equal(report.ok, true);
 
   const review = await reviewTool.execute({ orderId, pass: true }, ownerExec);
@@ -130,7 +130,7 @@ test("escalate 升级未终态订单并记录", async () => {
     config: { fake: true, routingRules: [{ type: "code_impl", dept: "dev" }], departments: [{ id: "dev", name: "研发部" }] },
   });
   await rt.boot();
-  const ownerExec = { exec: { agent: { session: { id: rt.ownerSessionId } } } };
+  const ownerExec = { agent: { session: { id: rt.ownerSessionId } } };
   await rt.tools.find((t) => t.name === "company_hire").execute({ id: "m1", displayName: "经理A", role: "manager", kind: "permanent", department: "dev" }, ownerExec);
   const order = await rt.tools.find((t) => t.name === "company_order").execute({ type: "code_impl", title: "升级测试" }, ownerExec);
   const res = await rt.tools.find((t) => t.name === "company_escalate").execute({ orderId: order.orderId, reason: "阻塞" }, ownerExec);
@@ -146,7 +146,7 @@ test("borrow 借调 shared 员工并创建 attempt", async () => {
     config: { fake: true, routingRules: [{ type: "code_impl", dept: "dev" }], departments: [{ id: "dev", name: "研发部" }] },
   });
   await rt.boot();
-  const ownerExec = { exec: { agent: { session: { id: rt.ownerSessionId } } } };
+  const ownerExec = { agent: { session: { id: rt.ownerSessionId } } };
   await rt.tools.find((t) => t.name === "company_hire").execute({ id: "s1", displayName: "共享", role: "staff", kind: "shared", department: "dev" }, ownerExec);
   const order = await rt.tools.find((t) => t.name === "company_order").execute({ type: "code_impl", title: "借调测试" }, ownerExec);
   const res = await rt.tools.find((t) => t.name === "company_borrow").execute({ orderId: order.orderId, sharedEmployeeId: "s1" }, ownerExec);
@@ -163,7 +163,7 @@ test("fake 模式下 assistant/message 会累加到 costs", async () => {
     config: { fake: true, routingRules: [{ type: "code_impl", dept: "dev" }], departments: [{ id: "dev", name: "研发部" }] },
   });
   await rt.boot();
-  const ownerExec = { exec: { agent: { session: { id: rt.ownerSessionId } } } };
+  const ownerExec = { agent: { session: { id: rt.ownerSessionId } } };
   await rt.tools.find((t) => t.name === "company_hire").execute({ id: "e1u", displayName: "员工U", role: "staff", kind: "permanent", department: "dev" }, ownerExec);
   const orderTool = rt.tools.find((t) => t.name === "company_order");
   const assignTool = rt.tools.find((t) => t.name === "company_assign");
