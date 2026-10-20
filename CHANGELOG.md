@@ -40,6 +40,17 @@
 - **视图归一扩展**：`buildCompanyOrgView(overview)` 新增 `costs`（按 tokens 降序、各 5 条的 byEmployee/byDepartment/byOrder 数组）与 `board` 字段，缺省/类型异常一律兜底为空值，不抛异常。
 - **测试**：`test/company-panel.test.mjs` 更新页签/默认页断言并新增成本归因、部门架构弹层（按钮/预设/关闭路径）、部门过滤、搜索、空态与归一兜底用例；`test/client-bundle.test.mjs` 适配新默认页签与弹层入口；全量用例数随更新调整。
 
+### 新增：总架构组织架构图与面板写接口（v4）
+
+- **组织架构图**：「总架构」页改为架构图——最高层「员工中心」卡片与各部门领导节点横向相连，向下接部门图框；领导取该部门 `role=manager` 中 M 通道等级最高者（同级取工号小者），无负责人显示「未设负责人」虚线占位；部门图框可点击，按部门编号升序排列。
+- **员工中心**：全员列表，下拉筛选 全体员工（默认，含已停用）/ 单部门 / 未启用成员（`state=fired`）；排序 部门编号 → M 线在前 → 等级从高到低 → 工号；行 = 工号 + 等级徽章 + 姓名 + 岗位 + 状态点。
+- **部门弹层（次级页面）**：点部门图框打开，两个页签——「部门架构图」（负责人卡 + M/P 两栏按等级降序）、「成员详情列表」（招聘 / 晋升 / 停用 / 调岗；停用需确认，成功后刷新 overview 且弹层保持打开，失败红字显示 `{code}: {message}`）；关闭按钮 / 遮罩 / ESC 三路关闭；部门失效自动关闭。
+- **新建部门合并一句话建组**：工具栏「新建部门」对话框字段 部门 ID（可选）/ 名称 / 说明 / 编制 / 一句话描述 + 「解析」（名称与编制启发式）；原「一句话建组」独立入口与弹层移除。
+- **面板写接口**：新增 `POST /api/dsh-member-manager/company/op`（6 个 action：createDepartment / updateDepartment / createEmployee / promoteEmployee / fireEmployee / moveEmployee），与工具共用文件锁 / 校验 / 审计；JSON 解析失败 400 `E_BAD_JSON`、请求体过大 413 `E_BODY_TOO_LARGE`、未知 action `E_UNKNOWN_ACTION`；路由总数 15 → 16。
+- **只保留公司化组织架构**：注册小组（registry groups）不再作为组织架构展示，`DeptOrgPanel` 等旧交互移除；4 个维护页签（已停用 / 未登记 / 工作流 / 备份与更新）保留。
+- **视图归一**：`buildCompanyOrgView` 增加 `card.leader` / `card.channelCounts` / 员工 `departmentCode`；新增纯函数 `buildEmployeeCenter(view, filter)` 与 `cpParseBrief(text)`。
+- **测试**：`test/company-runtime.test.mjs` 25 用例（op 六个 action）、`test/company-panel.test.mjs` 31 用例（v4 面板）、`test/host-plugin.test.mjs` 71 用例（路由 16 + POST op body 解析）、`test/client-bundle.test.mjs` 38 用例；全量 397/397；`node scripts/verify-company.mjs` 19/19。
+
 ### 修复（真实宿主端到端验证发现）
 
 - **派工 provider 名**：`company.provider` 默认值由错误的 `"default"` 改为宿主真实注册名 `"spawn"`（`"default"` 会让 `subagents.startActivation` 抛 `NO_PROVIDER`）；配置支持 `company.provider`，非法值回退默认并 warning。

@@ -38,7 +38,7 @@ Click a heading below to view **English** or **中文** .
 - 🧯 **全链路降级**：宿主没有 `agents` / `subagents` 服务时，公司化工具返回 `E_NO_AGENTS`，名册覆盖层（既有 16 个名册工具 + 面板 + 路由）不受影响；Agent 启动失败只记 warning，不阻断插件加载。
 - 🧩 **新增 Web 只读接口**：`GET /company/{overview,org,board,costs,orders}`，统一 `{ ok: true, data }` 信封；`GET /state` 附带 `company` 摘要。
 - 🎖️ **M/P 双通道等级与编号体系**：管理通道（M1 主管 → M5 副总裁）与专业技术通道（P1 初级工程师 → P6 首席专家）双通道；每名员工有唯一工号（默认 `E0001`、`E0002`…）并标注等级与部门，每个部门有唯一编号（默认 `D01`、`D02`…），两者都支持自定义模板。`company_hire` 可指定 `code/channel/level`，`company_admin` 新增 `updateDepartment` / `promoteEmployee` / `setNumbering`；历史数据在 boot 时自动补号，不丢员工。
-- 🖥️ **「总架构」可视化面板 + 「部门架构」弹层**：设置页/侧栏面板默认落在首个页签「总架构」，只读展示 KPI（部门/员工/M/P/工单/成本）、部门编号、编制、M/P 分栏员工、等级图例与成本归因（按员工/部门/工单 top5），5 秒轮询 + 手动刷新，数据源 `GET /api/dsh-member-manager/company/overview`；点工具栏「部门架构」按钮或部门卡片上的按钮，弹出部门架构弹层（次级页面），按部门分组查看/修改成员（部门过滤 + 搜索），关闭回到总架构。
+- 🖥️ **「总架构」组织架构图面板**：首个页签「总架构」默认就是组织架构图——最高层「员工中心」（下拉筛选：全体员工 / 单部门 / 未启用成员，按部门与等级排序）横向连接各部门领导，向下接各部门图框；点部门图框弹出部门弹层（两个页签：部门架构图 / 成员详情列表，可招聘、晋升、停用、调岗）；工具栏「新建部门」内置一句话解析（原「一句话建组」并入）；图表下方保留 KPI、编号规则、等级图例与成本归因（按员工/部门/工单 top5），5 秒轮询 + 手动刷新，读 `GET /api/dsh-member-manager/company/overview`，写 `POST /api/dsh-member-manager/company/op`。
 - 🎯 **组织架构图任务视角（并入本版）**：组织架构图从「全团队」改为**任务作用域**——一个 root 会话就是一个任务，图上只出现这个任务真正需要的参与者（大总管 + `parentSession` 指向它的成员），不再把整个名册都铺出来。
 - 🔽 **任务下拉切换（并入本版）**：右栏 tab 顶部新增任务选择器（由 `GET /orgmap` 返回的 `tasks[]` 驱动，带运行中标记与人数），切任务即换图；没有任何任务时显示空态并禁用下拉。
 - 🧭 布局不变（并入本版）：仍是并联横向 / 串联纵向的三层视图（大总管 → 分组色块 → 组内成员），工作区卡片、结构线与动态引导线保留；任务内成员的 token / 用时只统计该任务各会话的用量。
@@ -85,7 +85,7 @@ Click a heading below to view **English** or **中文** .
 
 优先级：`company.json` 内持久化的 `numbering`（如 `company_admin.setNumbering` 写入）> 配置 `company.numbering` > 内置默认；等级同理。员工提示词头部会带一行身份（工号 / 等级 / 通道 / 部门编号），派工时员工直接看得到。
 
-**面板**：设置页 →「成员管理」→ 默认「总架构」页签（只读）查看公司全景与成本归因；点工具栏「部门架构」按钮（或某张部门卡片上的按钮）弹出部门架构弹层，按部门分组、过滤与搜索成员并修改成员信息，关闭后回到总架构。公司数据改动请用 `company_hire` / `company_admin`。
+**面板**：设置页 →「成员管理」→ 默认「总架构」即组织架构图：员工中心（下拉筛选：全体员工 / 单部门 / 未启用成员）+ 各部门领导 + 部门图框；点部门图框打开弹层，第一个页签看部门架构图，第二个页签在成员详情列表里招聘 / 晋升 / 停用 / 调岗；工具栏「新建部门」输入一句话即可自动解析部门名称与编制（原「一句话建组」已并入）。面板写操作走 `POST /company/op`，也可以继续用 `company_hire` / `company_admin`。
 
 ## v0.2.4 更新要点
 
@@ -290,7 +290,7 @@ dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 | `settings.section`  | 设置页 →「成员管理」分区   |
 | `sidebar.panellist` | 侧栏「👥 成员管理」图标   |
 | `main`              | 独立主页面（keyed 面板） |
-| 面板页签            | 「总架构」（默认首屏，只读）：KPI + 部门编号 + 编制 + M/P 分栏员工 + 等级图例 + 成本归因（按员工/部门/工单 top5），5 秒轮询 `GET /company/overview`；「部门架构」为总架构页内弹层：点工具栏/部门卡片按钮打开，按部门分组管理成员 + 部门过滤 + 搜索，按钮/遮罩/ESC 关闭 |
+| 面板页签            | 「总架构」（默认首屏）＝组织架构图：员工中心（下拉：全体员工 / 单部门 / 未启用成员）+ 部门领导节点 + 部门图框；点图框开部门弹层（页签：部门架构图 / 成员详情列表，可招聘 / 晋升 / 停用 / 调岗）；工具栏「新建部门」含一句话解析；下方 KPI + 编号规则 + 等级图例 + 成本归因三列 top5；5 秒轮询，读 `GET /company/overview`、写 `POST /company/op` |
 
 后端 HTTP 路由：`/api/dsh-member-manager/{state, op, skills, models, overrides, health, backups, update, workflow}`；
 公司化只读路由：`/api/dsh-member-manager/company/{overview, org, board, costs, orders}`（返回 `{ ok: true, data }` 信封）。
@@ -345,7 +345,7 @@ MIT
 - 🧯 **Degrades everywhere**: with no `agents` / `subagents` service the company tools answer `E_NO_AGENTS` while the roster overlay (existing 16 roster tools, panel, routes) keeps working; agent boot failures only log a warning and never break plugin load.
 - 🧩 **New read-only web routes**: `GET /company/{overview,org,board,costs,orders}` in a uniform `{ ok: true, data }` envelope; `GET /state` carries a `company` summary.
 - 🎖️ **M/P dual-channel levels & numbering**: two career channels — Management (M1 Supervisor → M5 VP) and Professional (P1 Junior Engineer → P6 Principal Expert). Every employee gets a unique employee code (default `E0001`, `E0002`…) plus a level and department; every department gets a unique code (default `D01`, `D02`…). Both patterns are customizable. `company_hire` accepts `code/channel/level`; `company_admin` gains `updateDepartment` / `promoteEmployee` / `setNumbering`; legacy data is back-filled on boot without dropping employees.
-- 🖥️ **"Overall arch" panel + "Department org" modal**: the first tab of the settings/sidebar panel ("Overall arch") is the default landing page and shows KPIs (departments / employees / M / P / orders / costs), department codes, headcount, M/P-split employee rows, the level legend and cost attribution (top 5 by employee / department / order), polled every 5s with manual refresh from `GET /api/dsh-member-manager/company/overview`; click the "Department org" button in the toolbar (or on a department card) to open the Department org modal (secondary page), which groups members by department for viewing/editing with department filter + search; closing it returns to the overall architecture page.
+- 🖥️ **"Overall architecture" org chart panel**: the first tab is an org chart — the top row links an "Employee center" card (dropdown filter: all employees / one department / disabled members, sorted by department and level) horizontally to department leader nodes, each hanging down to a department box; click a box to open the department modal with two tabs (department chart / member details) supporting hire, promote, disable and transfer; the "New department" toolbar button includes one-line parsing (the old one-line group builder is merged in); KPIs, numbering rules, the level legend and top-5 cost attribution stay below the chart; polled every 5s with manual refresh, reads `GET /api/dsh-member-manager/company/overview` and writes `POST /api/dsh-member-manager/company/op`.
 - 🎯 **Task-scoped org chart (folded into this release)**: the chart shows only the current task's participants (lead + members whose `parentSession` points at it) instead of the whole roster.
 - 🔽 **Task switcher (folded into this release)**: a selector driven by `tasks[]` from `GET /orgmap` (running marker + member count); empty state disables the picker.
 - 🧭 Layout unchanged: the three-level parallel-across / serial-down view (lead → group chips → members) keeps its workspace cards, structural lines and animated guide lines; token/elapsed numbers count only that task's sessions.
@@ -382,7 +382,7 @@ MIT
 
 Precedence: persisted `numbering` in `company.json` (e.g. via `company_admin.setNumbering`) > config `company.numbering` > built-in defaults; levels work the same way. Employee prompts start with an identity line (code / level / channel / department code) so a dispatched employee sees exactly who they are.
 
-**Panel**: Settings → "Member Manager" → the default "Overall arch" tab (read-only) shows the company panorama and cost attribution; click the "Department org" button in the toolbar (or on a department card) to open the modal, which groups, filters and searches members by department and lets you edit members; close it to return to the overall architecture page. Mutate company data through `company_hire` / `company_admin`.
+**Panel**: Settings → "Member Manager" → the default "Overall architecture" tab is the org chart: employee center (dropdown: all / one department / disabled), department leader nodes and department boxes; click a box to open the department modal — the first tab shows the department chart, the second lists members with inline hire / promote / disable / transfer; the "New department" button parses a one-line description into a name and headcount (the old one-line group builder is merged in). Panel writes go through `POST /company/op`; `company_hire` / `company_admin` remain available.
 
 ## v0.2.4 highlights
 
@@ -584,7 +584,7 @@ All options are optional (omitted ⇒ default):
 | `settings.section`  | Settings → "Member Manager" section |
 | `sidebar.panellist` | "👥 Member Manager" sidebar icon    |
 | `main`              | Standalone main page (keyed panel)  |
-| Panel tab           | "Overall arch" (default landing tab, read-only): KPIs + department codes + headcount + M/P-split employees + level legend + cost attribution (top 5 by employee/department/order), polls `GET /company/overview` every 5s; "Department org" opens as a modal from the toolbar / department-card button: members grouped by department with department filter + search, closable via button / backdrop / ESC |
+| Panel tab           | "Overall architecture" (default landing tab) = org chart: employee center (filter: all / department / disabled) + leader nodes + department boxes; click a box for the department modal (tabs: department chart / member details, with hire, promote, disable, transfer); "New department" includes one-line parsing; KPIs + numbering rules + level legend + cost top-5 below; polls every 5s, reads `GET /company/overview`, writes `POST /company/op` |
 
 Backend HTTP routes: `/api/dsh-member-manager/{state, op, skills, models, overrides, health, backups, update, workflow}`;
 company read-only routes: `/api/dsh-member-manager/company/{overview, org, board, costs, orders}` (wrapped in `{ ok: true, data }`).
