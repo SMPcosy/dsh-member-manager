@@ -340,11 +340,18 @@ function sampleView() {
 function companyFetch(calls = [], options = {}) {
   const data = options.overview || overviewFixture();
   const opResult = options.opResult || { ok: true, data: {} };
+  const skills = options.skills || [{ name: "react", description: "前端框架", source: "local" }, { name: "node", description: "运行时", source: "local" }];
+  const providers = options.providers || [
+    { id: "p-1", displayName: "提供商一", models: [{ id: "m-1", name: "模型一" }] },
+    { id: "p-2", displayName: "提供商二", models: [{ id: "m-2", name: "模型二" }] },
+  ];
   return async (url, init) => {
     const u = String(url);
     calls.push({ url: u, method: (init && init.method) || "GET", body: init && init.body ? JSON.parse(init.body) : null });
     if (u.endsWith("/company/op")) return { ok: true, status: 200, json: async () => ({ ok: true, data: opResult }) };
     if (u.endsWith("/company/overview")) return { ok: true, status: 200, json: async () => ({ ok: true, data }) };
+    if (u.endsWith("/skills")) return { ok: true, status: 200, json: async () => ({ ok: true, data: { skills } }) };
+    if (u.endsWith("/models")) return { ok: true, status: 200, json: async () => ({ ok: true, data: { providers } }) };
     return { ok: true, status: 200, json: async () => ({ ok: true, data }) };
   };
 }
@@ -359,10 +366,10 @@ function overviewFetch(calls = [], data = overviewFixture()) {
 
 /* ==================== CompanyOrgPanel 渲染助手 ==================== */
 
-/** CompanyOrgPanel 的 useState 顺序（v5：追加 13 mgmtOpen / 14 saved）：
+/** CompanyOrgPanel 的 useState 顺序（v5.5：追加 15 rosterPicker / 16 modelProviders）：
  *  0 overview / 1 error / 2 busy / 3 updatedAt / 4 deptModal / 5 modalTab /
  *  6 newDeptOpen / 7 newDeptDraft / 8 opError / 9 newDeptError / 10 editor /
- *  11 syncResult / 12 syncError / 13 mgmtOpen / 14 saved */
+ *  11 syncResult / 12 syncError / 13 mgmtOpen / 14 saved / 15 rosterPicker / 16 modelProviders */
 function cpSeed(options = {}) {
   return [
     options.overview === undefined ? overviewFixture() : options.overview,
@@ -380,6 +387,8 @@ function cpSeed(options = {}) {
     options.syncError === undefined ? null : options.syncError,
     options.mgmtOpen || false,
     options.saved === undefined ? null : options.saved,
+    options.rosterPicker === undefined ? null : options.rosterPicker,
+    options.modelProviders === undefined ? null : options.modelProviders,
   ];
 }
 
@@ -497,6 +506,11 @@ function channelButtonFor(tree, t, code) {
 
 function checkboxInputs(tree) {
   return collectElements(tree, (n) => n.type === "input" && n.props.type === "checkbox");
+}
+
+/** 当前打开的人事详情草稿（editor.rosterDraft），便于断言选择弹层写回 */
+function seed10(made) {
+  return (made.seed[10] && made.seed[10].rosterDraft) || {};
 }
 
 /** 打开某员工的人事管理详情（行下方向下展开） */
@@ -2177,17 +2191,28 @@ test("名册资料：展示可编辑字段，保存依次 POST renameMember/setR
   tree = made.internals.CompanyOrgPanel(made.panelProps);
   inputByPlaceholder(tree, made.t("dutiesHint")).props.onChange({ target: { value: "带队\n汇报" } });
 
+  // v5.5：技能走选择弹层（从名册现有技能出发勾选），模型同样走选择弹层
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
-  inputByPlaceholder(tree, made.t("skillsHint")).props.onChange({ target: { value: "react, node" } });
+  buttonByLabel(tree, made.t("pickSkills"))[0].onClick();
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const skillsPicker = collectElements(tree, (n) => n.type === made.internals.SkillPicker)[0];
+  assert.ok(skillsPicker, "应渲染技能选择弹层");
+  skillsPicker.props.onToggle("node");
+  assert.equal(seed10(made).skillsText, "react, node", "勾选技能应写回名册草稿");
 
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
-  inputByPlaceholder(tree, made.t("modelPh")).props.onChange({ target: { value: "m-2" } });
-
+  buttonByLabel(tree, made.t("pickModel"))[0].onClick();
+  await tick();
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
-  inputByPlaceholder(tree, made.t("providerPh")).props.onChange({ target: { value: "p-2" } });
+  const modelPicker = collectElements(tree, (n) => n.type === made.internals.ModelPicker)[0];
+  assert.ok(modelPicker, "应渲染模型选择弹层");
+  modelPicker.props.onPick("p-2", "m-2");
+  assert.equal(seed10(made).model, "m-2");
+  assert.equal(seed10(made).provider, "p-2");
 
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
@@ -2218,6 +2243,107 @@ test("名册资料：展示可编辑字段，保存依次 POST renameMember/setR
   assert.ok(calls.some((c) => c.url.endsWith("/company/overview")), "保存后应刷新 overview");
   assert.equal(String(made.seed[10].kind), "hr", "保存后详情保持打开");
   assert.equal(made.seed[14], made.t("cpHrSave"), "保存成功提示");
+});
+
+test("v5.5 技能选择弹层：打开时拉 /skills 目录，支持关键词过滤与勾选", async () => {
+  const calls = [];
+  const react = makeReactLive([null, "", null]);
+  const { exports } = loadBundle(react, { fetch: companyFetch(calls) });
+  const t = translator("zh");
+  exports.__internals.SkillPicker({ t, selected: [], onToggle: () => {}, onClose: () => {} });
+  react.flushEffects();
+  await tick();
+  react.reset();
+  let tree = exports.__internals.SkillPicker({ t, selected: [], onToggle: () => {}, onClose: () => {} });
+  assert.ok(calls.some((c) => c.url.endsWith("/skills")), "打开时应拉 /skills");
+  assert.match(treeText(tree), /react/, "目录应列出 react");
+  assert.match(treeText(tree), /node/, "目录应列出 node");
+
+  const searchInput = collectElements(tree, (n) => n.type === "input" && n.props.placeholder === t("searchSkills"))[0];
+  assert.ok(searchInput, "弹层应有技能搜索框");
+  searchInput.props.onChange({ target: { value: "nod" } });
+  react.reset();
+  tree = exports.__internals.SkillPicker({ t, selected: [], onToggle: () => {}, onClose: () => {} });
+  assert.match(treeText(tree), /node/);
+  assert.doesNotMatch(treeText(tree), /react/, "关键词应过滤掉不匹配项");
+});
+
+test("v5.5 人事详情：技能选择弹层——按钮带已选数量、勾选写回草稿、关闭只清弹层", () => {
+  const made = renderCompany({
+    deptModal: "dept-plugin",
+    modalTab: "members",
+    fetch: companyFetch([]),
+    registryMembers: [
+      { target: "emp-lead", displayName: "负责人", title: "组长", duties: [], skills: ["react"], aliases: [], groupId: "g-1", status: "active", isRetired: false },
+    ],
+  });
+  openHr(made, "E0001");
+  made.react.reset();
+  let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const skillsButton = buttonByLabel(tree, made.t("pickSkills"))[0];
+  assert.ok(skillsButton, "名册资料应有「选择技能」按钮");
+  skillsButton.onClick();
+  assert.equal(String(made.seed[15].kind), "skills", "应打开技能选择弹层");
+  assert.deepEqual(made.seed[15].selected, ["react"], "弹层初值 = 名册现有技能");
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const picker = collectElements(tree, (n) => n.type === made.internals.SkillPicker)[0];
+  assert.ok(picker, "应渲染 SkillPicker");
+  picker.props.onToggle("node");
+  assert.equal(seed10(made).skillsText, "react, node", "勾选应写回草稿");
+  assert.deepEqual(made.seed[15].selected, ["react", "node"]);
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  collectElements(tree, (n) => n.type === made.internals.SkillPicker)[0].props.onToggle("react");
+  assert.equal(seed10(made).skillsText, "node", "取消勾选应从草稿移除");
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  collectElements(tree, (n) => n.type === made.internals.SkillPicker)[0].props.onClose();
+  assert.equal(made.seed[15], null, "关闭弹层后草稿保留、弹层状态清空");
+  assert.equal(seed10(made).skillsText, "node");
+});
+
+test("v5.5 人事详情：模型选择弹层——打开拉 /models、选择写回 provider/model、使用默认清空", async () => {
+  const calls = [];
+  const made = renderCompany({
+    deptModal: "dept-plugin",
+    modalTab: "members",
+    fetch: companyFetch(calls),
+    registryMembers: [
+      { target: "emp-lead", displayName: "负责人", title: "组长", duties: [], skills: [], aliases: [], groupId: "g-1", status: "active", isRetired: false },
+    ],
+  });
+  openHr(made, "E0001");
+  made.react.reset();
+  let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const modelButton = buttonByLabel(tree, made.t("pickModel"))[0];
+  assert.ok(modelButton, "名册资料应有「选择模型」按钮");
+  modelButton.onClick();
+  await tick();
+  assert.equal(String(made.seed[15].kind), "model", "应打开模型选择弹层");
+  assert.ok(calls.some((c) => c.url.endsWith("/models")), "打开模型弹层应拉取 /models 目录");
+  assert.equal(made.seed[16].length, 2, "目录应缓存到 modelProviders");
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const picker = collectElements(tree, (n) => n.type === made.internals.ModelPicker)[0];
+  assert.ok(picker, "应渲染 ModelPicker");
+  picker.props.onPick("p-2", "m-2");
+  assert.equal(seed10(made).provider, "p-2");
+  assert.equal(seed10(made).model, "m-2");
+  assert.equal(made.seed[15], null, "选择后关闭弹层");
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  buttonByLabel(tree, made.t("pickModel"))[0].onClick();
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  collectElements(tree, (n) => n.type === made.internals.ModelPicker)[0].props.onClear();
+  assert.equal(seed10(made).provider, "", "使用默认应清空 provider");
+  assert.equal(seed10(made).model, "", "使用默认应清空 model");
 });
 
 test("Panel：向 CompanyOrgPanel 传 registryMembers（扁平化 + 分组名）/registryGroups/onRegistryRefresh", () => {
