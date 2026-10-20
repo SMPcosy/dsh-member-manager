@@ -280,43 +280,44 @@ test("Panel：点击「同步核心成员」发出 registerLive 请求", async (
   assert.equal(op.body.op, "registerLive");
 });
 
-test("Panel：默认落在「总架构」页，页签顺序总架构→部门架构→…", () => {
+test("Panel：默认落在「总架构」页，页签顺序总架构→员工中心→工作流→备份与更新", () => {
   // seed 只给前三个 hook，第四个 tab 走组件内 useState("company") 的默认值
   const { exports } = loadBundle(makeReact([sampleView(), null, false]));
   const tree = exports.__internals.Panel({ t: (k) => k });
 
   const labels = collectButtons(tree).map((b) => b.label);
-  // v3：部门架构不再占页签，只在总架构内由按钮唤起弹层
-  const tabKeys = ["cpTab", "tabRetired", "tabUnregistered", "tabWorkflow", "tabMaintain"];
-  // 页签按钮的文案可能带计数徽章（如 tabUnregistered1），按前缀归一成 key 再比顺序
+  // v4.2：已停用 / 未登记页签移除，替换为独立的「员工中心」页签
+  const tabKeys = ["cpTab", "cpEmployeeCenter", "tabWorkflow", "tabMaintain"];
+  // 页签按钮的文案可能带计数徽章，按前缀归一成 key 再比顺序
   const tabOrder = labels
     .map((l) => tabKeys.find((k) => l.startsWith(k)))
     .filter(Boolean);
   assert.deepEqual(
     tabOrder,
     tabKeys,
-    "页签顺序应为 总架构 → 已停用 → 未登记 → 工作流 → 备份与更新",
+    "页签顺序应为 总架构 → 员工中心 → 工作流 → 备份与更新",
   );
   assert.equal(labels.some((l) => l.startsWith("tabOrg")), false, "不应再有「部门架构」页签");
+  assert.equal(labels.some((l) => l.startsWith("tabRetired")), false, "不应再有「已停用」页签");
+  assert.equal(labels.some((l) => l.startsWith("tabUnregistered")), false, "不应再有「未登记」页签");
 
-  const { CompanyOrgPanel } = exports.__internals;
+  const { CompanyOrgPanel, EmployeeCenterPanel } = exports.__internals;
   assert.ok(findComponent(tree, CompanyOrgPanel), "默认应渲染总架构页（CompanyOrgPanel）");
+  assert.equal(findComponent(tree, EmployeeCenterPanel), null, "默认页不应渲染员工中心页");
 });
 
-test("Panel：「未登记」页可对单个成员发出 addMember 请求", async () => {
-  const calls = [];
-  // seed 的第四个 useState 是 tab → 设为 unregistered
-  const { exports } = loadBundle(makeReact([sampleView(), null, false, "unregistered", null, null]), { fetch: recordingFetch(calls) });
+test("Panel：「员工中心」页签渲染 EmployeeCenterPanel，且总架构页给「查看全部」回调", () => {
+  const { exports } = loadBundle(makeReact([sampleView(), null, false]));
   const tree = exports.__internals.Panel({ t: (k) => k });
 
-  assert.match(treeText(tree), /brand-new-member/);
-  const register = collectButtons(tree).find((b) => b.label === "register");
-  assert.ok(register, "找不到「登记」按钮");
-  await register.onClick();
+  const companyNode = findComponent(tree, exports.__internals.CompanyOrgPanel);
+  assert.ok(companyNode, "默认应渲染总架构页");
+  assert.equal(typeof companyNode.props.onOpenEmployees, "function", "总架构页应收到 onOpenEmployees 回调");
 
-  const op = calls.find((c) => c.url.endsWith("/op"));
-  assert.equal(op.body.op, "addMember");
-  assert.equal(op.body.args.target, "brand-new-member");
+  const { exports: ex2 } = loadBundle(makeReact([sampleView(), null, false, "employees", null, null]));
+  const tree2 = ex2.__internals.Panel({ t: (k) => k });
+  assert.ok(findComponent(tree2, ex2.__internals.EmployeeCenterPanel), "employees 页签应渲染 EmployeeCenterPanel");
+  assert.equal(findComponent(tree2, ex2.__internals.CompanyOrgPanel), null, "employees 页签不应再渲染总架构页");
 });
 
 test("Panel：后端不可用时 fetch 失败被捕获为错误条，不抛到渲染层", async () => {

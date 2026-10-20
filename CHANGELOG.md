@@ -57,6 +57,12 @@
 - **删除部门**：`POST /company/op {action:"deleteDepartment"}` 与部门弹层底部「删除部门」按钮（二次确认含名称与编号）——仅允许删除不含在职员工的部门（否则 `E_DEPT_NOT_EMPTY`）；删除时把该部门已停用员工的部门清空（保留员工档案），审计 `department_deleted`。
 - **测试**：`test/company-runtime.test.mjs` 28 用例（新增 syncRoster 幂等/dryRun/缺失与 deleteDepartment 非空拒绝/清空部门）、`test/company-panel.test.mjs` 39 用例（新增同步按钮载荷与文案/失败红字/5 秒清除/刷新清除/删除确认取消/删除成功关弹层/删除失败红字）；全量 407/407；`node scripts/verify-company.mjs` 19/19。
 
+### 变更：页签改版——员工中心独立页签（v4.2）
+
+- **页签调整**：面板页签由 5 个改为 4 个——`总架构`（默认首屏）/ `员工中心` / `工作流` / `备份与更新`；移除「已停用」「未登记」两个页签（含页面与 `tabRetired`/`tabUnregistered` 文案键）。已停用员工改在「员工中心」页的「未启用成员」筛选中查看，未登记成员的管理入口回归名册工具（`member_*`）。
+- **员工中心独立页**：新增 `EmployeeCenterPanel`——全量员工列表（下拉筛选：全体员工 / 单部门 / 未启用成员，按部门与等级排序），自带 5 秒轮询、手动刷新、空态与错误提示；总架构页的员工中心收紧为紧凑节点（标题 + 员工总数 +「查看全部」按钮，点击切到员工中心页签）。
+- **测试**：`test/company-panel.test.mjs` 44 用例（新增 4 页签顺序与旧页签移除、EmployeeCenterPanel 排序/筛选/空态/轮询、查看全部回调）；`test/client-bundle.test.mjs` 38 用例同步；全量 412/412；`node scripts/verify-company.mjs` 19/19。
+
 ### 修复（真实宿主端到端验证发现）
 
 - **派工 provider 名**：`company.provider` 默认值由错误的 `"default"` 改为宿主真实注册名 `"spawn"`（`"default"` 会让 `subagents.startActivation` 抛 `NO_PROVIDER`）；配置支持 `company.provider`，非法值回退默认并 warning。
