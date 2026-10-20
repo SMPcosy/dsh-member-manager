@@ -602,15 +602,10 @@ test("源码：v5 总架构结构——默认 company、管理层节点、/compa
 
   // 轮询与写接口
   assert.match(src, /api\("\/company\/overview"\)/);
-  assert.match(src, /setInterval\(pull, CP_POLL_MS\)/);
-  assert.match(src, /clearInterval\(timer\)/);
 
-  // v5.1：总架构页去掉自动刷新（胶囊 + setInterval），只剩员工中心页保留 5s 轮询
-  assert.equal(
-    (src.match(/setInterval\(pull, CP_POLL_MS\)/g) || []).length,
-    1,
-    "setInterval 只应在员工中心页保留",
-  );
+  // v5.2：两页都去掉自动刷新——源码里不应再有 5s 轮询定时器或对应胶囊
+  assert.equal(src.includes("CP_POLL_MS"), false, "CP_POLL_MS 应删除（不再自动轮询）");
+  assert.equal(/setInterval\(pull,\s*(CP_POLL_MS|5000)\)/.test(src), false, "不应再有公司面板的 pull 轮询定时器");
   assert.equal(src.includes("cpRefreshHint"), false, "cpRefreshHint 文案键应删除");
   assert.equal(src.includes("每 5 秒自动刷新"), false, "自动刷新胶囊文案应删除");
   assert.match(src, /api\("\/company\/op"/);
@@ -926,37 +921,37 @@ test("EmployeeCenterPanel：刷新按钮立即拉取 overview，完成后 busy �
   assert.equal(made.seed[3], false, "刷新完成后 busy 应复位");
 });
 
-test("EmployeeCenterPanel：打开拉一次 + 5 秒 setInterval，卸载后 clearInterval 且不再请求", async () => {
+test("EmployeeCenterPanel：打开拉一次、不注册自动轮询定时器，手动刷新再拉一次", async () => {
   const calls = [];
   const timers = [];
-  const cleared = [];
-  const fakeSetInterval = (fn, ms) => {
-    timers.push({ fn, ms });
-    return timers.length;
-  };
-  const fakeClearInterval = (id) => cleared.push(id);
-
   const react = makeReactLive([null, null, null, false, "all"]);
-  const { exports } = loadBundle(react, { fetch: companyFetch(calls), setInterval: fakeSetInterval, clearInterval: fakeClearInterval });
+  const { exports } = loadBundle(react, {
+    fetch: companyFetch(calls),
+    setInterval: (fn, ms) => {
+      timers.push({ fn, ms });
+      return timers.length;
+    },
+    clearInterval: () => {},
+  });
   const t = translator("zh");
   const tree = exports.__internals.EmployeeCenterPanel({ t });
   assert.match(treeText(tree), new RegExp(t("cpLoading")), "首屏未拉到数据时显示加载中");
 
   const cleanups = react.flushEffects();
-  assert.equal(timers.length, 1, "应注册一个轮询定时器");
-  assert.equal(timers[0].ms, exports.__internals.CP_POLL_MS);
+  assert.equal(timers.length, 0, "v5.2 起员工中心页不再注册自动轮询定时器");
   await tick();
   assert.equal(calls.filter((c) => c.url.endsWith("/company/overview")).length, 1, "打开时拉一次");
 
-  await timers[0].fn();
+  const refresh = buttonByLabel(tree, t("cpRefresh"))[0];
+  assert.ok(refresh, "应有刷新按钮");
+  await refresh.onClick();
   await tick();
-  assert.equal(calls.filter((c) => c.url.endsWith("/company/overview")).length, 2, "轮询触发第二次请求");
+  assert.equal(calls.filter((c) => c.url.endsWith("/company/overview")).length, 2, "手动刷新再拉一次");
+  assert.equal(timers.length, 0, "刷新也不应创建轮询定时器");
 
   cleanups[0]();
-  assert.deepEqual(cleared, [1], "卸载应 clearInterval");
-  await timers[0].fn();
   await tick();
-  assert.equal(calls.filter((c) => c.url.endsWith("/company/overview")).length, 2, "清理后不再请求");
+  assert.equal(calls.filter((c) => c.url.endsWith("/company/overview")).length, 2, "卸载后不再请求");
 });
 
 test("CompanyOrgPanel：空组织 = 暂无部门空态，管理层节点仍在（人数 0）", () => {
