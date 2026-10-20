@@ -51,7 +51,7 @@ function makeReact(seed = [], { mutable = false } = {}) {
 }
 
 /** 能真正跑 state 与 effect 的替身；flushEffects() 返回本轮 useEffect 的清理函数数组。 */
-function makeReactLive() {
+function makeReactLive(seed = []) {
   const states = [];
   let cursor = 0;
   let effects = [];
@@ -69,7 +69,7 @@ function makeReactLive() {
     createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat(Infinity) }),
     useState(init) {
       const i = cursor++;
-      if (!(i in states)) states[i] = init;
+      if (!(i in states)) states[i] = i < seed.length ? seed[i] : init;
       return [
         states[i],
         (v) => {
@@ -359,14 +359,26 @@ test("源码：总架构/部门架构文案、overview 轮询、成本归因接�
   assert.match(src, /setInterval\(pull, CP_POLL_MS\)/);
   assert.match(src, /const CP_POLL_MS = 5000;/);
 
-  // 默认 tab = company，且 company 页签排在 org 之前
+  // 默认 tab = company；「部门架构」不再是页签，而是总架构页内按钮唤起的弹层
   assert.match(src, /useState\("company"\)/);
   assert.ok(src.indexOf('tabBtn("company"') >= 0, "源码应注册 company 页签");
-  assert.ok(src.indexOf('tabBtn("company"') < src.indexOf('tabBtn("org"'), "总架构页签应排在部门架构之前");
+  assert.equal(src.includes('tabBtn("org"'), false, "部门架构不应再注册为页签");
+  assert.ok(src.indexOf('tabBtn("company"') < src.indexOf('tabBtn("retired"'), "总架构页签应排在已停用之前");
+  assert.equal(src.includes('tab === "org"'), false, "不应再有独立的 org 页签分支");
+  assert.match(src, /const \[deptOrg, setDeptOrg\] = useState\(null\)/);
 
-  // 两个页面的分支接线
-  assert.match(src, /tab === "company" \? h\(CompanyOrgPanel, \{ t: t \}\) : null/);
-  assert.match(src, /tab === "org"\s*\? h\(DeptOrgPanel,/);
+  // 总架构页：工具栏/部门卡按钮 → 打开 deptOrg 弹层；页签保持 company
+  assert.match(src, /tab === "company" \? h\(CompanyOrgPanel, \{ t: t, onOpenDeptOrg:/);
+  assert.match(src, /props\.onOpenDeptOrg\("__all__"\)/);
+  assert.match(src, /deptOrg !== null/);
+  assert.match(src, /initialDept: deptOrg === null \? "__all__" : deptOrg/);
+  // ESC 关闭：window 守卫 + 注册/摘除
+  assert.match(src, /window\.addEventListener\("keydown", onKey\)/);
+  assert.match(src, /window\.removeEventListener\("keydown", onKey\)/);
+  // 新增文案
+  assert.match(src, /cpOpenDeptOrg: "部门架构"/);
+  assert.match(src, /cpClose: "关闭"/);
+  assert.match(src, /dpModalHint: "查看与修改成员/);
 
   // 成本归因：三个维度统一走 cpCostRows 并按 tokens 降序，渲染时取前 5
   assert.match(src, /cpCostRows/);
@@ -432,6 +444,14 @@ test("字典：cp*/dp* 文案 zh/en 一一对应，中文与 docs/16 §5 及 m02
   assert.equal(zh.groupName, "部门名称");
   assert.ok(zh.groupDesc.includes("部门说明"));
 
+  // v3：部门架构改为总架构页内弹层，入口/关闭/副标题文案
+  assert.equal(zh.cpOpenDeptOrg, "部门架构");
+  assert.equal(en.cpOpenDeptOrg, "Department org");
+  assert.equal(zh.cpClose, "关闭");
+  assert.equal(en.cpClose, "Close");
+  assert.match(zh.dpModalHint, /查看与修改成员/);
+  assert.match(en.dpModalHint, /View and edit members/);
+
   // 英文侧不能漏翻成中文
   for (const key of enCp) {
     assert.doesNotMatch(String(en[key]), /[\u4e00-\u9fff]/, `en.${key} 含中文：${en[key]}`);
@@ -442,57 +462,210 @@ test("字典：cp*/dp* 文案 zh/en 一一对应，中文与 docs/16 §5 及 m02
   }
 });
 
-/* ==================== ② Panel 页签 ==================== */
+/* ==================== ② Panel 页签与部门架构弹层 ==================== */
 
-test("Panel：默认页签为总架构（company），页签顺序 company → org → retired → unregistered → workflow → maintain", () => {
+/** Panel 的 fetch 替身：/state 与 /op 都回固定 payload；记录 url/method/body */
+function panelFetch(calls = [], view = sampleView()) {
+  return async (url, init) => {
+    const u = String(url);
+    calls.push({ url: u, method: (init && init.method) || "GET", body: init && init.body ? JSON.parse(init.body) : null });
+    if (u.endsWith("/op")) return { ok: true, status: 200, json: async () => ({ ok: true, data: {} }) };
+    return { ok: true, status: 200, json: async () => ({ ok: true, data: view }) };
+  };
+}
+
+/** Panel 的 useState 顺序：0 state / 1 error / 2 busy / 3 tab / 4 draft / 5 groupDraft / 6 briefOpen / 7 deptOrg */
+function panelSeed({ view = sampleView(), tab = "company", deptOrg = null } = {}) {
+  return [view, null, false, tab, null, null, false, deptOrg];
+}
+
+function renderPanel({ view = sampleView(), tab = "company", deptOrg = null, calls = [], confirm } = {}) {
   const t = translator("zh");
-  const { exports } = loadBundle(makeReact([sampleView(), null, false, "company", null, null, false]));
+  const seed = panelSeed({ view, tab, deptOrg });
+  const react = makeReact(seed, { mutable: true });
+  const { exports } = loadBundle(react, { fetch: panelFetch(calls, view), confirm });
   const tree = exports.__internals.Panel({ t });
+  return { t, seed, react, tree, internals: exports.__internals };
+}
 
-  const labels = collectButtons(tree).map((b) => b.label);
-  const tabLabels = [t("cpTab"), t("tabOrg"), t("tabRetired"), t("tabUnregistered"), t("tabWorkflow"), t("tabMaintain")];
-  assert.deepEqual(
-    labels.filter((label) => tabLabels.includes(label)),
-    tabLabels,
-    "页签顺序应为 company/org/retired/unregistered/workflow/maintain",
-  );
-  assert.equal(tabLabels[0], "总架构");
-  assert.equal(tabLabels[1], "部门架构");
+/** S 未导出：按样式特征定位弹层遮罩（position:fixed + zIndex）与卡片（有宽度覆盖） */
+function findModal(tree) {
+  const overlay = collectElements(
+    tree,
+    (n) => n.type === "div" && n.props.style && n.props.style.position === "fixed" && n.props.style.zIndex === 2147483000,
+  )[0];
+  const card = overlay
+    ? collectElements(overlay, (n) => n.type === "div" && n.props.style && n.props.style.width === "min(1080px, 94vw)")[0]
+    : null;
+  return { overlay: overlay || null, card: card || null };
+}
 
-  // 默认 tab=company：渲染总架构面板，不渲染部门架构面板
-  const panelType = exports.__internals.CompanyOrgPanel;
-  const deptType = exports.__internals.DeptOrgPanel;
-  assert.equal(collectElements(tree, (n) => n.type === panelType).length, 1, "默认应渲染 CompanyOrgPanel");
-  assert.equal(collectElements(tree, (n) => n.type === deptType).length, 0, "默认不应渲染 DeptOrgPanel");
+test("Panel：默认总架构，页签恰 5 个且不含「部门架构」页签", () => {
+  const { t, tree, internals } = renderPanel();
+  const expected = [t("cpTab"), t("tabRetired"), t("tabUnregistered"), t("tabWorkflow"), t("tabMaintain")];
+  const labels = collectButtons(tree)
+    .map((b) => b.label)
+    .filter((label) => expected.includes(label));
+
+  assert.deepEqual(labels, expected, "页签顺序应为 总架构→已停用→未登记→工作流→备份与更新");
+  assert.equal(labels.length, 5);
+  assert.equal(labels.includes(t("tabOrg")), false, "部门架构不应再占页签");
+  assert.equal(expected[0], "总架构");
+
+  // 默认 tab=company：渲染总架构，不渲染部门架构弹层
+  assert.equal(collectElements(tree, (n) => n.type === internals.CompanyOrgPanel).length, 1, "默认应渲染 CompanyOrgPanel");
+  assert.equal(collectElements(tree, (n) => n.type === internals.DeptOrgPanel).length, 0, "默认不应渲染 DeptOrgPanel");
+  assert.equal(findModal(tree).overlay, null, "默认不应出现弹层遮罩");
+  const company = collectElements(tree, (n) => n.type === internals.CompanyOrgPanel)[0];
+  assert.equal(typeof company.props.onOpenDeptOrg, "function", "总架构需要拿到打开弹层的回调");
 });
 
-test("Panel：点「部门架构」/「总架构」页签在两类面板间切换", () => {
+test("Panel：总架构工具栏「部门架构」→ 弹层（遮罩 + 卡片 + DeptOrgPanel），页签不变", () => {
+  const { t, seed, react, tree, internals } = renderPanel();
+  const company = collectElements(tree, (n) => n.type === internals.CompanyOrgPanel)[0];
+  company.props.onOpenDeptOrg("__all__");
+  assert.equal(seed[7], "__all__", "入口应把 deptOrg 置为「全部部门」");
+  assert.equal(seed[3], "company", "打开弹层不得改变页签");
+
+  react.reset();
+  const withModal = internals.Panel({ t });
+  const { overlay, card } = findModal(withModal);
+  assert.ok(overlay, "应渲染弹层遮罩");
+  assert.ok(card, "应渲染弹层卡片");
+  assert.equal(typeof card.props.onClick, "function", "卡片需要 stopPropagation 拦截遮罩点击");
+
+  const text = treeText(withModal);
+  assert.match(text, /部门架构/);
+  assert.match(text, /查看与修改成员/);
+  assert.match(text, /关闭/);
+
+  const dept = collectElements(withModal, (n) => n.type === internals.DeptOrgPanel);
+  assert.equal(dept.length, 1, "弹层内应渲染一个 DeptOrgPanel");
+  assert.equal(dept[0].props.initialDept, "__all__");
+  assert.equal(typeof dept[0].props.t, "function");
+  assert.ok(Array.isArray(dept[0].props.groups));
+  // 弹层内容确实在：把 DeptOrgPanel 元素展开，检查部门 pills + 搜索框
+  react.reset();
+  const deptTree = internals.DeptOrgPanel(dept[0].props);
+  assert.ok(collectButtons(deptTree).some((b) => b.label === t("dpAllDepts")), "弹层内应有部门 pills");
+  assert.equal(collectElements(deptTree, (n) => n.type === "input").length, 1, "弹层内应有搜索框");
+});
+
+test("Panel：部门卡片「部门架构」按钮带部门 id，未分配部门卡回落全部", () => {
   const t = translator("zh");
-  const seed = [sampleView(), null, false, "company", null, null, false];
-  const react = makeReact(seed, { mutable: true });
-  const { exports } = loadBundle(react);
+  const opened = [];
+  const { exports } = loadBundle(makeReact([overviewFixture(), null, false, null]));
+  const tree = exports.__internals.CompanyOrgPanel({ t, onOpenDeptOrg: (id) => opened.push(id) });
+  const buttons = collectButtons(tree).filter((b) => b.label === t("cpOpenDeptOrg"));
+  // 工具栏 1 个 + 两个部门卡 + 未分配部门卡
+  assert.equal(buttons.length, 4, "工具栏与每张部门卡都应有入口");
 
-  let tree = exports.__internals.Panel({ t });
-  const orgButton = collectButtons(tree).find((b) => b.label === "部门架构");
-  assert.ok(orgButton, "找不到「部门架构」页签按钮");
-  assert.equal(typeof orgButton.onClick, "function");
+  buttons[0].onClick();
+  assert.deepEqual(opened, ["__all__"], "工具栏入口默认全部部门");
 
-  orgButton.onClick();
-  assert.equal(seed[3], "org", "点击页签应把 tab 置为 org");
+  const ev = { stopped: false, stopPropagation() { this.stopped = true; } };
+  buttons[1].onClick(ev);
+  assert.deepEqual(opened, ["__all__", "dept-plugin"]);
+  assert.equal(ev.stopped, true, "卡片按钮应阻止事件冒泡");
+
+  buttons[2].onClick({ stopPropagation() {} });
+  assert.deepEqual(opened, ["__all__", "dept-plugin", "dept-doc"]);
+
+  buttons[3].onClick(); // 未分配部门卡没有 dept.id → 打开全部部门
+  assert.deepEqual(opened, ["__all__", "dept-plugin", "dept-doc", "__all__"]);
+
+  // Panel 打开时把该 id 传给 DeptOrgPanel
+  const panel = renderPanel({ deptOrg: "dept-plugin" });
+  const dept = collectElements(panel.tree, (n) => n.type === panel.internals.DeptOrgPanel)[0];
+  assert.equal(dept.props.initialDept, "dept-plugin", "弹层应预设触发入口的部门");
+});
+
+test("Panel：弹层关闭（关闭按钮 / 点遮罩），卡片内点击不关闭", () => {
+  const { t, seed, react, tree, internals } = renderPanel({ deptOrg: "__all__" });
+  const { overlay, card } = findModal(tree);
+  assert.ok(overlay && card);
+
+  // 卡片内部点击 → stopPropagation，不关闭
+  let stopped = false;
+  card.props.onClick({ stopPropagation: () => { stopped = true; } });
+  assert.equal(stopped, true);
+  assert.equal(seed[7], "__all__", "卡片内点击不应关闭弹层");
+
+  // 遮罩上的子元素点击（target !== currentTarget）→ 不关闭
+  overlay.props.onClick({ target: {}, currentTarget: {} });
+  assert.equal(seed[7], "__all__");
+
+  // 关闭按钮 → 关闭
+  const closeBtn = collectButtons(tree).find((b) => b.label === t("cpClose"));
+  assert.ok(closeBtn, "弹层应有「关闭」按钮");
+  closeBtn.onClick();
+  assert.equal(seed[7], null, "关闭按钮应把 deptOrg 置回 null");
+
+  // 点遮罩本身（target === currentTarget）→ 关闭
+  seed[7] = "__all__";
   react.reset();
-  tree = exports.__internals.Panel({ t });
-  const rendered = collectElements(tree, (n) => n.type === exports.__internals.DeptOrgPanel);
-  assert.equal(rendered.length, 1, "tab=org 时应渲染一个 DeptOrgPanel");
-  assert.equal(typeof rendered[0].props.t, "function", "DeptOrgPanel 需要拿到 t");
-  assert.ok(Array.isArray(rendered[0].props.groups), "DeptOrgPanel 需要拿到分组列表");
+  const again = findModal(internals.Panel({ t }));
+  const self = {};
+  again.overlay.props.onClick({ target: self, currentTarget: self });
+  assert.equal(seed[7], null, "点遮罩应关闭弹层");
+});
 
-  const companyButton = collectButtons(tree).find((b) => b.label === "总架构");
-  assert.ok(companyButton, "找不到「总架构」页签按钮");
-  companyButton.onClick();
-  assert.equal(seed[3], "company");
+test("Panel：ESC 关闭弹层（打开时注册 keydown，关闭后摘除）", () => {
+  const listeners = [];
+  const fakeWindow = {
+    addEventListener(type, fn) {
+      if (type === "keydown") listeners.push(fn);
+    },
+    removeEventListener(type, fn) {
+      const i = listeners.indexOf(fn);
+      if (i >= 0) listeners.splice(i, 1);
+    },
+  };
+  const t = translator("zh");
+  const react = makeReactLive(panelSeed({ deptOrg: "__all__" }));
+  const { exports } = loadBundle(react, { window: fakeWindow, fetch: panelFetch([]) });
+
+  const tree = exports.__internals.Panel({ t });
+  assert.ok(findModal(tree).overlay, "打开态应渲染弹层");
+  const cleanups = react.flushEffects();
+  const escCleanup = cleanups.find((fn) => typeof fn === "function");
+  assert.ok(escCleanup, "打开期间应注册 keydown 监听的清理函数");
+  assert.equal(listeners.length, 1, "应注册一个 keydown 监听");
+
+  listeners[0]({ key: "a" });
+  assert.equal(react._states[7], "__all__", "非 Escape 键不应关闭");
+
+  listeners[0]({ key: "Escape" });
+  assert.equal(react._states[7], null, "ESC 应关闭弹层");
+
+  // 关闭后重新渲染：不再有遮罩；执行上一轮 cleanup 后监听被摘除
   react.reset();
-  tree = exports.__internals.Panel({ t });
-  assert.equal(collectElements(tree, (n) => n.type === exports.__internals.CompanyOrgPanel).length, 1);
+  assert.equal(findModal(exports.__internals.Panel({ t })).overlay, null);
+  escCleanup();
+  assert.equal(listeners.length, 0, "卸载后应摘除 keydown 监听");
+});
+
+test("Panel：弹层内「移除」部门仍走 confirm → deleteGroup", async () => {
+  const calls = [];
+  const asked = [];
+  let allow = false;
+  const { tree, internals } = renderPanel({ deptOrg: "__all__", calls, confirm: (m) => (asked.push(m), allow) });
+  const dept = collectElements(tree, (n) => n.type === internals.DeptOrgPanel)[0];
+  assert.equal(typeof dept.props.onDeleteGroup, "function", "弹层需要能删除部门");
+
+  dept.props.onDeleteGroup({ id: "g-1", name: "数据组" });
+  assert.equal(asked.length, 1, "删除部门前应弹确认");
+  assert.match(asked[0], /数据组/);
+  assert.equal(calls.filter((c) => c.url.endsWith("/op")).length, 0, "取消后不应发请求");
+
+  allow = true;
+  dept.props.onDeleteGroup({ id: "g-2", name: "插件组" });
+  await tick();
+  const op = calls.find((c) => c.url.endsWith("/op"));
+  assert.ok(op, "确认后应发 /op 请求");
+  assert.equal(op.method, "POST");
+  assert.equal(op.body.op, "deleteGroup");
+  assert.equal(op.body.args.id, "g-2");
 });
 
 /* ==================== ③ 完整数据渲染 ==================== */
@@ -1075,6 +1248,36 @@ test("DeptOrgPanel：过滤值指向已消失的部门时回落到「全部部�
   assert.match(text, /数据组 1 人/);
   assert.match(text, /插件组 1 人/);
   assert.match(text, /未分配部门 1 人/);
+});
+
+test("DeptOrgPanel：initialDept 预设部门过滤（弹层入口传入），无效值回落全部", () => {
+  const view = deptSampleView();
+  const t = translator("zh");
+  const internals = loadBundle(makeReact()).exports.__internals;
+
+  const render = (initialDept) =>
+    internals.DeptOrgPanel({
+      t,
+      groups: view.groups,
+      ungrouped: view.ungrouped,
+      busy: false,
+      tableProps: deptTableProps(t, view.groups),
+      initialDept,
+      onRefresh() {},
+      onDeleteGroup() {},
+    });
+
+  // 预设 g-2：成员列表只显示插件组
+  const preset = treeText(expandTables(render("g-2"), internals));
+  assert.match(preset, /插件匠/);
+  assert.equal(preset.includes("数据整理员"), false, "预设部门外成员不应出现");
+  assert.equal(preset.includes("自由成员"), false, "未分配部门成员不应出现");
+
+  // 无效 initialDept：回落「全部部门」，不白屏
+  const fallback = treeText(expandTables(render("g-already-gone"), internals));
+  assert.match(fallback, /数据组 1 人/);
+  assert.match(fallback, /插件组 1 人/);
+  assert.match(fallback, /未分配部门 1 人/);
 });
 
 test("DeptOrgPanel：一个成员都没有时沿用「还没有成员」空态", () => {

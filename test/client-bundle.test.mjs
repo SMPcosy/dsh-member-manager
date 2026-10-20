@@ -229,8 +229,9 @@ function treeText(node) {
   return self + (node.children || []).map(treeText).join(" ") + " " + JSON.stringify(node.props || {});
 }
 
-test("Panel：正常状态下渲染出组织架构（小组名 + 中文显示名 + target）", () => {
-  const react = makeReact([sampleView(), null, false, "org", null, null]);
+test("Panel：部门架构弹层渲染出小组名 + 中文显示名 + target", () => {
+  // seed：tab 用默认 company，deptOrg 在 briefOpen 之后（索引 7）设为 "__all__" 打开弹层
+  const react = makeReact([sampleView(), null, false, "company", null, null, false, "__all__"]);
   const { exports } = loadBundle(react);
   const tree = exports.__internals.Panel({ t: (k) => k });
 
@@ -246,7 +247,7 @@ test("Panel：正常状态下渲染出组织架构（小组名 + 中文显示名
 });
 
 test("Panel：state 为 null 时渲染占位而不抛错", () => {
-  const { exports } = loadBundle(makeReact([null, null, false, "org", null, null]));
+  const { exports } = loadBundle(makeReact([null, null, false, "company", null, null]));
   const tree = exports.__internals.Panel({ t: (k) => k });
   assert.equal(tree.type, "div");
   assert.match(treeText(tree), /…/);
@@ -254,14 +255,14 @@ test("Panel：state 为 null 时渲染占位而不抛错", () => {
 
 test("Panel：coreAvailable=false 时显示同步提示；warnings 会透出", () => {
   const view = { ...sampleView(), coreAvailable: false, warnings: ["名册文件不存在，已初始化为空名册"] };
-  const { exports } = loadBundle(makeReact([view, null, false, "org", null, null]));
+  const { exports } = loadBundle(makeReact([view, null, false, "company", null, null]));
   const text = treeText(exports.__internals.Panel({ t: (k) => k }));
   assert.match(text, /coreUnavailable/);
   assert.match(text, /名册文件不存在/);
 });
 
 test("Panel：错误态渲染错误条（error 非空且无 state 时走独立分支）", () => {
-  const { exports } = loadBundle(makeReact([null, "HTTP 500", false, "org", null, null]));
+  const { exports } = loadBundle(makeReact([null, "HTTP 500", false, "company", null, null]));
   const text = treeText(exports.__internals.Panel({ t: (k) => k }));
   assert.match(text, /HTTP 500/);
   assert.match(text, /noApi/);
@@ -269,7 +270,7 @@ test("Panel：错误态渲染错误条（error 非空且无 state 时走独立�
 
 test("Panel：点击「同步核心成员」发出 registerLive 请求", async () => {
   const calls = [];
-  const { exports } = loadBundle(makeReact([sampleView(), null, false, "org", null, null]), { fetch: recordingFetch(calls) });
+  const { exports } = loadBundle(makeReact([sampleView(), null, false, "company", null, null]), { fetch: recordingFetch(calls) });
   const tree = exports.__internals.Panel({ t: (k) => k });
 
   const sync = collectButtons(tree).find((b) => b.label === "sync");
@@ -288,7 +289,8 @@ test("Panel：默认落在「总架构」页，页签顺序总架构→部门架
   const tree = exports.__internals.Panel({ t: (k) => k });
 
   const labels = collectButtons(tree).map((b) => b.label);
-  const tabKeys = ["cpTab", "tabOrg", "tabRetired", "tabUnregistered", "tabWorkflow", "tabMaintain"];
+  // v3：部门架构不再占页签，只在总架构内由按钮唤起弹层
+  const tabKeys = ["cpTab", "tabRetired", "tabUnregistered", "tabWorkflow", "tabMaintain"];
   // 页签按钮的文案可能带计数徽章（如 tabUnregistered1），按前缀归一成 key 再比顺序
   const tabOrder = labels
     .map((l) => tabKeys.find((k) => l.startsWith(k)))
@@ -296,12 +298,13 @@ test("Panel：默认落在「总架构」页，页签顺序总架构→部门架
   assert.deepEqual(
     tabOrder,
     tabKeys,
-    "页签顺序应为 总架构 → 部门架构 → 已停用 → 未登记 → 工作流 → 备份与更新",
+    "页签顺序应为 总架构 → 已停用 → 未登记 → 工作流 → 备份与更新",
   );
+  assert.equal(labels.some((l) => l.startsWith("tabOrg")), false, "不应再有「部门架构」页签");
 
   const { CompanyOrgPanel, DeptOrgPanel } = exports.__internals;
   assert.ok(findComponent(tree, CompanyOrgPanel), "默认应渲染总架构页（CompanyOrgPanel）");
-  assert.equal(findComponent(tree, DeptOrgPanel), null, "默认不应渲染部门架构页");
+  assert.equal(findComponent(tree, DeptOrgPanel), null, "默认不应渲染部门架构弹层");
 });
 
 test("Panel：「未登记」页可对单个成员发出 addMember 请求", async () => {
@@ -320,25 +323,28 @@ test("Panel：「未登记」页可对单个成员发出 addMember 请求", asyn
   assert.equal(op.body.args.target, "brand-new-member");
 });
 
-/** 渲染 Panel 的「部门架构」页，并把内嵌的 DeptOrgPanel 真正展开成元素树。
+/** 渲染 Panel 的「部门架构」弹层，并把内嵌的 DeptOrgPanel 真正展开成元素树。
  *  Panel 用 h(DeptOrgPanel, props) 挂子组件，但它不是 Panel 树里的 DOM，
- *  所以要取出该元素的 props 再调用一次组件函数。 */
+ *  所以要取出该元素的 props 再调用一次组件函数；弹层由 deptOrg（索引 7）seed 打开。 */
 function renderDeptOrgPage(exports) {
   const { Panel, DeptOrgPanel } = exports.__internals;
   const el = findComponent(Panel({ t: (k) => k }), DeptOrgPanel);
-  assert.ok(el, "部门架构页应渲染 DeptOrgPanel");
+  assert.ok(el, "部门架构弹层应渲染 DeptOrgPanel");
   return DeptOrgPanel(el.props);
 }
 
-test("部门架构页：部门「移除」按钮先弹确认，确认后才发 deleteGroup", async () => {
+/** 部门架构弹层的 seed：tab 默认 company，deptOrg="__all__" 打开弹层 */
+const DEPT_ORG_MODAL_SEED = () => [sampleView(), null, false, "company", null, null, false, "__all__"];
+
+test("部门架构弹层：部门「移除」按钮先弹确认，确认后才发 deleteGroup", async () => {
   const calls = [];
   // 用户取消 → 不发请求
-  const denied = loadBundle(makeReact([sampleView(), null, false, "org", null, null]), { fetch: recordingFetch(calls), confirm: () => false });
+  const denied = loadBundle(makeReact(DEPT_ORG_MODAL_SEED()), { fetch: recordingFetch(calls), confirm: () => false });
   await collectButtons(renderDeptOrgPage(denied.exports)).find((b) => b.label === "remove").onClick();
   assert.equal(calls.length, 0, "取消确认后不应发请求");
 
   // 用户确认 → 发 deleteGroup
-  const allowed = loadBundle(makeReact([sampleView(), null, false, "org", null, null]), { fetch: recordingFetch(calls), confirm: () => true });
+  const allowed = loadBundle(makeReact(DEPT_ORG_MODAL_SEED()), { fetch: recordingFetch(calls), confirm: () => true });
   await collectButtons(renderDeptOrgPage(allowed.exports)).find((b) => b.label === "remove").onClick();
   const op = calls.find((c) => c.url.endsWith("/op"));
   assert.equal(op.body.op, "deleteGroup");
@@ -349,7 +355,7 @@ test("Panel：后端不可用时 fetch 失败被捕获为错误条，不抛到�
   const failing = async () => {
     throw new Error("Failed to fetch");
   };
-  const { exports } = loadBundle(makeReact([sampleView(), null, false, "org", null, null]), { fetch: failing });
+  const { exports } = loadBundle(makeReact([sampleView(), null, false, "company", null, null]), { fetch: failing });
   const tree = exports.__internals.Panel({ t: (k) => k });
   const sync = collectButtons(tree).find((b) => b.label === "sync");
   await sync.onClick(); // 不应抛异常
