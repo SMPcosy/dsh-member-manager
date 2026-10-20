@@ -25,6 +25,8 @@
 
 - **派工 provider 名**：`company.provider` 默认值由错误的 `"default"` 改为宿主真实注册名 `"spawn"`（`"default"` 会让 `subagents.startActivation` 抛 `NO_PROVIDER`）；配置支持 `company.provider`，非法值回退默认并 warning。
 - **验收标准归一**：`company_order` 的 `acceptance`/`deps` 传字符串时自动归一为数组，不再被账本层丢弃。
+- **真实宿主激活参数**：`subagents.startActivation` 补上必填的 `signal`（AbortController，会话结束时中止）；初始 prompt 改为消息块数组；`agents.create` 的 `agentOptions` 不再误把 subagent provider 名当 LLM provider（留空走宿主默认模型，子会话继承）。
+- **派工失败回滚**：会话创建失败时订单回滚到 queued（不再留下 running 无 attempt 的僵单），并写 `assign_failed` 审计。
 
 ### 保留
 

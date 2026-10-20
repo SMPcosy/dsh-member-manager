@@ -88,14 +88,25 @@ export function createEmployeeSessionManager({ runtime, logger }) {
         ? `emp-${employee.id}-${Date.now()}-${++seq}`
         : `resident-${employee.id}`;
 
-      const result = await subagents.startActivation({
-        provider,
-        label: `company-${employee.role}-${employee.id}`,
-        request: { parent: parentAgent, prompt: buildPromptFor(employee, config), cwd },
-        delivery,
-      });
-      handle = result;
-      sessionId = result?.childId || result?.sessionId || childId;
+      // startActivation 的 spec.signal 是必填（内部会 signal.throwIfAborted()）；
+      // 每个会话持有一个 AbortController，end()/shutdown 时中止未建立的激活。
+      const controller = new AbortController();
+      let result;
+      try {
+        result = await subagents.startActivation({
+          provider,
+          label: `company-${employee.role}-${employee.id}`,
+          request: { parent: parentAgent, prompt: [{ type: "text", text: buildPromptFor(employee, config, orderId) }], cwd },
+          delivery,
+          signal: controller.signal,
+        });
+        handle = result;
+        sessionId = result?.childId || result?.sessionId || childId;
+        if (sessionId && runtime.sessionAborts) runtime.sessionAborts.set(sessionId, controller);
+      } catch (err) {
+        controller.abort();
+        throw err;
+      }
 
       // 同步从 agents 服务取已发布的 agent 对象
       if (agents && typeof agents.get === "function") {
@@ -178,6 +189,10 @@ export function createEmployeeSessionManager({ runtime, logger }) {
       logger?.warn?.(`dispose 会话失败: ${err.message}`);
     }
     if (s.sessionId && runtime.sessionTools) runtime.sessionTools.delete(s.sessionId);
+    if (s.sessionId && runtime.sessionAborts) {
+      try { runtime.sessionAborts.get(s.sessionId)?.abort(); } catch { /* 已中止 */ }
+      runtime.sessionAborts.delete(s.sessionId);
+    }
     sessions.delete(employeeId);
   }
 
@@ -194,7 +209,7 @@ export function createEmployeeSessionManager({ runtime, logger }) {
   };
 }
 
-function buildPromptFor(employee, config) {
+function buildPromptFor(employee, config, orderId) {
   const isManager = employee.role === EMPLOYEE_ROLE.MANAGER;
   const isWindow = employee.role === EMPLOYEE_ROLE.WINDOW;
   const roleName = isManager ? "经理" : isWindow ? "窗口" : "员工";
@@ -215,6 +230,14 @@ function buildPromptFor(employee, config) {
   }
   duties.push("- 你无权 fork 子代理或指派其他员工。");
 
+
+  const orderHint = orderId
+    ? `
+
+## 当前派工
+- 工单：${orderId}。请**立即**调用 company_status 查看该工单详情与 attempts[0].id，然后开工；完成后调用 company_report（attemptId 必填）。`
+    : "";
+
   return `# 公司运行时 ${roleName}
 
 你是公司运行时的 ${roleName}（${employee.displayName || employee.id}）。
@@ -227,5 +250,5 @@ ${duties.join("\n")}
 
 ## 成本约定
 - 记录本次 attempt 的预估/实际 token 消耗。
-- 完成后在 summary 中简要说明耗时与阻塞点。`;
+- 完成后在 summary 中简要说明耗时与阻塞点。${orderHint}`;
 }

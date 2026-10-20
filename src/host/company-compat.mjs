@@ -256,7 +256,7 @@ export async function wakeAgent({ agents, subagents, sessionId, parentAgent, use
 export function makeIdleMessage(reason = "shutdown") {
   return {
     role: "user",
-    content: reason,
+    content: [{ type: "text", text: reason }],
     source: { kind: SOURCE_KIND, signal: "idle" },
   };
 }

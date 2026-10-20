@@ -146,7 +146,7 @@ export function createDispatcher({ runtime, store, employeeManager, logger }) {
       const { wakeAgent } = await import("./company-compat.mjs");
       const userMessage = {
         role: "user",
-        content: `执行订单 ${orderId}`,
+        content: [{ type: "text", text: `执行订单 ${orderId}` }],
         source: { kind: "company-runtime", attemptId: attempt.id, orderId },
       };
       await wakeAgent({
@@ -321,7 +321,7 @@ export function createDispatcher({ runtime, store, employeeManager, logger }) {
 
       const userMessage = {
         role: "user",
-        content: `借调执行订单 ${orderId}`,
+        content: [{ type: "text", text: `借调执行订单 ${orderId}` }],
         source: { kind: SOURCE_KIND, attemptId: attempt.id, orderId },
       };
       await wakeAgent({

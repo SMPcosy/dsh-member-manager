@@ -54,6 +54,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     dataDir,
     workspaceDir,
     sessionTools: new Map(),
+    sessionAborts: new Map(),
     company: emptyCompany(),
     ledger: emptyLedger(),
     ownerAgent: null,
@@ -506,7 +507,10 @@ async function createOwnerAgent(runtime) {
   const ownerSessionId = `company-owner-${crypto.randomUUID()}`;
   const handle = await agents.create({
     sessionId: ownerSessionId,
-    agentOptions: { provider: runtime.provider },
+    // 注意：runtime.provider 是 subagent 后端名（spawn/fork），不是 LLM provider。
+    // 这里必须留空，让宿主的 agent-default-model 插件在请求时补默认 LLM provider/model；
+    // 子会话再沿用 owner 的 options 继承同一默认模型。
+    agentOptions: {},
     setup: (agentCtx, agent) => {
       runtime.ownerAgent = agent;
       runtime.ownerSessionId = ownerSessionId;
