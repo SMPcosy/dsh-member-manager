@@ -84,6 +84,14 @@
 - 选择结果即时写回详情草稿并随「保存名册资料」提交（`setSkills` / `setModel`），关闭弹层不会丢草稿。
 - **测试**：`test/company-panel.test.mjs` 61→64 用例；全量 **452/452**，`node scripts/verify-company.mjs` **19/19**。
 
+### 新增：名册档案迁入公司化员工（v5.8）
+
+- **员工档案字段**：员工新增 `title`（岗位名称）、`duties`（职责条目，≤8 条）、`model`/`provider`（模型覆盖）三个可选档案字段，与既有 `displayName`/`skills` 一起构成公司化档案；`company.json` 重载时归一保留（非法值丢弃、职责截断 8 条）。
+- **新写接口**：`POST /company/op` 新增 `updateEmployeeProfile`（一次请求写显示名/岗位/职责/技能/模型，`employee_profile_updated` 审计）与 `importRosterProfiles`（把名册 active 成员的档案**只补空字段、绝不覆盖**地迁入同名员工，支持 `dryRun`，`roster.profiles_imported` 审计）。
+- **模型覆盖生效**：员工同时配置 `provider` + `model` 时，其公司化会话通过 `agentOptions` 继承该路由；缺一沿用宿主默认。
+- **面板**：「人事管理」详情页的「名册资料」改为「公司化资料」，直接读写公司化员工并用单次 `updateEmployeeProfile` 保存（不再串行发名册 op）；总架构工具栏新增「导入名册资料」按钮一键迁移名册档案。调岗表单里的「名册部门」暂保留。
+- **测试**：shared/host/panel 新增用例，全量 **464/464**，`node scripts/verify-company.mjs` **19/19**。
+
 ### 调整：名册部门并入调岗、岗位职责条目化（v5.7）
 
 - **名册部门移入调岗**：人事详情页的名册资料不再包含「名册部门」下拉；调岗表单新增「名册部门」下拉（仅关联名册的员工显示），提交时先发公司化 `moveEmployee`，再发名册 `assignGroup`，成功后刷新名册与总架构概览并回到详情。

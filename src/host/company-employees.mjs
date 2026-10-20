@@ -18,6 +18,13 @@ export function createEmployeeSessionManager({ runtime, logger }) {
     return TOOL_LINES.STAFF;
   }
 
+  function buildAgentOptions(employee) {
+    if (employee.provider && employee.model) {
+      return { provider: employee.provider, model: employee.model };
+    }
+    return undefined;
+  }
+
   function setupAgentContext(agent, line) {
     if (!agent || !agent.ctx) return;
     const allowed = LINE_TOOLS[line] || [];
@@ -70,7 +77,10 @@ export function createEmployeeSessionManager({ runtime, logger }) {
     if (employee.sessionPolicy === SESSION_POLICY.RESIDENT && agents && typeof agents.resume === "function") {
       const resumeSessionId = existing?.sessionId || `resident-${employee.id}`;
       try {
-        const resumed = await agents.resume({ resumeSessionId, parentAgent: parentAgent?.agent || parentAgent, cwd });
+        const agentOptions = buildAgentOptions(employee);
+        const resumeArgs = { resumeSessionId, parentAgent: parentAgent?.agent || parentAgent, cwd };
+        if (agentOptions) resumeArgs.agentOptions = agentOptions;
+        const resumed = await agents.resume(resumeArgs);
         if (resumed?.agent) {
           agent = resumed.agent;
           handle = resumed;
@@ -94,10 +104,13 @@ export function createEmployeeSessionManager({ runtime, logger }) {
       const controller = new AbortController();
       let result;
       try {
+        const agentOptions = buildAgentOptions(employee);
+        const request = { parent: parentAgent, prompt: [{ type: "text", text: buildPromptFor(employee, orderId, runtime) }], cwd };
+        if (agentOptions) request.agentOptions = agentOptions;
         result = await subagents.startActivation({
           provider,
           label: `company-${employee.role}-${employee.id}`,
-          request: { parent: parentAgent, prompt: [{ type: "text", text: buildPromptFor(employee, orderId, runtime) }], cwd },
+          request,
           delivery,
           signal: controller.signal,
         });

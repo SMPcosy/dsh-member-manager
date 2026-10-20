@@ -450,3 +450,48 @@ test("normalizeCompany：只有旧标量 channel/level 的历史数据迁移出�
   assert.equal(emp.channel, "P");
   assert.equal(emp.level, "P2");
 });
+
+/* --------------------------- v5.8 员工档案字段 --------------------------- */
+
+import { EMPLOYEE_DUTIES_MAX, updateEmployee } from "../src/shared/company-org.mjs";
+
+test("EMPLOYEE_DUTIES_MAX = 8 且 duties 截断到 8 条", () => {
+  assert.equal(EMPLOYEE_DUTIES_MAX, 8);
+  let c = bizCompany();
+  c = createEmployee(c, { id: "s1", role: "staff", kind: "permanent", department: "A", duties: ["a", "b", "c", "d", "e", "f", "g", "h", "i"] });
+  assert.deepEqual(c.employees[0].duties, ["a", "b", "c", "d", "e", "f", "g", "h"]);
+});
+
+test("normalizeCompany：title/duties/model/provider 归一，非法值丢弃为缺省，重载不丢", () => {
+  const raw = { version: 1, status: "idle", departments: [{ id: "A", name: "A 部" }], employees: [{ id: "s1", displayName: "张三", role: "staff", kind: "permanent", department: "A", title: "高级工程师", duties: ["  写代码  ", "  ", "review"], model: "gpt-4", provider: "openai" }] };
+  const emp = normalizeCompany(raw).company.employees[0];
+  assert.equal(emp.title, "高级工程师");
+  assert.deepEqual(emp.duties, ["写代码", "review"]);
+  assert.equal(emp.model, "gpt-4");
+  assert.equal(emp.provider, "openai");
+  // 重载不丢
+  const again = normalizeCompany(JSON.parse(JSON.stringify(emp))).company;
+  assert.equal(again.title, "高级工程师");
+  assert.equal(again.model, "gpt-4");
+});
+
+test("createEmployee：接受 title/duties/model/provider", () => {
+  let c = bizCompany();
+  c = createEmployee(c, { id: "s1", role: "staff", kind: "permanent", department: "A", title: "架构师", duties: ["设计", "评审"], model: "claude-3", provider: "anthropic" });
+  const emp = c.employees[0];
+  assert.equal(emp.title, "架构师");
+  assert.deepEqual(emp.duties, ["设计", "评审"]);
+  assert.equal(emp.model, "claude-3");
+  assert.equal(emp.provider, "anthropic");
+});
+
+test("updateEmployee：允许更新 title/duties/model/provider", () => {
+  let c = bizCompany();
+  c = createEmployee(c, { id: "s1", role: "staff", kind: "permanent", department: "A", title: "初级" });
+  c = updateEmployee(c, "s1", { title: "高级", duties: ["  a  ", "", "b"], model: "llama", provider: "local" });
+  const emp = c.employees.find((e) => e.id === "s1");
+  assert.equal(emp.title, "高级");
+  assert.deepEqual(emp.duties, ["a", "b"]);
+  assert.equal(emp.model, "llama");
+  assert.equal(emp.provider, "local");
+});

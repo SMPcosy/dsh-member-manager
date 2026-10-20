@@ -172,6 +172,10 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
           channel: { type: "string", enum: ["M", "P"], description: "通道：M 管理/P 专业（旧字段，与 channels 互斥）" },
           level: { type: "string", description: "等级 code，如 M2/P4（旧字段，与 channels 互斥）" },
           channels: { type: "array", items: { type: "object", properties: { channel: { type: "string", enum: ["M", "P"] }, level: { type: "string" } }, required: ["channel", "level"], additionalProperties: false }, description: "双通道配置，优先于旧 channel/level" },
+          title: { type: "string", description: "岗位名称" },
+          duties: { type: "array", items: { type: "string" }, description: "岗位职责条目，最多 8 条" },
+          model: { type: "string", description: "模型覆盖" },
+          provider: { type: "string", description: "模型 provider 覆盖" },
         },
         required: ["id"],
       }, company_hire),
@@ -180,7 +184,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         properties: {
           action: {
             type: "string",
-            enum: ["createDepartment", "createEmployee", "setRoutingRules", "updateDepartment", "promoteEmployee", "setNumbering", "setChannels"],
+            enum: ["createDepartment", "createEmployee", "setRoutingRules", "updateDepartment", "promoteEmployee", "setNumbering", "setChannels", "updateEmployeeProfile", "importRosterProfiles"],
             description: "管理动作",
           },
           args: { type: "object" },
@@ -295,6 +299,37 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     }
   }
 
+  function normalizeDutiesInput(v) {
+    if (!Array.isArray(v)) return [];
+    return v.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean).slice(0, 8);
+  }
+
+  async function restoreChannelsFromFile(company) {
+    try {
+      const raw = await readFile(path.join(dataDir, "company.json"), "utf8");
+      const saved = JSON.parse(raw);
+      const map = new Map((saved.employees || []).map((e) => [e.id, e.channels]));
+      for (const emp of (company?.employees || [])) {
+        const ch = map.get(emp.id);
+        if (Array.isArray(ch)) emp.channels = ch;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  function employeeProfileSummary(emp) {
+    return {
+      id: emp.id,
+      displayName: emp.displayName,
+      title: emp.title ?? "",
+      duties: emp.duties ?? [],
+      skills: emp.skills ?? [],
+      model: emp.model ?? "",
+      provider: emp.provider ?? "",
+    };
+  }
+
   async function company_hire(args) {
     return store.withLock(async () => {
       try {
@@ -312,6 +347,10 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
           channels: Array.isArray(args.channels) ? args.channels : undefined,
           channel: args.channel,
           level: args.level,
+          title: args.title,
+          duties: Array.isArray(args.duties) ? args.duties : undefined,
+          model: args.model,
+          provider: args.provider,
         });
         await store.saveCompany(runtime.company);
         await store.appendAudit({ type: "employee_hired", employeeId: args.id });
@@ -361,6 +400,10 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
               channels: Array.isArray(args.args.channels) ? args.args.channels : undefined,
               channel: args.args.channel,
               level: args.args.level,
+              title: args.args.title,
+              duties: Array.isArray(args.args.duties) ? args.args.duties : undefined,
+              model: args.args.model,
+              provider: args.args.provider,
             });
             await store.saveCompany(runtime.company);
             await store.appendAudit({ type: "employee_created", employeeId: args.args.id });
@@ -512,12 +555,139 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
               channels: Array.isArray(args.channels) ? args.channels : undefined,
               channel: args.channel,
               level: args.level,
+              title: args.title,
+              duties: Array.isArray(args.duties) ? args.duties : undefined,
+              model: args.model,
+              provider: args.provider,
             });
             await store.saveCompany(runtime.company);
             const emp = runtime.company.employees.find((e) => e.id === id);
             const levelInfo = describeEmployeeLevel(emp, runtime.config.levels);
             await store.appendAudit({ type: "employee_hired", employeeId: id, code: emp?.code });
             return { ok: true, employeeId: id, code: emp?.code, channel: levelInfo.channel, level: levelInfo.level, levelName: levelInfo.levelName };
+          });
+        }
+                case "updateEmployeeProfile": {
+          const employeeId = args.employeeId;
+          if (!employeeId) {
+            return { ok: false, code: "E_INVALID_INPUT", message: "employeeId 必填" };
+          }
+          return await withCompanyRefresh(async () => {
+            const target = runtime.company.employees.find((e) => e.id === employeeId);
+            if (!target) {
+              return { ok: false, code: "E_NOT_FOUND", message: `员工 ${employeeId} 不存在` };
+            }
+            const patch = {};
+            const fields = [];
+            if (args.displayName !== undefined) {
+              patch.displayName = args.displayName;
+              fields.push("displayName");
+            }
+            if (args.title !== undefined) {
+              patch.title = args.title;
+              fields.push("title");
+            }
+            if (args.duties !== undefined) {
+              patch.duties = normalizeDutiesInput(args.duties);
+              fields.push("duties");
+            }
+            if (args.skills !== undefined) {
+              patch.skills = args.skills;
+              fields.push("skills");
+            }
+            if (args.model !== undefined) {
+              patch.model = args.model;
+              fields.push("model");
+            }
+            if (args.provider !== undefined) {
+              patch.provider = args.provider;
+              fields.push("provider");
+            }
+            if (fields.length === 0) {
+              return { ok: true, employeeId, employee: employeeProfileSummary(target) };
+            }
+            runtime.company = updateEmployee(runtime.company, employeeId, patch);
+            await store.saveCompany(runtime.company);
+            const updated = runtime.company.employees.find((e) => e.id === employeeId);
+            await store.appendAudit({ type: "employee_profile_updated", employeeId, fields });
+            return { ok: true, employeeId, employee: employeeProfileSummary(updated) };
+          });
+        }
+        case "importRosterProfiles": {
+          let registry;
+          try {
+            const raw = await readFile(path.join(dataDir, "registry.json"), "utf8");
+            registry = JSON.parse(raw);
+          } catch (err) {
+            if (err.name === "SyntaxError") {
+              return { ok: false, code: "E_NO_REGISTRY", message: "registry.json 解析失败" };
+            }
+            return { ok: false, code: "E_NO_REGISTRY", message: `registry.json 读取失败: ${err.message}` };
+          }
+          const dryRun = Boolean(args.dryRun);
+          return await store.withLock(async () => {
+            const loaded = await store.load();
+            runtime.company = loaded.company || runtime.company;
+            await restoreChannelsFromFile(runtime.company);
+            const members = (registry.members || []).filter((m) => m.status === "active");
+            const memberMap = new Map(members.map((m) => [m.target, m]));
+            const filled = [];
+            const skipped = [];
+            for (const emp of runtime.company.employees) {
+              const member = memberMap.get(emp.id);
+              if (!member) {
+                skipped.push({ employeeId: emp.id, reason: "registry 中无匹配成员" });
+                continue;
+              }
+              const patch = {};
+              const fields = [];
+              const isDisplayNameEmpty = !emp.displayName || emp.displayName === emp.id;
+              if (isDisplayNameEmpty && member.displayName) {
+                patch.displayName = member.displayName;
+                fields.push("displayName");
+              }
+              if (!emp.title && member.duties?.title) {
+                patch.title = member.duties.title;
+                fields.push("title");
+              }
+              const incomingDuties = Array.isArray(member.duties?.duties) ? member.duties.duties.filter(Boolean) : [];
+              if ((!emp.duties || emp.duties.length === 0) && incomingDuties.length > 0) {
+                patch.duties = incomingDuties;
+                fields.push("duties");
+              }
+              const incomingSkills = Array.isArray(member.skills) ? member.skills.filter(Boolean) : [];
+              if ((!emp.skills || emp.skills.length === 0) && incomingSkills.length > 0) {
+                patch.skills = incomingSkills;
+                fields.push("skills");
+              }
+              if (!emp.model && member.model) {
+                patch.model = member.model;
+                fields.push("model");
+              }
+              if (!emp.provider && member.provider) {
+                patch.provider = member.provider;
+                fields.push("provider");
+              }
+              if (fields.length === 0) {
+                skipped.push({ employeeId: emp.id, reason: "无空字段可补" });
+                continue;
+              }
+              if (!dryRun) {
+                runtime.company = updateEmployee(runtime.company, emp.id, patch);
+              }
+              filled.push({ employeeId: emp.id, fields });
+            }
+            if (!dryRun) {
+              await store.saveCompany(runtime.company);
+              await store.appendAudit({ type: "roster.profiles_imported", counts: { filled: filled.length, skipped: skipped.length } });
+            }
+            return {
+              ok: true,
+              dryRun,
+              filled,
+              skipped,
+              counts: { filled: filled.length, skipped: skipped.length },
+            };
           });
         }
         case "promoteEmployee": {

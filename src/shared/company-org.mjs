@@ -26,6 +26,8 @@ export const EMPLOYEE_STATE = Object.freeze({
   FIRED: "fired",
 });
 
+export const EMPLOYEE_DUTIES_MAX = 8;
+
 export const SESSION_POLICY = Object.freeze({
   PER_TASK: "per_task",
   RESIDENT: "resident",
@@ -137,6 +139,10 @@ export function normalizeCompany(raw, now = new Date().toISOString()) {
         level: emp.level,
         channels: Array.isArray(emp.channels) ? emp.channels : undefined,
         code: emp.code,
+        title: typeof emp.title === "string" ? emp.title.trim() : "",
+        duties: normalizeDuties(emp.duties),
+        model: typeof emp.model === "string" ? emp.model.trim() : "",
+        provider: typeof emp.provider === "string" ? emp.provider.trim() : "",
       };
       // 等级迁移：非法 level/channel 回退默认 + warning，不丢员工（docs/16 §1.3）。
       try {
@@ -172,6 +178,14 @@ export function normalizeCompany(raw, now = new Date().toISOString()) {
   }
 
   return { company, warnings };
+}
+
+function normalizeDuties(v) {
+  if (!Array.isArray(v)) return [];
+  return v
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean)
+    .slice(0, EMPLOYEE_DUTIES_MAX);
 }
 
 function normalizeKind(v) {
@@ -653,7 +667,10 @@ export function createEmployee(
     channel: primaryChannel,
     level: primaryLevel,
     channels: sortedChannels.map((x) => ({ ...x })),
-    ...rest,
+    title: typeof rest.title === "string" ? rest.title.trim() : "",
+    duties: normalizeDuties(rest.duties),
+    model: typeof rest.model === "string" ? rest.model.trim() : "",
+    provider: typeof rest.provider === "string" ? rest.provider.trim() : "",
   });
   return c;
 }
@@ -662,10 +679,11 @@ export function updateEmployee(company, id, patch) {
   const c = clone(company);
   const emp = findEmployee(c, id);
   if (!emp) throw new OrgError(`员工 ${id} 不存在`);
-  const allowed = ["displayName", "state", "skills", "lastUsed", "sessionPolicy"];
+  const allowed = ["displayName", "state", "skills", "lastUsed", "sessionPolicy", "title", "model", "provider"];
   for (const key of allowed) {
     if (patch[key] !== undefined) emp[key] = patch[key];
   }
+  if (patch.duties !== undefined) emp.duties = normalizeDuties(patch.duties);
   return c;
 }
 

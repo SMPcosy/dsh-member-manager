@@ -16,6 +16,10 @@ function makeCtx(opts = {}) {
   };
 }
 
+function makeExec(sessionId) {
+  return { agent: { session: { id: sessionId } } };
+}
+
 test("createCompanyRuntime 返回工具/路由/boot/shutdown/view", () => {
   const rt = createCompanyRuntime(makeCtx(), { dataDir: "/tmp/test-dsh-member-manager" });
   assert.ok(Array.isArray(rt.tools));
@@ -790,5 +794,125 @@ test("legacy 单通道员工迁移后 view 仍可正常描述 channels", async (
   assert.equal(v.channels[0].channel, "P");
   assert.equal(v.channels[0].level, "P3");
   assert.equal(v.channels[0].primary, true);
+  await rt.shutdown();
+});
+
+test("company_hire 透传 title/duties/model/provider 并持久化", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-hire-profile-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true, departments: [{ id: "dev", name: "研发部" }] } });
+  await rt.boot();
+  const r = await rt.tools.find((t) => t.name === "company_hire").execute({
+    id: "p1", displayName: "张三", department: "dev", role: "staff",
+    title: "架构师", duties: ["设计", "评审"], model: "claude-3", provider: "anthropic",
+  }, makeExec("owner"));
+  assert.equal(r.ok, true);
+  const emp = rt.view().org.employees.find((e) => e.id === "p1");
+  assert.equal(emp.title, "架构师");
+  assert.deepEqual(emp.duties, ["设计", "评审"]);
+  assert.equal(emp.model, "claude-3");
+  assert.equal(emp.provider, "anthropic");
+  await rt.shutdown();
+});
+
+test("POST /company/op updateEmployeeProfile 截断 duties 并审计", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-update-profile-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d1", name: "研发部" } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "e1", displayName: "张三", department: "d1", role: "staff" } });
+  const res = await op.handler({}, new URL("http://localhost/company/op"), { action: "updateEmployeeProfile", args: { employeeId: "e1", title: "高级工程师", duties: ["  写代码  ", "", ...Array(10).fill("x")], model: "gpt-4", provider: "openai" } });
+  assert.equal(res.ok, true);
+  assert.equal(res.employee.title, "高级工程师");
+  assert.equal(res.employee.duties.length, 8);
+  assert.equal(res.employee.model, "gpt-4");
+  assert.equal(res.employee.provider, "openai");
+  await rt.shutdown();
+});
+
+test("POST /company/op updateEmployeeProfile 不存在返回 E_NOT_FOUND", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-update-profile-notfound-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  const res = await op.handler({}, new URL("http://localhost/company/op"), { action: "updateEmployeeProfile", args: { employeeId: "ghost", title: "x" } });
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "E_NOT_FOUND");
+  await rt.shutdown();
+});
+
+test("POST /company/op importRosterProfiles 只补空字段且不覆盖", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-import-profiles-${Date.now()}`;
+  const fs = await import("node:fs/promises");
+  await fs.mkdir(dataDir, { recursive: true });
+  const registry = {
+    members: [
+      { target: "e1", status: "active", displayName: "Registry 名", duties: { title: "高级", duties: ["a", "b"] }, model: "m1", provider: "p1" },
+      { target: "e2", status: "active", displayName: "已有" },
+    ],
+  };
+  await fs.writeFile(`${dataDir}/registry.json`, JSON.stringify(registry));
+
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d1", name: "研发部" } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "e1", displayName: "已有名", department: "d1", role: "staff" } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "e2", displayName: "已有", department: "d1", role: "staff", title: "不覆盖" } });
+
+  const dry = await op.handler({}, new URL("http://localhost/company/op"), { action: "importRosterProfiles", args: { dryRun: true } });
+  assert.equal(dry.dryRun, true);
+  assert.equal(dry.counts.filled, 1);
+
+  const res = await op.handler({}, new URL("http://localhost/company/op"), { action: "importRosterProfiles", args: {} });
+  assert.equal(res.ok, true);
+  assert.equal(res.counts.filled, 1);
+  assert.equal(res.counts.skipped, 1);
+
+  const e1 = rt.view().org.employees.find((e) => e.id === "e1");
+  assert.equal(e1.displayName, "已有名");
+  assert.equal(e1.title, "高级");
+  assert.deepEqual(e1.duties, ["a", "b"]);
+  const e2 = rt.view().org.employees.find((e) => e.id === "e2");
+  assert.equal(e2.title, "不覆盖");
+  await rt.shutdown();
+});
+
+test("POST /company/op importRosterProfiles registry 缺失返回 E_NO_REGISTRY", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-import-profiles-noreg-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  const res = await op.handler({}, new URL("http://localhost/company/op"), { action: "importRosterProfiles", args: {} });
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "E_NO_REGISTRY");
+  await rt.shutdown();
+});
+
+test("company_hire 含 provider+model 时 startActivation 传 agentOptions", async () => {
+  let capturedRequest = null;
+  let childId = 0;
+  const customSub = {
+    startActivation: async ({ request }) => {
+      capturedRequest = request;
+      return { childId: `c-${++childId}`, dispose: () => {} };
+    },
+    listChildren: async () => [],
+    drainChildren: async () => {},
+    drainDescendants: async () => {},
+  };
+  const customAgents = {
+    create: () => ({ session: { id: "owner-sid" }, followup: () => {}, cancel: () => {}, whenIdle: () => Promise.resolve(), dispose: () => {} }),
+    get: () => ({ session: { id: "c-1" }, followup: () => {}, ctx: { on: () => {} } }),
+  };
+  const dataDir = `/tmp/test-dsh-member-manager-agent-options-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx({ agents: customAgents, subagents: customSub, llm: {} }), { dataDir, config: { fake: false, departments: [{ id: "dev", name: "研发部" }] } });
+  await rt.boot();
+  await rt.tools.find((t) => t.name === "company_hire").execute({ id: "e1", displayName: "模型员工", department: "dev", role: "staff", model: "gpt-4", provider: "openai" }, makeExec("owner"));
+  await rt.tools.find((t) => t.name === "company_order").execute({ type: "code", title: "测试单", detail: "测试" }, makeExec("owner"));
+  const order = rt.view().orders[0];
+  await rt.tools.find((t) => t.name === "company_assign").execute({ orderId: order.id, employeeId: "e1" }, makeExec("owner"));
+  assert.ok(capturedRequest, "startActivation 应被调用");
+  assert.deepEqual(capturedRequest.agentOptions, { provider: "openai", model: "gpt-4" });
   await rt.shutdown();
 });

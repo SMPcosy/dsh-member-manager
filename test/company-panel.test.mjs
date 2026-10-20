@@ -274,8 +274,8 @@ function overviewFixture() {
         { id: "dept-doc", code: "D02", name: "文档组", capacity: 2, employeeCount: 1, managerId: null, accepts: true },
       ],
       employees: [
-        employee({ id: "emp-lead", code: "E0001", displayName: "插件组负责人", department: "dept-plugin", departmentCode: "D01", channel: "M", level: "M2", levelName: "经理", role: "manager", state: "working" }),
-        employee({ id: "emp-dev", code: "E0002", displayName: "插件工程师", department: "dept-plugin", departmentCode: "D01", channel: "P", level: "P4", levelName: "资深工程师" }),
+        employee({ id: "emp-lead", code: "E0001", displayName: "插件组负责人", title: "组长", duties: ["带队", "汇报"], skills: ["react"], model: "m-1", provider: "p-1", department: "dept-plugin", departmentCode: "D01", channel: "M", level: "M2", levelName: "经理", role: "manager", state: "working" }),
+        employee({ id: "emp-dev", code: "E0002", displayName: "插件工程师", title: "工程师", duties: ["a", "b", "c", "d", "e", "f", "g", "h"], skills: [], model: "", provider: "", department: "dept-plugin", departmentCode: "D01", channel: "P", level: "P4", levelName: "资深工程师" }),
         employee({ id: "emp-gone", code: "E0005", displayName: "前插件工程师", department: "dept-plugin", departmentCode: "D01", channel: "P", level: "P2", levelName: "工程师", kind: "temp", state: "fired" }),
         employee({ id: "emp-doc", code: "E0003", displayName: "文档工程师", department: "dept-doc", departmentCode: "D02", channel: "P", level: "P3", levelName: "高级工程师", kind: "temp", state: "cold" }),
         employee({ id: "emp-free", code: "E0004", displayName: "特聘专家", department: null, departmentCode: null, channel: "P", level: "P5", levelName: "技术专家", kind: "shared" }),
@@ -508,9 +508,9 @@ function checkboxInputs(tree) {
   return collectElements(tree, (n) => n.type === "input" && n.props.type === "checkbox");
 }
 
-/** 当前打开的人事详情草稿（editor.rosterDraft），便于断言选择弹层写回 */
+/** 当前打开的人事详情草稿（editor.profileDraft，v5.8 起读写公司化资料） */
 function seed10(made) {
-  return (made.seed[10] && made.seed[10].rosterDraft) || {};
+  return (made.seed[10] && made.seed[10].profileDraft) || {};
 }
 
 /** 打开某员工的人事管理详情（行下方向下展开） */
@@ -663,25 +663,22 @@ test("源码：v5 总架构结构——默认 company、管理层节点、/compa
   // v5.4（docs/21 §4）：四操作合并为「人事管理」详情页（名册资料编辑 + 四操作内嵌）
   assert.match(src, /cpHr: "人事管理"/);
   assert.match(src, /cpHr: "HR management"/);
-  assert.match(src, /cpHrRoster: "名册资料"/);
-  assert.match(src, /cpHrNoRoster: "未关联名册成员/);
-  assert.match(src, /cpHrSave: "保存名册资料"/);
+  assert.match(src, /cpProfile: "公司化资料"/);
+  assert.match(src, /cpSaveProfile: "保存公司化资料"/);
+  assert.match(src, /cpImportProfiles: "导入名册资料"/);
   assert.match(src, /cpHrActions: "人事操作"/);
   assert.match(src, /cpHrPolicy: "会话策略"/);
   assert.match(src, /cpMainChannel: "通道说明"/);
   assert.match(src, /function cpRegistryMembers\(state\)/);
   assert.match(src, /cpRegistryMembers: cpRegistryMembers/);
   assert.match(src, /function hrDetail\(emp\)/);
-  assert.match(src, /function hrRosterBlock\(emp, roster\)/);
+  assert.match(src, /function hrProfileBlock\(emp\)/);
   assert.match(src, /function closeEditor\(\)/);
   assert.match(src, /registryMembers: cpRegistryMembers\(state\)/);
   assert.match(src, /onRegistryRefresh: load/);
   assert.match(src, /setEditor\(hrEmployeeId != null \? \{ kind: "hr", employeeId: hrEmployeeId \} : null\)/);
-  assert.match(src, /post\("renameMember"/);
-  assert.match(src, /post\("setRole"/);
-  assert.match(src, /post\("setSkills"/);
-  assert.match(src, /post\("setModel"/);
-  assert.match(src, /post\("assignGroup"/);
+  assert.match(src, /opPost\("updateEmployeeProfile"/);
+  assert.match(src, /opPost\("importRosterProfiles"/);
 
   // 轮询与写接口
   assert.match(src, /api\("\/company\/overview"\)/);
@@ -763,6 +760,11 @@ test("字典：v5 文案 zh/en 严格对称，中文与 docs/21 §4.3 一致", (
   assert.equal(en.cpMainChannel, "Channels");
   assert.equal(zh.cpHrSave, "保存名册资料");
   assert.equal(en.cpHrSave, "Save roster record");
+  assert.equal(zh.cpProfile, "公司化资料");
+  assert.equal(en.cpProfile, "Company profile");
+  assert.equal(zh.cpSaveProfile, "保存公司化资料");
+  assert.equal(zh.cpImportProfiles, "导入名册资料");
+  assert.ok(zh.cpImportDone.includes("{count}"));
   assert.equal(zh.cpHrTarget, "名册 target");
   assert.equal(zh.cpKindPermanent, "常驻成员 · 独立会话");
   assert.ok(zh.cpKindTemp.length > 0 && zh.cpKindShared.length > 0);
@@ -1647,9 +1649,9 @@ test("总架构工具栏：标题 → 新建部门 → 从名册同步 → 刷�
   const start = labels.indexOf(t("cpNewDept"));
   assert.ok(start >= 0, "工具栏应有新建部门按钮");
   assert.deepEqual(
-    labels.slice(start, start + 3),
-    [t("cpNewDept"), t("cpSyncRoster"), t("cpRefresh")],
-    "按钮顺序应为 新建部门 → 从名册同步 → 刷新",
+    labels.slice(start, start + 4),
+    [t("cpNewDept"), t("cpSyncRoster"), t("cpImportProfiles"), t("cpRefresh")],
+    "按钮顺序应为 新建部门 → 从名册同步 → 导入名册资料 → 刷新",
   );
 
   const text = treeText(tree);
@@ -2101,8 +2103,8 @@ test("人事管理详情：头部 + 基本信息（部门/类型/角色/状态/�
   assert.match(text, /状态 工作中/);
   assert.match(text, /会话策略 常驻成员 · 独立会话/);
   assert.match(text, /通道说明 M M2 经理/);
-  assert.match(text, /名册资料/);
-  assert.match(text, /未关联名册成员/);
+  assert.match(text, /公司化资料/);
+  assert.equal(text.includes("未关联名册成员"), false, "公司化资料不依赖名册条目");
   assert.match(text, /人事操作/);
   assert.ok(buttonByLabel(tree, made.t("cpClose")).length >= 1, "详情头部有关闭按钮");
   for (const action of ["cpChannels", "cpPromote", "cpFire", "cpMove"]) {
@@ -2137,110 +2139,59 @@ test("人事详情：四操作都在详情页内，点击向下展开原表单�
   assert.ok(primaryButton(tree, made.t("cpMove")), "详情页下方应展开调岗表单");
 });
 
-test("名册资料：展示可编辑字段，保存依次 POST renameMember/setRole/setSkills/setModel 并刷新", async () => {
+test("公司化资料：展示可编辑字段，保存单次 POST updateEmployeeProfile 并刷新", async () => {
   const calls = [];
   let refreshed = 0;
   const made = renderCompany({
     deptModal: "dept-plugin",
     modalTab: "members",
     fetch: companyFetch(calls),
-    registryMembers: [
-      {
-        target: "emp-lead",
-        displayName: "负责人",
-        title: "组长",
-        duties: ["带队"],
-        skills: ["react"],
-        model: "m-1",
-        provider: "p-1",
-        aliases: ["老负"],
-        groupId: "g-1",
-        status: "active",
-        isRetired: false,
-      },
-    ],
-    registryGroups: [
-      { id: "g-1", name: "数据组" },
-      { id: "g-2", name: "文档组" },
-    ],
     onRegistryRefresh: async () => {
       refreshed += 1;
     },
   });
-
   openHr(made, "E0001");
   made.react.reset();
   let tree = made.internals.CompanyOrgPanel(made.panelProps);
-  assert.match(treeText(tree), /名册资料/);
-  assert.match(treeText(tree), /名册 target：emp-lead/, "应显示名册 target");
-  assert.equal(inputByPlaceholder(tree, made.t("displayName")).props.value, "负责人");
+  const text = treeText(tree);
+  assert.match(text, /公司化资料/);
+  assert.equal(text.includes(made.t("cpHrSave")), false, "v5.8 不再显示旧「保存名册资料」按钮");
 
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
-  inputByPlaceholder(tree, made.t("displayName")).props.onChange({ target: { value: "新负责人" } });
+  collectElements(tree, (node) => node.type === "input" && node.props.placeholder === made.t("displayName"))[0].props.onChange({ target: { value: "新负责人" } });
 
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
-  inputByPlaceholder(tree, made.t("cpHrAliases")).props.onChange({ target: { value: "老负, 副手" } });
-
-  made.react.reset();
-  tree = made.internals.CompanyOrgPanel(made.panelProps);
-  inputByPlaceholder(tree, made.t("role")).props.onChange({ target: { value: "负责人" } });
+  collectElements(tree, (node) => node.type === "input" && node.props.placeholder === made.t("role"))[0].props.onChange({ target: { value: "负责人" } });
 
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
   buttonByLabel(tree, made.t("cpAddDuty"))[0].onClick();
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
-  const dutyInputs = collectElements(tree, (n) => n.type === "input" && n.props.placeholder === made.t("duties"));
-  assert.equal(dutyInputs.length, 2, "职责按条目单列展示");
-  dutyInputs[1].props.onChange({ target: { value: "汇报" } });
-
-  // v5.5：技能走选择弹层（从名册现有技能出发勾选），模型同样走选择弹层
-  made.react.reset();
-  tree = made.internals.CompanyOrgPanel(made.panelProps);
-  buttonByLabel(tree, made.t("pickSkills"))[0].onClick();
-  made.react.reset();
-  tree = made.internals.CompanyOrgPanel(made.panelProps);
-  const skillsPicker = collectElements(tree, (n) => n.type === made.internals.SkillPicker)[0];
-  assert.ok(skillsPicker, "应渲染技能选择弹层");
-  skillsPicker.props.onToggle("node");
-  assert.equal(seed10(made).skillsText, "react, node", "勾选技能应写回名册草稿");
+  const dutyInputs = collectElements(tree, (node) => node.type === "input" && node.props.placeholder === made.t("duties"));
+  dutyInputs[dutyInputs.length - 1].props.onChange({ target: { value: "汇报" } });
 
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
-  buttonByLabel(tree, made.t("pickModel"))[0].onClick();
-  await tick();
-  made.react.reset();
-  tree = made.internals.CompanyOrgPanel(made.panelProps);
-  const modelPicker = collectElements(tree, (n) => n.type === made.internals.ModelPicker)[0];
-  assert.ok(modelPicker, "应渲染模型选择弹层");
-  modelPicker.props.onPick("p-2", "m-2");
-  assert.equal(seed10(made).model, "m-2");
-  assert.equal(seed10(made).provider, "p-2");
-
-  made.react.reset();
-  tree = made.internals.CompanyOrgPanel(made.panelProps);
-  const save = buttonByLabel(tree, made.t("cpHrSave"))[0];
-  assert.ok(save, "应有保存名册资料按钮");
-  assert.equal(save.disabled, false);
+  const save = buttonByLabel(tree, made.t("cpSaveProfile"))[0];
+  assert.ok(save, "应有保存公司化资料按钮");
   await save.onClick();
   await tick();
 
-  const ops = calls.filter((c) => c.url.endsWith("/op")).map((c) => c.body);
-  assert.deepEqual(
-    ops.map((op) => op.op),
-    ["renameMember", "setRole", "setSkills", "setModel"],
-    "保存名册资料应依次发 4 个 op（名册部门改由调岗表单处理）",
-  );
-  assert.deepEqual(ops[0].args, { target: "emp-lead", patch: { displayName: "新负责人", aliases: ["老负", "副手"] } });
-  assert.deepEqual(ops[1].args, { target: "emp-lead", patch: { title: "负责人", duties: ["带队", "汇报"] } });
-  assert.deepEqual(ops[2].args, { target: "emp-lead", patch: { skills: ["react", "node"] } });
-  assert.deepEqual(ops[3].args, { target: "emp-lead", model: "m-2", provider: "p-2" });
-  assert.equal(refreshed, 1, "保存名册资料后刷新名册");
+  const ops = calls.filter((c) => c.url.endsWith("/company/op")).map((c) => c.body);
+  assert.equal(ops.length, 1, "保存公司化资料只发一次 /company/op");
+  assert.equal(ops[0].action, "updateEmployeeProfile");
+  assert.equal(ops[0].args.employeeId, "emp-lead");
+  assert.equal(ops[0].args.displayName, "新负责人");
+  assert.equal(ops[0].args.title, "负责人");
+  assert.ok(ops[0].args.duties.includes("汇报"), "职责条目应随保存提交");
+  assert.ok(ops[0].args.duties.length <= 8, "职责最多 8 条");
+  assert.equal(refreshed, 1, "保存后刷新名册");
   assert.ok(calls.some((c) => c.url.endsWith("/company/overview")), "保存后应刷新 overview");
   assert.equal(String(made.seed[10].kind), "hr", "保存后详情保持打开");
-  assert.equal(made.seed[14], made.t("cpHrSave"), "保存成功提示");
+  assert.equal(made.seed[14], made.t("cpSaved"), "保存成功提示");
 });
 
 test("调岗表单：名册部门下拉随调岗提交，保存时 POST moveEmployee + assignGroup", async () => {
@@ -2285,19 +2236,12 @@ test("调岗表单：名册部门下拉随调岗提交，保存时 POST moveEmpl
   assert.equal(String(made.seed[10].kind), "hr", "调岗成功后回到人事详情");
 });
 
-test("名册资料：岗位职责按条目单列，最多 8 条且不再要求每行一条", () => {
-  const made = renderCompany({
-    deptModal: "dept-plugin",
-    modalTab: "members",
-    registryMembers: [
-      { target: "emp-dev", displayName: "插件工程师", duties: ["a", "b", "c", "d", "e", "f", "g", "h"], skills: [], aliases: [], groupId: "g-1", status: "active", isRetired: false },
-    ],
-    registryGroups: [{ id: "g-1", name: "数据组" }],
-  });
+test("公司化资料：岗位职责按条目单列，最多 8 条且不再要求每行一条", () => {
+  const made = renderCompany({ deptModal: "dept-plugin", modalTab: "members" });
   openHr(made, "E0002");
   made.react.reset();
   const tree = made.internals.CompanyOrgPanel(made.panelProps);
-  const inputs = collectElements(tree, (n) => n.type === "input" && n.props.placeholder === made.t("duties"));
+  const inputs = collectElements(tree, (node) => node.type === "input" && node.props.placeholder === made.t("duties"));
   assert.equal(inputs.length, 8, "岗位职责应按条目单列");
   assert.equal(buttonByLabel(tree, made.t("cpAddDuty")).length, 0, "达到 8 条后不再显示添加按钮");
   assert.equal(inputByPlaceholder(tree, made.t("dutiesHint")), undefined, "不再有「每行一条」文本框");
@@ -2339,17 +2283,17 @@ test("v5.5 人事详情：技能选择弹层——按钮带已选数量、勾选
   made.react.reset();
   let tree = made.internals.CompanyOrgPanel(made.panelProps);
   const skillsButton = buttonByLabel(tree, made.t("pickSkills"))[0];
-  assert.ok(skillsButton, "名册资料应有「选择技能」按钮");
+  assert.ok(skillsButton, "公司化资料应有「选择技能」按钮");
   skillsButton.onClick();
   assert.equal(String(made.seed[15].kind), "skills", "应打开技能选择弹层");
-  assert.deepEqual(made.seed[15].selected, ["react"], "弹层初值 = 名册现有技能");
+  assert.deepEqual(made.seed[15].selected, ["react"], "弹层初值 = 员工公司化资料现有技能");
 
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
   const picker = collectElements(tree, (n) => n.type === made.internals.SkillPicker)[0];
   assert.ok(picker, "应渲染 SkillPicker");
   picker.props.onToggle("node");
-  assert.equal(seed10(made).skillsText, "react, node", "勾选应写回草稿");
+  assert.equal(seed10(made).skillsText, "react, node", "勾选应写回公司化资料草稿");
   assert.deepEqual(made.seed[15].selected, ["react", "node"]);
 
   made.react.reset();
@@ -2378,7 +2322,7 @@ test("v5.5 人事详情：模型选择弹层——打开拉 /models、选择写�
   made.react.reset();
   let tree = made.internals.CompanyOrgPanel(made.panelProps);
   const modelButton = buttonByLabel(tree, made.t("pickModel"))[0];
-  assert.ok(modelButton, "名册资料应有「选择模型」按钮");
+  assert.ok(modelButton, "公司化资料应有「选择模型」按钮");
   modelButton.onClick();
   await tick();
   assert.equal(String(made.seed[15].kind), "model", "应打开模型选择弹层");
