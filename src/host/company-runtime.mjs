@@ -3,7 +3,7 @@
  * 公司运行时统一入口：组装 compat / employees / dispatcher / scheduler，注册工具与路由。
  */
 
-import { detectCap, isFakeMode, normalizeUsage, buildUserMessage, SOURCE_KIND, makeIdleMessage, buildFakeServices, TOOL_LINES, LINE_TOOLS, safeCtxGet, safeCtxProp } from "./company-compat.mjs";
+import { detectCap, isFakeMode, normalizeUsage, buildUserMessage, SOURCE_KIND, makeIdleMessage, buildFakeServices, TOOL_LINES, LINE_TOOLS, safeCtxGet, safeCtxProp, resolveDefaultLlmOptions } from "./company-compat.mjs";
 import { createEmployeeSessionManager } from "./company-employees.mjs";
 import { createDispatcher } from "./company-dispatcher.mjs";
 import { createScheduler } from "./company-scheduler.mjs";
@@ -508,13 +508,22 @@ async function createOwnerAgent(runtime) {
   const handle = await agents.create({
     sessionId: ownerSessionId,
     // 注意：runtime.provider 是 subagent 后端名（spawn/fork），不是 LLM provider。
-    // 这里必须留空，让宿主的 agent-default-model 插件在请求时补默认 LLM provider/model；
-    // 子会话再沿用 owner 的 options 继承同一默认模型。
-    agentOptions: {},
+    // 插件自建的根级 Agent 不走 GUI 的会话创建路径，拿不到会话默认模型，
+    // 必须显式继承宿主 agent-default-model 的默认 provider/model；子会话再沿用 owner
+    // 的 options 继承同一路由（否则 dsh-agent-loop 会报 has no provider/model）。
+    agentOptions: resolveDefaultLlmOptions(runtime.ctx),
     setup: (agentCtx, agent) => {
       runtime.ownerAgent = agent;
       runtime.ownerSessionId = ownerSessionId;
       runtime.sessionTools.set(ownerSessionId, new Set(TOOL_LINES[TOOL_LINES.OWNER]));
+      // owner 出错要能在 boot.log 看到（默认只有循环内部吞掉）
+      if (agentCtx && typeof agentCtx.on === "function") {
+        agentCtx.on("agent/error", (payload) => {
+          const message = payload?.error?.message || String(payload?.error || "");
+          runtime.lastAgentError = message;
+          logger?.warn?.(`owner agent/error: ${message}`);
+        });
+      }
       // 在 owner 上下文累加 usage
       if (agentCtx && typeof agentCtx.on === "function") {
         agentCtx.on("assistant/message", (payload) => {

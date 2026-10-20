@@ -27,6 +27,8 @@
 - **验收标准归一**：`company_order` 的 `acceptance`/`deps` 传字符串时自动归一为数组，不再被账本层丢弃。
 - **真实宿主激活参数**：`subagents.startActivation` 补上必填的 `signal`（AbortController，会话结束时中止）；初始 prompt 改为消息块数组；`agents.create` 的 `agentOptions` 不再误把 subagent provider 名当 LLM provider（留空走宿主默认模型，子会话继承）。
 - **派工失败回滚**：会话创建失败时订单回滚到 queued（不再留下 running 无 attempt 的僵单），并写 `assign_failed` 审计。
+- **owner/员工模型路由**：插件自建的根级 owner Agent 不经过 GUI 会话创建路径，拿不到会话默认模型；改为启动时读取宿主 `agent-default-model` 服务的默认 provider/model 写入 owner 的 `agentOptions`，子会话继承。此前会导致子会话首轮请求前抛 `agent "..." has no provider/model`，表现为「派工成功但员工毫无动静、costs 为 0」。
+- **员工静默失败可见化**：owner 与每个员工会话注册 `agent/error` 监听，把错误写进 boot.log（此前 agent loop 会吞掉首轮错误，看起来像卡住）。
 
 ### 保留
 

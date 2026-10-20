@@ -9,6 +9,7 @@ import { restrictTools, guardTools, LINE_TOOLS, TOOL_LINES, SOURCE_KIND, normali
 export function createEmployeeSessionManager({ runtime, logger }) {
   const sessions = new Map();
   const trackedAgents = new WeakSet();
+  const errorTracked = new Set();
   let seq = 0;
 
   function allowedLine(role) {
@@ -149,6 +150,14 @@ export function createEmployeeSessionManager({ runtime, logger }) {
         clearInterval(timer);
         if (trackedAgents.has(agent)) return;
         trackedAgents.add(agent);
+        if (!errorTracked.has(sessionId)) {
+          errorTracked.add(sessionId);
+          agent.ctx.on("agent/error", (payload) => {
+            const message = payload?.error?.message || String(payload?.error || "");
+            runtime.lastAgentError = message;
+            logger?.warn?.(`employee agent/error (${employee.id}): ${message}`);
+          });
+        }
         agent.ctx.on("assistant/message", (payload) => {
           const usage = payload?.usage || payload?.payload?.usage;
           if (!usage) return;

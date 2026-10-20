@@ -54,6 +54,27 @@ export function safeCtxGet(ctx, name, fallback = undefined) {
   }
 }
 
+/**
+ * 读取宿主默认 LLM 路由（agent-default-model 服务）。
+ * 公司运行时的 owner/员工都是插件自己创建的根级/子级 Agent，不经过 GUI 会话创建路径，
+ * 因此拿不到会话默认模型；必须显式把默认 provider/model 写进 owner 的 agentOptions，
+ * 子会话再通过 resolveChildAgentOptions 继承。读不到时返回空对象（交给宿主兜底）。
+ */
+export function resolveDefaultLlmOptions(ctx) {
+  try {
+    const svc = safeCtxGet(ctx, "agentDefaultModel");
+    const selection = svc && typeof svc.currentSelection === "function" ? svc.currentSelection() : undefined;
+    if (selection && typeof selection.provider === "string" && typeof selection.model === "string") {
+      return {
+        provider: selection.provider,
+        model: selection.model,
+        ...(selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort }),
+      };
+    }
+  } catch {}
+  return {};
+}
+
 export function detectCap(ctx) {
   const hasGet = typeof safeCtxProp(ctx, "get") === "function";
   return {

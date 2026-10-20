@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createCompanyRuntime, TOOL_NAMES } from "../src/host/company-runtime.mjs";
+import { resolveDefaultLlmOptions } from "../src/host/company-compat.mjs";
 
 function makeCtx(opts = {}) {
   return {
@@ -178,4 +179,17 @@ test("fake 模式下 assistant/message 会累加到 costs", async () => {
   assert.ok(costs.tokens >= 5, "costs.tokens 应累加 assistant/message 的用量");
   assert.ok(costs.requests >= 1, "costs.requests 应计数");
   await rt.shutdown();
+});
+
+test("resolveDefaultLlmOptions 读取宿主 agent-default-model 默认路由", () => {
+  const ctx = makeCtx({ agentDefaultModel: { currentSelection: () => ({ provider: "tokenrhythm", model: "deepseek-v4.1-flash-1017", reasoningEffort: "max" }) } });
+  assert.deepEqual(resolveDefaultLlmOptions(ctx), { provider: "tokenrhythm", model: "deepseek-v4.1-flash-1017", reasoningEffort: "max" });
+});
+
+test("resolveDefaultLlmOptions 服务缺失或异常时返回空对象（交给宿主兜底）", () => {
+  assert.deepEqual(resolveDefaultLlmOptions(makeCtx()), {});
+  const broken = makeCtx({ agentDefaultModel: { currentSelection() { throw new Error("boom"); } } });
+  assert.deepEqual(resolveDefaultLlmOptions(broken), {});
+  const partial = makeCtx({ agentDefaultModel: { currentSelection: () => ({ provider: "only-provider" }) } });
+  assert.deepEqual(resolveDefaultLlmOptions(partial), {});
 });
