@@ -6,7 +6,7 @@
 
 **一个管理团队组织架构、中文显示名、岗位职责、技能，以及按成员模型覆盖的 DSH 插件。**
 
-`dsh-plugin-member-manager` · **v0.1.1** · License: MIT
+`dsh-plugin-member-manager` · **v0.3.0** · License: MIT
 
 点击下方标题可查看 **中文** 或 **English**。  
 Click a heading below to view **English** or **中文** .
@@ -28,16 +28,66 @@ Click a heading below to view **English** or **中文** .
 - 数据落盘于：`~/.dsh/storages/member-manager/registry.json`（可配置）。
 - 提供**宿主端工具**（Agent 可调用）与 **Web 管理面板**（人可操作）。
 
+## v0.3.0 更新要点
+
+- 🎯 **只显示当前任务**：组织架构图从「全团队」改为**任务作用域**——一个 root 会话就是一个任务，图上只出现这个任务真正需要的参与者（大总管 + `parentSession` 指向它的成员），不再把整个名册都铺出来。
+- 🔽 **任务下拉切换**：右栏 tab 顶部新增任务选择器（由 `GET /orgmap` 返回的 `tasks[]` 驱动，带运行中标记与人数），切任务即换图；没有任何任务时显示空态并禁用下拉。
+- 🧭 布局不变：仍是并联横向 / 串联纵向的三层视图（大总管 → 分组色块 → 组内成员），工作区卡片、结构线与动态引导线保留；任务内成员的 token / 用时只统计该任务各会话的用量。
+- 🔌 `GET /orgmap` 契约升级到 `version: 2`：新增 `tasks` / `task` / `lead` / `groups` / `members` / `dispatch` / `dependency` / `totals`，支持 `?task=<rootSessionId>` 指定任务；未指定或指定失效时回落到最近活跃任务。
+- 🧪 测试 228 → **230**（host：任务作用域与 `?task=` 回退；client-bundle：任务下拉 / 切换 / 空态）。
+
+## v0.2.4 更新要点
+
+- 🪟 **去掉图表自带的窗口框**：删掉标题栏、折叠、⇤/⇥、刷新按钮与外框，组织架构图直接铺在右侧边栏 tab 里，宽度随右栏变化，内部横向滚动。
+- 🧱 **并联—横向 / 串联—纵向**：同一层级的兄弟横向并排（并联），父子层级之间用纵向正交总线连接（串联）。三层结构为「大总管 → 分组色块（横向并排）→ 组内成员（横向并排）」。
+- 🎯 首次渲染自动把视口横向居中到大总管；任务分发 / 依赖的动态引导线改走目标卡片外侧过渡带，不再压住分组色块和卡片。
+- 🧪 测试保持 **228** 全绿。
+
+## v0.2.3 更新要点
+
+- 🧭 **组织架构图改为右侧边栏常驻 tab**：不再用浮在页面上的 fixed 覆盖层，而是注册为 DSH 右侧边栏（`sidebar.right`）的一个 tab，随右栏开合 / 分屏 / 全屏；关掉后可从会话头部的「组织架构」按钮重新打开。
+- 🌳 层级树与工作区卡片、动态引导线保持不变；窄面板里动态线改走左侧沟槽的括号式折线，避免贴边糊成一条竖线。
+- 🧹 移除拖拽、磁吸、浮动位置记忆等浮层遗留交互，只保留折叠。
+- 🧪 测试 225 → **228**（client-bundle 新增 tab 注册 / 降级 / 内嵌三条）。
+
+## v0.2.2 更新要点
+
+- 组织架构图默认常驻**右侧边栏**，改为「大总管 → 分组色块 → 组内成员」的**层级树**布局，正交连接线；工作区卡片与动态引导线保留。
+- 拖动不再自由漂浮，松手按落点吸附左右两侧；⇤/⇥ 可手动切换。
+
+## v0.2.1 更新要点
+
+- 🛡️ **名册自动备份**：每次写入名册后防抖 1.5s 自动快照，启动时再补一份；按「最近 N 份 + 最近 M 天每天一份」轮转，升级/回滚/误操作都能一键恢复（恢复前先自动备份当前状态）。
+- ⬆️ **分阶段自动更新**：`check → stage → apply → rollback` 四段式。下载解到 `{dataDir}/updates/<version>/` 并记 `pending`；**面板不会在线应用**，退出 DSH 后运行 `node scripts/apply-pending.mjs ... --yes` 才替换；遇到 lnk/junction 安装、包名不符、staged 内容非法等 5 道闸门直接拒绝并给出可操作提示，失败自动回滚。
+- 💬 **一句话建组**：面板「一句话建组」或工具 `member_group_from_text`，用自然语言描述小组与成员（示例已内置），先给**预览**（不落盘），确认后才创建小组并登记成员。
+- 🗺 **组织架构图悬浮层**：把名册层级固化成常驻浮层，独立显示在 DSH 主界面（不占插槽、不进页面路由）。每个成员一张工作区卡片（名字、模型、任务简介、token 用量、用时）；任务活动时按「Lead 分发 / 任务依赖」画动态流动引导线；浮层可拖动，拖到窗口左右边缘 48px 内自动磁吸，也可点 ⇤ / ⇥ 手动吸附，折叠/展开与位置写入 localStorage。
+- 📊 **可视化工作流面板**：新增「工作流」页签，显示每个成员的状态、当前工作包、token 消耗（入/出/缓存命中共）、用时、请求数，以及任务板进度；数据全部旁路采集，不阻塞会话。
+- 🔧 工具从 12 个增至 **16 个**，HTTP 路由 6 → **10** 条（新增 `GET /orgmap`），测试 134 → **225**。
+
+---
+
+## v0.2.0 更新要点
+
+- 备份/分阶段更新/一句话建组/工作流面板首次落地；安全红线：不在 DSH 运行中替换自身（`applyMode=offline-script`）。
+
+## v0.1.2 更新要点
+
+- 🖥️ **编辑弹窗重排**：一屏放下（技能 / 模型并排两列、职责框收紧），「选择技能 / 选择模型」改为紧贴标题的高亮按钮。
+- 🧠 **模型改为弹层选择**：可搜索、按 provider 分组、显示上下文窗口、单选 + 「使用默认（清除覆盖）」，与技能弹层同一套交互。
+- 🛡️ **宿主更健壮**：HTTP 路由统一兜底（写盘失败返回 500 + `INTERNAL_ERROR`，不再伪装成 400），`/health` 校验 method。
+- ⌨️ **交互修复**：弹层开着时 Esc 只关弹层；保存中不响应遮罩关闭；显示名为空时禁用保存；保存部分失败会自动回读真实状态。
+- 🧹 清理未使用的文案与样式键；测试从 130 增至 **134**，并新增静态交叉审计脚本。
+
 ---
 
 ## 截图
 
 
-<img width="2186" height="1640" alt="DSH Member Manager01" src="https://github.com/user-attachments/assets/12b22bc4-97dc-41a7-a04c-3e6d1af3c5e6" />
+<img width="2196" height="1640" alt="DSH Member Manager01" src="https://github.com/user-attachments/assets/12b22bc4-97dc-41a7-a04c-3e6d1af3c5e6" />
 
-<img width="2186" height="1640" alt="DSH Member Manager07" src="https://github.com/user-attachments/assets/d9858133-c497-4640-9919-0aa9696ff2c7" />
+<img width="2196" height="1640" alt="DSH Member Manager07" src="https://github.com/user-attachments/assets/d9858133-c497-4640-9919-0aa9696ff2c7" />
 
-<img width="2186" height="1640" alt="DSH Member Manager02" src="https://github.com/user-attachments/assets/7ac1a139-412d-4922-b599-a2e59c583bf9" />
+<img width="2196" height="1640" alt="DSH Member Manager02" src="https://github.com/user-attachments/assets/7ac1a139-412d-4922-b599-a2e59c583bf9" />
 
 ---
 ## 功能特性
@@ -50,18 +100,18 @@ Click a heading below to view **English** or **中文** .
 
 - 🔄 **停用 / 恢复**：软删除，保留历史记录，随时恢复。
 
-<img width="2186" height="1640" alt="DSH Member Manager03" src="https://github.com/user-attachments/assets/c6a603a8-b4fa-4495-a785-0fb65a66ae90" />
+<img width="2196" height="1640" alt="DSH Member Manager03" src="https://github.com/user-attachments/assets/c6a603a8-b4fa-4495-a785-0fb65a66ae90" />
 
 - ⭐ **技能赋予**：从本机技能目录选择（可搜索多选），也支持自定义标签。
 
-<img width="2186" height="1640" alt="DSH Member Manager05" src="https://github.com/user-attachments/assets/d544aa19-6aae-4186-9560-fd9e56193696" />
+<img width="2196" height="1640" alt="DSH Member Manager05" src="https://github.com/user-attachments/assets/d544aa19-6aae-4186-9560-fd9e56193696" />
 
-<img width="2186" height="1640" alt="DSH Member Manager06" src="https://github.com/user-attachments/assets/78bd87d1-8922-4dd2-8fde-d6457ac73dc6" />
+<img width="2196" height="1640" alt="DSH Member Manager06" src="https://github.com/user-attachments/assets/78bd87d1-8922-4dd2-8fde-d6457ac73dc6" />
 
 
 - 🧠 **按成员模型覆盖**：每个成员可单独指定 `provider/model`，下一次请求即生效；清空即恢复默认。这是通过官方 `agent/request` 水位接缝实现，**真生效**。
 
-<img width="2186" height="1640" alt="DSH Member Manager04" src="https://github.com/user-attachments/assets/b40fe472-cf54-4a8e-b27c-f17cae4c41b6" />
+<img width="2196" height="1640" alt="DSH Member Manager04" src="https://github.com/user-attachments/assets/b40fe472-cf54-4a8e-b27c-f17cae4c41b6" />
 
 
 - 📊 **Web 面板**：组织架构、行内编辑、未登记成员一键登记、诊断信息。
@@ -118,10 +168,15 @@ dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 | `registryFile`    | `{dataDir}/registry.json`        | 名册文件路径                            |
 | `scanLocalSkills` | `true`                           | 是否直接扫盘补充本地技能目录（`~/.dsh/skills` 等） |
 | `extraSkillRoots` | `[]`                             | 追加的技能扫描根目录（绝对路径数组）                |
+| `backups`         | `{enabled:true, keep:20, dailyKeep:7}` | 名册自动备份：保留最近 keep 份 ∪ 最近 dailyKeep 个实际日期每天最后一份 ∪ 兜底 3 份 |
+| `update`          | `{enabled:true, checkOnBoot:false, autoStage:false, allowOnlineApply:false, registryUrl, installDir}` | 分阶段更新：检查/暂存/离线应用；`installDir` 一般不用填 |
+| `workflow`        | `{enabled:true, persistMs:5000, retentionHours:6, tasksPollMs:3000}` | 可视化工作流采集：落盘间隔、保留时长、任务板轮询 |
+
+> 自动更新默认**不**在启动时自动检查（`checkOnBoot:false`），且**永远不会**在进程运行中替换自身：面板的「应用」会拒绝并给出命令，需退出 DSH 后在终端运行 `node scripts/apply-pending.mjs --data-dir ... --install-dir ... --yes`。只有显式设置 `allowOnlineApply:true` 才允许在线应用（不推荐）。
 
 ---
 
-## 工具一览（12 个）
+## 工具一览（16 个）
 
 | 工具                  | 作用                                   |
 | ------------------- | ------------------------------------ |
@@ -137,6 +192,10 @@ dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 | `member_diagnose`   | 诊断运行状态（目录可写、服务可用、路由注册、缓存与告警）         |
 | `skill_list`        | 列出本机已安装技能（名称 + 描述 + 来源 + 是否可被模型调用）   |
 | `model_list`        | 列出可用 provider 与模型目录                  |
+| `member_backup`     | 名册备份：status / list / backup / restore / prune / export |
+| `member_group_from_text` | 一句话建组：自然语言 → 预览 → 确认创建（默认只预览） |
+| `member_workflow`   | 读取可视化工作流的聚合摘要（成员状态 / token / 用时 / 任务） |
+| `member_update`     | 分阶段更新：status / check / stage / apply / rollback |
 
 ---
 
@@ -148,7 +207,7 @@ dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 | `sidebar.panellist` | 侧栏「👥 成员管理」图标   |
 | `main`              | 独立主页面（keyed 面板） |
 
-后端 HTTP 路由：`/api/dsh-plugin-member-manager/{state, op, skills, models, overrides, health}`。
+后端 HTTP 路由：`/api/dsh-plugin-member-manager/{state, op, skills, models, overrides, health, backups, update, workflow}`。
 
 ---
 
@@ -158,7 +217,7 @@ dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 # 语法校验
 npm run check
 
-# 运行全部 130 个单元/集成测试
+# 运行全部 225 个单元/集成测试
 npm test
 ```
 
@@ -190,15 +249,65 @@ MIT
 - **Registry file**: `~/.dsh/storages/member-manager/registry.json` (configurable).
 - Ships with **host tools** (Agent‑callable) and a **Web management panel** (human‑operable).
 
+## v0.3.0 highlights
+
+- 🎯 **Current task only**: the org chart is now **task-scoped** — one root session is one task, and the chart shows only that task's participants (the lead plus members whose `parentSession` points at it), instead of the whole roster.
+- 🔽 **Task switcher**: a selector at the top of the sidebar tab is driven by `tasks[]` from `GET /orgmap` (with a running marker and member count); switching re-renders the chart. With no tasks it shows an empty state and disables the picker.
+- 🧭 Layout is unchanged: the three-level parallel-across / serial-down view (lead → group chips → members) keeps its workspace cards, structural lines and animated guide lines; token/elapsed numbers count only that task's sessions.
+- 🔌 `GET /orgmap` is now contract `version: 2` with `tasks` / `task` / `lead` / `groups` / `members` / `dispatch` / `dependency` / `totals`, and accepts `?task=<rootSessionId>`; an unknown/absent id falls back to the most recently active task.
+- 🧪 Tests 228 → **230** (host: task scoping and `?task=` fallback; client-bundle: picker / switching / empty state).
+
+## v0.2.4 highlights
+
+- 🪟 **No more chart chrome**: the panel no longer renders its own window frame, title bar, collapse, ⇤/⇥ or refresh buttons — the chart fills the right-sidebar tab, follows the rail width and scrolls horizontally inside.
+- 🧱 **Parallel across, serial down**: siblings of one level line up horizontally while parent→child relations run vertically through orthogonal buses. Three levels — lead → group chips (side by side) → members (side by side).
+- 🎯 The viewport is centered on the lead on first paint; task dispatch / dependency edges route through the gap beside the target card so they no longer cross group chips or cards.
+- 🧪 Tests stay at **228**, all green.
+
+## v0.2.3 highlights
+
+- 🧭 **The org chart now lives in the right sidebar as a persistent tab** instead of a fixed overlay on `document.body`. It follows the sidebar's open/split/fullscreen states; after closing, reopen it from the "Org chart" button in the conversation header.
+- 🌳 The hierarchical tree, member cards and animated guide lines are unchanged; in the narrow panel the dynamic links now use bracket-style polylines in the left gutter so they no longer collapse into an edge line.
+- 🧹 Floating-layer leftovers (drag, snap-to-side, placement memory) are gone; only collapse remains.
+- 🧪 Tests 225 → **228** (client-bundle: tab registration / graceful degradation / embedded mount).
+
+## v0.2.2 highlights
+
+- The org chart now docks to the **right sidebar** by default and renders a **hierarchical tree** (lead → colored group nodes → members) with orthogonal connectors; member cards and animated guide lines are kept.
+- Dragging no longer floats freely: on release it snaps to the nearest side; use ⇤/⇥ to switch manually.
+
+## v0.2.1 highlights
+
+- 🛡️ **Automatic roster backups**: a debounced snapshot ~1.5s after every registry write, plus one at boot; rotated by "latest N copies + one per day for the latest M days". Restore any snapshot in one click (the current state is backed up first).
+- ⬆️ **Staged self-update**: `check → stage → apply → rollback`. The tarball is unpacked into `{dataDir}/updates/<version>/` and recorded as *pending*; the panel **never** applies in-process — quit DSH and run `node scripts/apply-pending.mjs ... --yes`. Five safety gates (junction/link install, package-name mismatch, invalid staged payload, ...) refuse with actionable messages, and a failed apply rolls back automatically.
+- 💬 **One-sentence group creation**: describe the group and its members in natural language (built-in example); you get a **preview** first, and nothing is written until you confirm.
+- 🗺 **Org-chart overlay**: the roster hierarchy becomes a always-on floating layer rendered straight onto the page (no slot, no route). Each member gets a workspace card (name, model, current task, token usage, elapsed time); active work draws animated flow lines for Lead dispatch and task dependencies; drag it anywhere, snap to either side within 48px, collapse, and the placement persists in `localStorage`.
+- 📊 **Visual workflow panel**: a new "Workflow" tab shows each member's status, current work package, token usage (input/output/cache hit), elapsed time, request count, and the task board; everything is collected off the hot path and never blocks a session.
+- 🔧 Tools 12 → **16**, HTTP routes 6 → **10** (`GET /orgmap`), tests 134 → **225**.
+
+---
+
+## v0.2.0 highlights
+
+- Backups, staged updates, one-sentence group creation and the workflow panel landed; hard rule: never replace the plugin while DSH is running (`applyMode=offline-script`).
+
+## v0.1.2 highlights
+
+- 🖥️ **Edit modal reworked** to fit one screen (skills / model side by side, shorter duties box); "Pick skills / Pick model" are highlighted buttons right next to their section titles.
+- 🧠 **Model picking is now a modal**: searchable, grouped by provider, shows context window, single-select radio + "Use default (clear override)" — same interaction as the skills picker.
+- 🛡️ **More robust host**: all HTTP routes are guarded (disk failures now return 500 + `INTERNAL_ERROR` instead of a misleading 400); `/health` validates the method.
+- ⌨️ **Interaction fixes**: Esc closes the sub-picker first; overlay click is ignored while saving; Save is disabled until a display name is entered; a partially failed save re-reads the real state.
+- 🧹 Dead i18n/style keys removed; tests grew from 130 to **134**, plus a new static cross-audit script.
+
 ---
 
 ## Screenshots
 
-<img width="2186" height="1640" alt="DSH Member Manager01" src="https://github.com/user-attachments/assets/12b22bc4-97dc-41a7-a04c-3e6d1af3c5e6" />
+<img width="2196" height="1640" alt="DSH Member Manager01" src="https://github.com/user-attachments/assets/12b22bc4-97dc-41a7-a04c-3e6d1af3c5e6" />
 
-<img width="2186" height="1640" alt="DSH Member Manager07" src="https://github.com/user-attachments/assets/d9858133-c497-4640-9919-0aa9696ff2c7" />
+<img width="2196" height="1640" alt="DSH Member Manager07" src="https://github.com/user-attachments/assets/d9858133-c497-4640-9919-0aa9696ff2c7" />
 
-<img width="2186" height="1640" alt="DSH Member Manager02" src="https://github.com/user-attachments/assets/7ac1a139-412d-4922-b599-a2e59c583bf9" />
+<img width="2196" height="1640" alt="DSH Member Manager02" src="https://github.com/user-attachments/assets/7ac1a139-412d-4922-b599-a2e59c583bf9" />
 
 ---
 ## Features
@@ -212,17 +321,17 @@ MIT
 
 - 🔄 **Retire / restore**: soft deletes keep history; restore anytime.
 
-<img width="2186" height="1640" alt="DSH Member Manager03" src="https://github.com/user-attachments/assets/c6a603a8-b4fa-4495-a785-0fb65a66ae90" />
+<img width="2196" height="1640" alt="DSH Member Manager03" src="https://github.com/user-attachments/assets/c6a603a8-b4fa-4495-a785-0fb65a66ae90" />
 
 - ⭐ **Skills**: pick from the local skill catalog (searchable multi‑select), or type custom tags.
 
-<img width="2186" height="1640" alt="DSH Member Manager05" src="https://github.com/user-attachments/assets/d544aa19-6aae-4186-9560-fd9e56193696" />
+<img width="2196" height="1640" alt="DSH Member Manager05" src="https://github.com/user-attachments/assets/d544aa19-6aae-4186-9560-fd9e56193696" />
 
-<img width="2186" height="1640" alt="DSH Member Manager06" src="https://github.com/user-attachments/assets/78bd87d1-8922-4dd2-8fde-d6457ac73dc6" />
+<img width="2196" height="1640" alt="DSH Member Manager06" src="https://github.com/user-attachments/assets/78bd87d1-8922-4dd2-8fde-d6457ac73dc6" />
 
 - 🧠 **Per‑member model override**: set a `provider/model` for each member that takes effect on the next request; clearing reverts to default. Implemented through the official `agent/request` waterfall seam — it **really works**.
 
-<img width="2186" height="1640" alt="DSH Member Manager04" src="https://github.com/user-attachments/assets/b40fe472-cf54-4a8e-b27c-f17cae4c41b6" />
+<img width="2196" height="1640" alt="DSH Member Manager04" src="https://github.com/user-attachments/assets/b40fe472-cf54-4a8e-b27c-f17cae4c41b6" />
 
 
 - 📊 **Web panel**: org‑chart view, inline editing, one‑click registration of unregistered members, diagnostics.
@@ -277,10 +386,15 @@ All options are optional (omitted ⇒ default):
 | `registryFile`    | `{dataDir}/registry.json`        | Roster file path                                                          |
 | `scanLocalSkills` | `true`                           | Also scan disk to complete the local skill catalog (`~/.dsh/skills` etc.) |
 | `extraSkillRoots` | `[]`                             | Extra skill scan roots (array of absolute paths)                          |
+| `backups`         | `{enabled:true, keep:20, dailyKeep:7}` | Automatic roster backups: `keep` copies, `dailyKeep` days            |
+| `update`          | `{enabled:true, checkOnBoot:false, autoStage:false, allowOnlineApply:false, registryUrl, installDir}` | Staged update: check / stage / offline apply |
+| `workflow`        | `{enabled:true, persistMs:5000, retentionHours:6, tasksPollMs:3000}` | Visual workflow collection: persist interval, retention, task poll |
+
+> Auto-update does **not** check on boot by default (`checkOnBoot:false`) and **never** replaces the running plugin in-process: the panel's Apply refuses with a command; quit DSH and run `node scripts/apply-pending.mjs --data-dir ... --install-dir ... --yes`. Only `allowOnlineApply:true` (not recommended) enables in-process apply.
 
 ---
 
-## Tools (12)
+## Tools (16)
 
 | Tool                | Purpose                                                                               |
 | ------------------- | ------------------------------------------------------------------------------------- |
@@ -296,6 +410,10 @@ All options are optional (omitted ⇒ default):
 | `member_diagnose`   | Diagnose runtime health (dir writable, services, routes, cache, warnings)             |
 | `skill_list`        | List installed skills (name + description + source + model‑invocable)                 |
 | `model_list`        | List available providers and their model catalogs                                     |
+| `member_backup`     | Roster backups: status / list / backup / restore / prune / export                     |
+| `member_group_from_text` | One-sentence group: NL → preview → confirm (preview is the default)               |
+| `member_workflow`   | Aggregated workflow summary (member status / tokens / elapsed / tasks)                |
+| `member_update`     | Staged update: status / check / stage / apply / rollback                              |
 
 ---
 
@@ -307,7 +425,7 @@ All options are optional (omitted ⇒ default):
 | `sidebar.panellist` | "👥 Member Manager" sidebar icon    |
 | `main`              | Standalone main page (keyed panel)  |
 
-Backend HTTP routes: `/api/dsh-plugin-member-manager/{state, op, skills, models, overrides, health}`.
+Backend HTTP routes: `/api/dsh-plugin-member-manager/{state, op, skills, models, overrides, health, backups, update, workflow}`.
 
 ---
 
@@ -317,7 +435,7 @@ Backend HTTP routes: `/api/dsh-plugin-member-manager/{state, op, skills, models,
 # Syntax check
 npm run check
 
-# Run all 130 unit / integration tests
+# Run all 225 unit / integration tests
 npm test
 ```
 

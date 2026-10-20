@@ -1,9 +1,16 @@
 {
   "name": "dsh-plugin-member-manager",
-  "version": "0.1.1",
+  "version": "0.3.0",
   "type": "module",
-  "description": "DSH 成员管理插件：团队组织架构、成员增删、重命名（中文显示名）、岗位职责与技能赋予。宿主端工具 + Web GUI 面板。",
-  "keywords": ["deepseek-harness", "dsh", "dsh-plugin", "agent-team", "member", "org-chart"],
+  "description": "Manage the DSH member roster from a local registry overlay: org chart, roles, skills, model overrides, backups, staged updates, one-sentence group creation, a visual workflow panel and a draggable org-chart overlay.",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "agent-team",
+    "member",
+    "org-chart"
+  ],
   "license": "MIT",
   "icon": "./icon.png",
   "repository": {
@@ -23,8 +30,10 @@
     "locale",
     "cordis.patch.yml",
     "docs",
+    "demo",
     "test",
-    "icon.png"
+    "icon.png",
+    "scripts"
   ],
   "dsh": {
     "bundle": {
@@ -38,11 +47,11 @@
       "platform": "web"
     }
   },
-  "scripts": {
-    "test": "node --test test/registry-core.test.mjs test/store-and-service.test.mjs test/host-plugin.test.mjs test/client-bundle.test.mjs",
-    "check": "node --check lib/index.js && node --check lib/client.js && node --check src/shared/registry-core.mjs && node --check src/shared/registry-store.mjs && node --check src/shared/team-service.mjs"
-  },
   "engines": {
     "node": ">=22.19"
+  },
+  "scripts": {
+    "test": "node --test test/registry-core.test.mjs test/store-and-service.test.mjs test/host-plugin.test.mjs test/client-bundle.test.mjs test/group-brief.test.mjs test/backups.test.mjs test/workflow.test.mjs test/updater.test.mjs",
+    "check": "node --check lib/index.js && node --check lib/client.js && node --check src/shared/registry-core.mjs && node --check src/shared/registry-store.mjs && node --check src/shared/team-service.mjs && node --check src/shared/group-brief.mjs && node --check src/shared/backups.mjs && node --check src/host/workflow.mjs && node --check src/host/updater.mjs && node --check scripts/apply-pending.mjs"
   }
 }

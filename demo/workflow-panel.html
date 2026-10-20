@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>成员管理 · 可视化工作流面板（独立演示）</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --line: #e6e8ee;
+    --text: #1f2430;
+    --sub: #6b7280;
+    --accent: #2f6feb;
+    --green: #16a34a;
+    --amber: #d97706;
+    --gray: #9ca3af;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 22px 20px 40px; }
+  .demo-banner {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    background: #fff8e6; border: 1px solid #f5dfa7; color: #8a5a00;
+    padding: 9px 12px; border-radius: 8px; margin-bottom: 16px; font-size: 12px;
+  }
+  .demo-banner b { font-weight: 600; }
+  .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0 0 4px; font-weight: 600; }
+  .sub { color: var(--sub); font-size: 12px; }
+  .actions { display: flex; gap: 8px; align-items: center; }
+  .btn {
+    border: 1px solid var(--line); background: #fff; color: var(--text);
+    padding: 6px 11px; border-radius: 7px; font-size: 12px; cursor: pointer;
+  }
+  .btn:hover { border-color: #c9ced9; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--sub); }
+  .stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 14px; }
+  .chip {
+    background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+    padding: 5px 12px; font-size: 12px; color: var(--sub);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .chip b { color: var(--text); font-size: 13px; font-family: var(--mono); font-weight: 600; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .card + .card { margin-top: 14px; }
+  .card-head { padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .card-title { font-weight: 600; font-size: 13px; }
+  .card-desc { color: var(--sub); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid #f0f1f5; vertical-align: middle; }
+  th { font-size: 11px; font-weight: 600; color: var(--sub); background: #fafbfc; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  .who { display: flex; align-items: center; gap: 8px; min-width: 150px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--gray); }
+  .dot.running { background: var(--green); box-shadow: 0 0 0 3px rgba(22,163,74,.14); animation: pulse 1.6s infinite; }
+  .dot.idle { background: var(--amber); }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 2px rgba(22,163,74,.10); } 50% { box-shadow: 0 0 0 5px rgba(22,163,74,.02); } }
+  .name { font-weight: 600; }
+  .target { color: var(--sub); font-family: var(--mono); font-size: 11px; }
+  .role { color: var(--sub); font-size: 12px; }
+  .work { min-width: 210px; }
+  .work-subject { font-size: 12px; }
+  .badge {
+    display: inline-block; padding: 0 6px; border-radius: 5px; font-size: 11px;
+    border: 1px solid var(--line); color: var(--sub); background: #fafbfc; margin-right: 6px;
+  }
+  .badge.in_progress { color: #1d4ed8; border-color: #c7d7fe; background: #eef4ff; }
+  .badge.completed { color: #15803d; border-color: #bbe7c8; background: #effaf2; }
+  .badge.pending { color: #92400e; border-color: #f3ddb0; background: #fdf6e7; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .model { font-family: var(--mono); font-size: 11px; color: var(--sub); }
+  .num { text-align: right; white-space: nowrap; }
+  .totals td { background: #fafbfc; font-weight: 600; }
+  .tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; padding: 12px; }
+  .task { border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; background: #fff; }
+  .task-top { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin-bottom: 4px; }
+  .task-subject { font-size: 12px; font-weight: 600; }
+  .task-meta { color: var(--sub); font-size: 11px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .foot { color: var(--sub); font-size: 11px; margin-top: 14px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .kbd { font-family: var(--mono); background: #f1f3f7; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+  @media (max-width: 820px) { .hide-sm { display: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="demo-banner">
+    <b>独立演示 · mock 数据</b>
+    <span>此页不连接 DSH，也不依赖插件构建，仅用于预览「可视化工作流」面板的形态与交互；数字会自行跳动。</span>
+  </div>
+
+  <div class="head">
+    <div>
+      <h1>成员管理 · 工作流</h1>
+      <div class="sub">成员状态 / 当前工作包 / token 消耗 / 用时 —— 旁路采集，不阻塞会话</div>
+    </div>
+    <div class="actions">
+      <label class="toggle"><input type="checkbox" id="auto" checked /> 自动刷新</label>
+      <button class="btn" id="pauseBtn">暂停</button>
+      <button class="btn primary" id="refreshBtn">刷新</button>
+    </div>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">成员工作状态</div>
+        <div class="card-desc">状态点：<span class="kbd">running</span> / <span class="kbd">idle</span> / <span class="kbd">unknown</span>；用时为观测累计，非精确开工时间</div>
+      </div>
+      <div class="card-desc" id="sampleAt"></div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>成员</th>
+          <th class="hide-sm">岗位</th>
+          <th>当前工作包</th>
+          <th class="hide-sm">模型</th>
+          <th class="num">token 入</th>
+          <th class="num">token 出</th>
+          <th class="num hide-sm">请求</th>
+          <th class="num">用时</th>
+        </tr>
+      </thead>
+      <tbody id="members"></tbody>
+      <tfoot id="totals"></tfoot>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">任务板</div>
+        <div class="card-desc">来自官方 agent-team 的任务投影；工作包用时由插件观测推算</div>
+      </div>
+      <div class="card-desc" id="taskCounts"></div>
+    </div>
+    <div class="tasks" id="tasks"></div>
+  </div>
+
+  <div class="foot">
+    <span>演示口径：缓存命中率 = 缓存读 /（输入 + 缓存读）</span>
+    <span id="tickInfo">采样于 —</span>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var NOW = Date.now();
+  var startedAt = NOW - 1000 * 60 * 47;
+
+  var members = [
+    { target: "plugin-arch", displayName: "插件架构", title: "技术负责人 · 架构拆解", group: "插件组", model: "deepseek-v4-pro-0813", provider: "tokenrhythm", status: "running", activeMs: 1000 * 60 * 31,
+      work: { subject: "0.2.0 接线：工作流/备份/更新", status: "in_progress", elapsedMs: 1000 * 60 * 22 },
+      usage: { input: 412800, output: 18900, requests: 96, cacheRead: 1882000 } },
+    { target: "plugin-builder", displayName: "插件编写", title: "实现 · 测试", group: "插件组", model: "kimi-k2.7-code", provider: "tokenrhythm", status: "running", activeMs: 1000 * 60 * 44,
+      work: { subject: "修 backups / group-brief 5 条红测试", status: "in_progress", elapsedMs: 1000 * 60 * 9 },
+      usage: { input: 318300, output: 24100, requests: 74, cacheRead: 1405000 } },
+    { target: "plugin-engineer", displayName: "插件工程", title: "安全更新 · 打包", group: "插件组", model: "deepseek-v4.1-flash-1017", provider: "tokenrhythm", status: "idle", activeMs: 1000 * 60 * 26,
+      work: { subject: "updater.mjs 35 条测试 · 已交付", status: "completed", elapsedMs: 1000 * 60 * 38 },
+      usage: { input: 226700, output: 13200, requests: 52, cacheRead: 642000 } },
+    { target: "plugin-reviewer", displayName: "插件审阅", title: "独立复核 · 证据链", group: "插件组", model: "seed-2.1-pro", provider: "tokenrhythm", status: "running", activeMs: 1000 * 60 * 12,
+      work: { subject: "审阅 0.2.0 变更与文档一致性", status: "in_progress", elapsedMs: 1000 * 60 * 5 },
+      usage: { input: 156400, output: 8700, requests: 31, cacheRead: 498000 } },
+    { target: "plugin-prober", displayName: "插件验证", title: "本地验证", group: "插件组", model: "qwen3.8:latest", provider: "ollama-local", status: "idle", activeMs: 1000 * 60 * 8,
+      work: { subject: "本地面板冒烟（ollama）", status: "pending", elapsedMs: 0 },
+      usage: { input: 38400, output: 3600, requests: 11, cacheRead: 96000 } },
+    { target: "data-verifier", displayName: "插件复核", title: "长上下文 · GUI 复核", group: "插件组", model: "deepseek-v4-pro-0813", provider: "tokenrhythm", status: "unknown", activeMs: 0,
+      work: { subject: "备用：全量用例复核", status: "pending", elapsedMs: 0 },
+      usage: { input: 0, output: 0, requests: 0, cacheRead: 0 } },
+    { target: "kb-organizer", displayName: "插件资产", title: "台账 · 发布说明", group: "插件组", model: "deepseek-v4.1-flash-1017", provider: "tokenrhythm", status: "idle", activeMs: 1000 * 60 * 15,
+      work: { subject: "0.2.0 发布说明与回滚预案", status: "in_progress", elapsedMs: 1000 * 60 * 15 },
+      usage: { input: 88200, output: 6400, requests: 18, cacheRead: 214000 } },
+    { target: "plugin-smith", displayName: "插件工程二", title: "工具链 · 实测", group: "插件组", model: "deepseek-v4.1-flash-1017", provider: "tokenrhythm", status: "idle", activeMs: 1000 * 60 * 6,
+      work: { subject: "延迟/包体回归抽样", status: "completed", elapsedMs: 1000 * 60 * 11 },
+      usage: { input: 64200, output: 4100, requests: 14, cacheRead: 132000 } }
+  ];
+
+  var tasks = [
+    { id: "t1", subject: "0.2.0 接线：工作流/备份/更新", status: "in_progress", owner: "plugin-arch", blockedBy: [], writeScopes: ["lib/index.js"], firstSeenAgo: 1000 * 60 * 22, elapsedMs: 1000 * 60 * 22 },
+    { id: "t2", subject: "修 backups / group-brief 5 条红测试", status: "in_progress", owner: "plugin-builder", blockedBy: [], writeScopes: ["src/shared/", "test/"], firstSeenAgo: 1000 * 60 * 9, elapsedMs: 1000 * 60 * 9 },
+    { id: "t3", subject: "updater.mjs 35 条测试 · 已交付", status: "completed", owner: "plugin-engineer", blockedBy: [], writeScopes: ["src/host/updater.mjs"], firstSeenAgo: 1000 * 60 * 38, elapsedMs: 1000 * 60 * 38 },
+    { id: "t4", subject: "审阅 0.2.0 变更与文档一致性", status: "in_progress", owner: "plugin-reviewer", blockedBy: [], writeScopes: ["docs/"], firstSeenAgo: 1000 * 60 * 5, elapsedMs: 1000 * 60 * 5 },
+    { id: "t5", subject: "本地面板冒烟（ollama）", status: "pending", owner: "plugin-prober", blockedBy: ["t1"], writeScopes: [], firstSeenAgo: 1000 * 60 * 3, elapsedMs: 0 },
+    { id: "t6", subject: "0.2.0 发布说明与回滚预案", status: "in_progress", owner: "kb-organizer", blockedBy: [], writeScopes: ["docs/"], firstSeenAgo: 1000 * 60 * 15, elapsedMs: 1000 * 60 * 15 },
+    { id: "t7", subject: "延迟/包体回归抽样", status: "completed", owner: "plugin-smith", blockedBy: [], writeScopes: [], firstSeenAgo: 1000 * 60 * 11, elapsedMs: 1000 * 60 * 11 }
+  ];
+
+  function fmtNum(n) { return (n || 0).toLocaleString("en-US"); }
+  function fmtK(n) {
+    n = n || 0;
+    if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
+    return String(n);
+  }
+  function fmtDur(ms) {
+    if (!ms || ms < 0) return "—";
+    var s = Math.round(ms / 1000);
+    if (s < 60) return s + " 秒";
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + " 分 " + (s % 60) + " 秒";
+    return Math.floor(m / 60) + " 小时 " + (m % 60) + " 分";
+  }
+  var STATUS_TEXT = { running: "运行中", idle: "空闲", unknown: "未知", pending: "待处理", in_progress: "进行中", completed: "已完成" };
+
+  function totals() {
+    var t = { input: 0, output: 0, requests: 0, cacheRead: 0, activeMs: 0, live: 0 };
+    members.forEach(function (m) {
+      t.input += m.usage.input; t.output += m.usage.output; t.requests += m.usage.requests; t.cacheRead += m.usage.cacheRead;
+      if (m.status === "running") { t.activeMs += m.activeMs; t.live++; }
+    });
+    t.total = t.input + t.output;
+    t.hit = (t.input + t.cacheRead) ? t.cacheRead / (t.input + t.cacheRead) : 0;
+    return t;
+  }
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined && text !== null) e.textContent = text;
+    return e;
+  }
+
+  function renderStats() {
+    var t = totals();
+    var host = document.getElementById("stats");
+    host.innerHTML = "";
+    [
+      ["活跃成员", t.live + " / " + members.length],
+      ["token 总量", fmtK(t.total)],
+      ["请求数", fmtNum(t.requests)],
+      ["缓存命中", (t.hit * 100).toFixed(1) + "%"],
+      ["累计用时", fmtDur(t.activeMs)],
+      ["任务", tasks.filter(function (x) { return x.status !== "completed"; }).length + " 进行中"]
+    ].forEach(function (pair) {
+      var chip = el("span", "chip", pair[0] + " ");
+      chip.appendChild(el("b", null, pair[1]));
+      host.appendChild(chip);
+    });
+  }
+
+  function renderMembers() {
+    var tbody = document.getElementById("members");
+    tbody.innerHTML = "";
+    members.forEach(function (m) {
+      var tr = el("tr");
+      var who = el("div", "who");
+      var dot = el("span", "dot " + m.status);
+      dot.title = STATUS_TEXT[m.status] || m.status;
+      var nameBox = el("div");
+      nameBox.appendChild(el("div", "name", m.displayName));
+      nameBox.appendChild(el("div", "target", m.target));
+      who.appendChild(dot); who.appendChild(nameBox);
+      var tdWho = el("td"); tdWho.appendChild(who); tr.appendChild(tdWho);
+
+      var role = el("div");
+      role.appendChild(el("div", "role", m.title));
+      role.appendChild(el("div", "card-desc", m.group));
+      var tdRole = el("td", "hide-sm"); tdRole.appendChild(role); tr.appendChild(tdRole);
+
+      var work = el("div", "work");
+      if (m.work) {
+        var top = el("div");
+        top.appendChild(el("span", "badge " + m.work.status, STATUS_TEXT[m.work.status] || m.work.status));
+        top.appendChild(el("span", "work-subject", m.work.subject));
+        work.appendChild(top);
+        work.appendChild(el("div", "card-desc", "用时 " + fmtDur(m.work.elapsedMs)));
+      } else {
+        work.appendChild(el("span", "card-desc", "暂无工作包"));
+      }
+      var tdWork = el("td"); tdWork.appendChild(work); tr.appendChild(tdWork);
+
+      var tdModel = el("td", "hide-sm");
+      var mm = el("div", "model", m.model);
+      mm.title = m.provider + " / " + m.model;
+      tdModel.appendChild(mm); tr.appendChild(tdModel);
+
+      tr.appendChild(el("td", "num mono", fmtNum(m.usage.input)));
+      tr.appendChild(el("td", "num mono", fmtNum(m.usage.output)));
+      tr.appendChild(el("td", "num mono hide-sm", fmtNum(m.usage.requests)));
+      tr.appendChild(el("td", "num mono", m.status === "running" ? fmtDur(m.activeMs) : fmtDur(m.activeMs)));
+      tbody.appendChild(tr);
+    });
+
+    var t = totals();
+    var tf = document.getElementById("totals");
+    tf.innerHTML = "";
+    var tr2 = el("tr", "totals");
+    tr2.appendChild(el("td", null, "合计（" + members.length + " 人）"));
+    tr2.appendChild(el("td", "hide-sm", ""));
+    tr2.appendChild(el("td", "card-desc", "命中率 " + (t.hit * 100).toFixed(1) + "%（缓存读 / 输入+缓存读）"));
+    tr2.appendChild(el("td", "hide-sm", ""));
+    tr2.appendChild(el("td", "num mono", fmtNum(t.input)));
+    tr2.appendChild(el("td", "num mono", fmtNum(t.output)));
+    tr2.appendChild(el("td", "num mono hide-sm", fmtNum(t.requests)));
+    tr2.appendChild(el("td", "num mono", fmtDur(t.activeMs)));
+    tf.appendChild(tr2);
+  }
+
+  function renderTasks() {
+    var host = document.getElementById("tasks");
+    host.innerHTML = "";
+    tasks.forEach(function (task) {
+      var box = el("div", "task");
+      var top = el("div", "task-top");
+      top.appendChild(el("div", "task-subject", task.subject));
+      top.appendChild(el("span", "badge " + task.status, STATUS_TEXT[task.status] || task.status));
+      box.appendChild(top);
+
+      var owner = members.filter(function (m) { return m.target === task.owner; })[0];
+      var meta = el("div", "task-meta");
+      meta.appendChild(el("span", null, "负责人：" + (owner ? owner.displayName : task.owner)));
+      meta.appendChild(el("span", null, "用时 " + fmtDur(task.elapsedMs)));
+      if (task.blockedBy.length) meta.appendChild(el("span", null, "被阻塞：" + task.blockedBy.join(", ")));
+      box.appendChild(meta);
+      host.appendChild(box);
+    });
+
+    var counts = { pending: 0, in_progress: 0, completed: 0 };
+    tasks.forEach(function (t) { counts[t.status] = (counts[t.status] || 0) + 1; });
+    document.getElementById("taskCounts").textContent =
+      "待处理 " + counts.pending + " · 进行中 " + counts.in_progress + " · 已完成 " + counts.completed;
+  }
+
+  function renderAll() {
+    renderStats(); renderMembers(); renderTasks();
+    var at = new Date();
+    var hh = String(at.getHours()).padStart(2, "0");
+    var mm = String(at.getMinutes()).padStart(2, "0");
+    var ss = String(at.getSeconds()).padStart(2, "0");
+    document.getElementById("sampleAt").textContent = "采样于 " + hh + ":" + mm + ":" + ss;
+    document.getElementById("tickInfo").textContent = "采样于 " + hh + ":" + mm + ":" + ss + " · 演示数据每 2 秒更新（仅本页）";
+  }
+
+  // 简单的「活着」模拟：运行中成员 token/请求/用时增长，偶尔切换成员状态
+  var running = true;
+  function tick() {
+    if (!running) return;
+    members.forEach(function (m) {
+      if (m.status !== "running") return;
+      m.usage.input += 900 + Math.floor(Math.random() * 2600);
+      m.usage.output += 80 + Math.floor(Math.random() * 260);
+      m.usage.cacheRead += 4000 + Math.floor(Math.random() * 9000);
+      m.usage.requests += Math.random() < 0.55 ? 1 : 0;
+      m.activeMs += 2000;
+      if (m.work && m.work.status === "in_progress") m.work.elapsedMs += 2000;
+    });
+    tasks.forEach(function (t) { if (t.status === "in_progress") t.elapsedMs += 2000; });
+    if (Math.random() < 0.12) {
+      var idle = members.filter(function (m) { return m.status === "idle"; });
+      var busy = members.filter(function (m) { return m.status === "running"; });
+      if (idle.length && busy.length > 1) {
+        var a = Math.random() < 0.5 ? idle[0] : busy[0];
+        a.status = a.status === "running" ? "idle" : "running";
+      }
+    }
+    renderAll();
+  }
+
+  document.getElementById("auto").addEventListener("change", function (e) {
+    running = e.target.checked;
+    document.getElementById("pauseBtn").textContent = running ? "暂停" : "继续";
+  });
+  document.getElementById("pauseBtn").addEventListener("click", function () {
+    running = !running;
+    document.getElementById("auto").checked = running;
+    document.getElementById("pauseBtn").textContent = running ? "暂停" : "继续";
+  });
+  document.getElementById("refreshBtn").addEventListener("click", renderAll);
+
+  renderAll();
+  setInterval(tick, 2000);
+})();
+</script>
+</body>
+</html>

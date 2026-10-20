@@ -167,7 +167,7 @@ test("宿主插件导出合法的 Cordis 插件形状", () => {
   assert.equal(typeof PLUGIN.apply, "function");
 });
 
-test("apply() 注册 12 个工具，且参数 schema 结构合法", () => {
+test("apply() 注册 16 个工具，且参数 schema 结构合法", () => {
   const { ctx, tools } = mockCtx();
   PLUGIN.apply(ctx);
 
@@ -175,7 +175,9 @@ test("apply() 注册 12 个工具，且参数 schema 结构合法", () => {
   assert.deepEqual(names, [
     "group_manage",
     "member_add",
+    "member_backup",
     "member_diagnose",
+    "member_group_from_text",
     "member_list",
     "member_remove",
     "member_rename",
@@ -183,6 +185,8 @@ test("apply() 注册 12 个工具，且参数 schema 结构合法", () => {
     "member_set_role",
     "member_set_skills",
     "member_sync",
+    "member_update",
+    "member_workflow",
     "model_list",
     "skill_list",
   ]);
@@ -202,18 +206,71 @@ test("apply() 注册 HTTP 路由，content-type 为 utf-8 JSON", async () => {
   const { ctx, routes } = mockCtx();
   PLUGIN.apply(ctx);
   assert.deepEqual([...routes.keys()].sort(), [
+    "/api/dsh-plugin-member-manager/backups",
     "/api/dsh-plugin-member-manager/health",
     "/api/dsh-plugin-member-manager/models",
     "/api/dsh-plugin-member-manager/op",
+    "/api/dsh-plugin-member-manager/orgmap",
     "/api/dsh-plugin-member-manager/overrides",
     "/api/dsh-plugin-member-manager/skills",
     "/api/dsh-plugin-member-manager/state",
+    "/api/dsh-plugin-member-manager/update",
+    "/api/dsh-plugin-member-manager/workflow",
   ]);
 
   const r = await call(routes.get("/api/dsh-plugin-member-manager/health"), "GET");
   assert.equal(r.status, 200);
   assert.equal(r.json.ok, true);
   assert.match(r.headers["content-type"], /charset=utf-8/);
+});
+
+test("0.3.0 任务作用域组织架构图：/orgmap 只返回当前会话的参与者，?task= 选任务，任务板缺失时降级", async () => {
+  const leadSession = { id: "s-lead", header: { id: "s-lead", createdAt: 1000 } };
+  const childSession = { id: "s-child", header: { id: "s-child", createdAt: 2000, parentSession: "s-lead" } };
+  const leadAgent = { id: "a-lead", session: leadSession, status: "running" };
+  const childAgent = { id: "a-child", session: childSession, status: "idle" };
+  const agentTeams = {
+    tryMembership(agent) {
+      if (agent === leadAgent) return { name: "lead", role: "lead", root: true };
+      if (agent === childAgent) return { name: "plugin-builder", role: "teammate", root: false };
+      return null;
+    },
+  };
+  const { ctx, tools, routes } = mockCtx({ agents: [leadAgent, childAgent], agentTeams });
+  PLUGIN.apply(ctx);
+  await tools.get("group_manage").execute({ action: "create", id: "g-plug", name: "插件组" });
+  await tools.get("member_add").execute({ target: "plugin-builder", displayName: "插件编写", groupId: "g-plug" });
+
+  const handler = routes.get("/api/dsh-plugin-member-manager/orgmap");
+  const r = await call(handler, "GET");
+  assert.equal(r.status, 200);
+  const d = r.json.data;
+  assert.equal(d.version, 2, "0.3.0 起 /orgmap 是任务作用域快照");
+  assert.equal(d.tasks.length, 1, "一个 root 会话 = 一个任务");
+  assert.equal(d.tasks[0].id, "s-lead");
+  assert.equal(d.tasks[0].memberCount, 2);
+  assert.equal(d.task.id, "s-lead");
+  assert.equal(d.lead.target, "lead");
+  assert.equal(d.groups.length, 1);
+  assert.equal(d.groups[0].name, "插件组");
+  assert.deepEqual(d.groups[0].members.map((m) => m.target), ["plugin-builder"]);
+  const builder = d.groups[0].members[0];
+  for (const key of ["displayName", "model", "status", "usage", "elapsedMs", "work", "role"]) {
+    assert.ok(key in builder, `成员卡片缺字段 ${key}`);
+  }
+  assert.equal(builder.role, "teammate");
+  assert.ok(Array.isArray(d.dispatch));
+  assert.ok(Array.isArray(d.dependency));
+  assert.equal(d.enabled, true);
+  assert.equal(d.tasksAvailable, false, "没装任务板时必须显式降级");
+
+  // 指定一个不存在的任务 → 回落到最近活跃任务，不报错
+  const req = mockReq("GET");
+  req.url = "/api/dsh-plugin-member-manager/orgmap?task=missing";
+  const res = mockRes();
+  await handler(req, res);
+  const picked = JSON.parse(res.body).data;
+  assert.equal(picked.task.id, "s-lead");
 });
 
 test("apply() 返回值可用于卸载（effect 登记了 disposer）", () => {
@@ -386,6 +443,38 @@ test("HTTP：方法不匹配返回 405，/op 的 GET 也一样", async () => {
   assert.equal(s.json.code, "METHOD_NOT_ALLOWED");
   const o = await call(routes.get("/api/dsh-plugin-member-manager/op"), "GET");
   assert.equal(o.status, 405);
+  const h = await call(routes.get("/api/dsh-plugin-member-manager/health"), "POST");
+  assert.equal(h.status, 405);
+  assert.equal(h.json.code, "METHOD_NOT_ALLOWED");
+});
+
+test("HTTP：写盘点被占（registry.json 变成目录）时 /op 返回 500 INTERNAL，而不是把异常抛给 webServer", async () => {
+  const { ctx, routes, dir } = mockCtx();
+  PLUGIN.apply(ctx);
+  // 把名册文件换成同名目录：读 → 走空名册兜底，写 → rename 必然失败（EPERM/EISDIR/ENOTEMPTY）
+  fs.mkdirSync(path.join(dir, "registry.json"), { recursive: true });
+
+  const op = routes.get("/api/dsh-plugin-member-manager/op");
+  const r = await call(op, "POST", JSON.stringify({ op: "addMember", args: { target: "disk-fail", displayName: "写盘失败" } }));
+  assert.equal(r.status, 500, "写盘失败应映射为 500，而不是抛出未处理异常");
+  assert.equal(r.json.ok, false);
+  assert.equal(r.json.code, "INTERNAL_ERROR", "内部错误码要能和业务错误区分开");
+  assert.ok(r.json.message, "应带上底层错误信息，便于面板显示与排查");
+  assert.match(JSON.stringify(r.json), /INTERNAL/, "响应里要有可检索的内部错误标记");
+
+  // 读路径不受影响：/state 仍能正常返回（读失败回退空名册 + 警告）
+  const state = await call(routes.get("/api/dsh-plugin-member-manager/state"), "GET");
+  assert.equal(state.status, 200);
+  assert.equal(state.json.ok, true);
+});
+
+test("HTTP：未知 op 与非法 JSON 不会被 500 兜底误吞（仍是 400 + 业务 code）", async () => {
+  const { ctx, routes } = mockCtx();
+  PLUGIN.apply(ctx);
+  const op = routes.get("/api/dsh-plugin-member-manager/op");
+  const unknown = await call(op, "POST", JSON.stringify({ op: "nope", args: {} }));
+  assert.equal(unknown.status, 400);
+  assert.equal(unknown.json.code, "UNKNOWN_OP");
 });
 
 test("HTTP 与工具共用同一份名册（跨入口一致性）", async () => {
@@ -525,17 +614,17 @@ test("核心集成：agent/created 事件路径也能刷新缓存", async () => 
 
 /* ================== 装载韧性 ================== */
 
-test("韧性：webServer 服务缺失时，8 个工具仍全部注册", () => {
+test("韧性：webServer 服务缺失时，16 个工具仍全部注册", () => {
   const { ctx, tools, routes } = mockCtx({ webServer: null });
   assert.doesNotThrow(() => PLUGIN.apply(ctx));
-  assert.equal(tools.size, 12);
+  assert.equal(tools.size, 16);
   assert.equal(routes.size, 0, "没有 webServer 就不该有路由");
 });
 
 test("韧性：webServer.register 抛错时，插件仍加载且工具可用", async () => {
   const { ctx, tools } = mockCtx({ webServerThrows: true });
   assert.doesNotThrow(() => PLUGIN.apply(ctx));
-  assert.equal(tools.size, 12);
+  assert.equal(tools.size, 16);
   const add = await tools.get("member_add").execute({ target: "still-works" });
   assert.equal(add.ok, true, "面板路由挂了也不该影响工具");
 });
@@ -545,7 +634,7 @@ test("韧性：缺少 ctx.config 时使用默认数据目录且不抛错", () =>
   const m = mockCtx({ dir });
   delete m.ctx.config;
   assert.doesNotThrow(() => PLUGIN.apply(m.ctx));
-  assert.equal(m.tools.size, 12);
+  assert.equal(m.tools.size, 16);
 });
 
 test("group_manage：assign 传空字符串表示移出小组", async () => {
@@ -686,8 +775,8 @@ test("回归：ctx 访问未声明属性即抛错时，apply 仍能完整执行�
   // 关键：这里连 ctx.config 都会抛错（config 不在 inject 列表里）。
   // 早期实现写了 `ctx.config`，导致 apply 在第一行后中断、工具与路由全部注册不上。
   assert.doesNotThrow(() => PLUGIN.apply(ctx, {  dataDir: dir }));
-  assert.equal(tools.size, 12, "12 个工具都应注册（真实故障时这里是 0）");
-  assert.equal(routes.size, 6, "6 条路由都应注册（真实故障时这里是 0）");
+  assert.equal(tools.size, 16, "16 个工具都应注册（真实故障时这里是 0）");
+  assert.equal(routes.size, 10, "10 条路由都应注册（真实故障时这里是 0）");
 });
 
 test("回归：不给 config 且 ctx 会抛错时，回退默认目录且不崩溃", () => {
@@ -708,8 +797,8 @@ test("回归：不给 config 且 ctx 会抛错时，回退默认目录且不崩�
     },
   });
   assert.doesNotThrow(() => PLUGIN.apply(ctx)); // 无第二个参数
-  assert.equal(tools.size, 12);
-  assert.equal(routes.size, 6);
+  assert.equal(tools.size, 16);
+  assert.equal(routes.size, 10);
 });
 
 test("配置取自第二个参数（与官方 apply(ctx, config) 一致），优先于 ctx.config", async () => {
@@ -1293,4 +1382,181 @@ test("member_diagnose：带上模型覆盖的运行统计", async () => {
   assert.equal(d.modelOverride.installedAgents, 1);
   assert.equal(d.modelOverride.lastApplied.model, "m-x");
   assert.deepEqual(JSON.parse(JSON.stringify(d)), d, "输出必须无损 JSON 往返");
+});
+
+/* ================================================================== */
+/* 0.2.0：备份 / 工作流 / 自动更新 / 一句话建组                          */
+/* ================================================================== */
+
+test("0.2.0 备份：backupNow 生成快照，restoreBackup 能把名册恢复回去", async () => {
+  const { ctx, tools, routes } = mockCtx();
+  PLUGIN.apply(ctx);
+
+  const add = await tools.get("member_add").execute({ target: "keep-me", displayName: "别丢我" });
+  assert.equal(add.ok, true);
+
+  const backups = await call(routes.get("/api/dsh-plugin-member-manager/backups"), "GET");
+  assert.equal(backups.status, 200);
+  assert.equal(backups.json.data.enabled, true, "默认应开启备份");
+  assert.equal(backups.json.data.count, 0, "启动时名册还不存在，允许 0 份");
+
+  const made = await call(
+    routes.get("/api/dsh-plugin-member-manager/op"),
+    "POST",
+    JSON.stringify({ op: "backupNow", args: { reason: "test" } }),
+  );
+  assert.equal(made.status, 200);
+  assert.equal(made.json.ok, true);
+  const file = made.json.data.file;
+  assert.match(file, /^registry-.*-test\.json$/);
+
+  const findMember = (view, target) =>
+    [...view.groups.flatMap((g) => g.members), ...view.ungrouped, ...(view.retired || [])].find((m) => m.target === target);
+  const readState = async () => (await call(routes.get("/api/dsh-plugin-member-manager/state"), "GET")).json.data;
+
+  // 制造「丢失」：软删该成员
+  await tools.get("member_remove").execute({ target: "keep-me" });
+  let row = findMember(await readState(), "keep-me");
+  assert.ok(row, "软删后成员仍应在名册里（只是 retired）");
+  assert.equal(row.isRetired, true);
+
+  // 恢复备份
+  const restored = await call(
+    routes.get("/api/dsh-plugin-member-manager/op"),
+    "POST",
+    JSON.stringify({ op: "restoreBackup", args: { file } }),
+  );
+  assert.equal(restored.status, 200);
+  assert.equal(restored.json.ok, true);
+
+  row = findMember(await readState(), "keep-me");
+  assert.equal(row.isRetired, false, "恢复后成员应重新是 active");
+  assert.equal(row.displayName, "别丢我");
+
+  // 恢复前应自动留了一份安全备份
+  const view = await call(routes.get("/api/dsh-plugin-member-manager/backups"), "GET");
+  const reasons = view.json.data.list.map((b) => b.reason);
+  assert.ok(reasons.includes("pre-restore"), "恢复前应有 pre-restore 安全备份");
+});
+
+test("0.2.0 备份：恢复不存在的文件返回错误码而不是 500", async () => {
+  const { ctx, routes } = mockCtx();
+  PLUGIN.apply(ctx);
+  const r = await call(
+    routes.get("/api/dsh-plugin-member-manager/op"),
+    "POST",
+    JSON.stringify({ op: "restoreBackup", args: { file: "registry-nope.json" } }),
+  );
+  assert.equal(r.status, 400);
+  assert.equal(r.json.ok, false);
+  assert.equal(r.json.code, "BACKUP_NOT_FOUND");
+});
+
+test("0.2.0 工作流：/workflow 返回成员行与总量，任务板缺失时明确降级", async () => {
+  const { ctx, tools, routes } = mockCtx();
+  PLUGIN.apply(ctx);
+  await tools.get("member_add").execute({ target: "wf-member", displayName: "工作流成员" });
+
+  const r = await call(routes.get("/api/dsh-plugin-member-manager/workflow"), "GET");
+  assert.equal(r.status, 200);
+  const data = r.json.data;
+  assert.equal(data.version, 1);
+  assert.ok(Array.isArray(data.members));
+  assert.ok(data.members.some((m) => m.target === "wf-member"));
+  assert.equal(typeof data.totals.totalTokens, "number");
+  assert.equal(typeof data.totals.requests, "number");
+  assert.equal(typeof data.generatedAt, "string");
+  // 没装 agent-team：任务板不可用，必须是显式降级而不是抛错
+  assert.equal(data.tasksAvailable, false);
+  assert.ok(Array.isArray(data.tasks));
+
+  const tool = await tools.get("member_workflow").execute({});
+  assert.ok(Array.isArray(tool.members));
+  assert.equal(tool.sessions, undefined, "工具输出应是瘦身视图");
+});
+
+test("0.2.0 工作流：session/event 按位置参数 (session, event) 采集 usage 并计入总量", async () => {
+  const { ctx, events, routes } = mockCtx();
+  PLUGIN.apply(ctx);
+  const listeners = events.get("session/event") || [];
+  assert.equal(listeners.length, 1, "必须挂上一个 session/event 监听");
+
+  const session = { id: "s-wf-1" };
+  listeners[0](session, {
+    type: "assistant/message",
+    data: { usage: { inputTokens: 120, outputTokens: 30, cacheReadTokens: 480, totalTokens: 150 } },
+  });
+  listeners[0](session, { type: "tool/call", data: { usage: { inputTokens: 999 } } });
+
+  const r = await call(routes.get("/api/dsh-plugin-member-manager/workflow"), "GET");
+  assert.equal(r.json.data.totals.totalTokens, 150);
+  assert.equal(r.json.data.totals.outputTokens, 30);
+  assert.equal(r.json.data.totals.requests, 1, "非 assistant/message 事件不能计入请求数");
+  assert.equal(r.json.data.totals.cacheReadTokens, 480);
+});
+
+test("0.2.0 更新：/update 只报告状态，默认离线应用（offline-script）", async () => {
+  const { ctx, routes } = mockCtx();
+  PLUGIN.apply(ctx);
+  const r = await call(routes.get("/api/dsh-plugin-member-manager/update"), "GET");
+  assert.equal(r.status, 200);
+  const data = r.json.data;
+  assert.equal(data.applyMode, "offline-script");
+  assert.equal(data.allowOnlineApply, false);
+  assert.equal(data.restartRequired, true);
+  assert.equal(typeof data.current, "string");
+  assert.equal(data.pending, null);
+  assert.match(data.applyCommand, /apply-pending\.mjs/);
+});
+
+test("0.2.0 更新：运行中 apply 默认被拒绝（NEEDS_OFFLINE_APPLY），且不写任何东西", async () => {
+  const { ctx, tools } = mockCtx();
+  PLUGIN.apply(ctx);
+  const r = await tools.get("member_update").execute({ action: "apply" });
+  assert.equal(r.ok, false);
+  assert.equal(r.code, "NEEDS_OFFLINE_APPLY", `实际 code=${r.code}`);
+  assert.match(r.detail.applyCommand, /apply-pending\.mjs/);
+});
+
+test("0.2.0 更新：显式 allowOnlineApply 后仍受 pending 闸门保护", async () => {
+  const { ctx, tools } = mockCtx();
+  ctx.config.update = { allowOnlineApply: true };
+  PLUGIN.apply(ctx);
+  const r = await tools.get("member_update").execute({ action: "apply" });
+  assert.equal(r.ok, false);
+  assert.ok(["NO_PENDING", "JUNCTION_INSTALL"].includes(r.code), `实际 code=${r.code}`);
+});
+
+test("0.2.0 一句话建组：默认只预览，confirm 才真正写名册", async () => {
+  const { ctx, tools, routes } = mockCtx();
+  PLUGIN.apply(ctx);
+  const text = "创建一个叫「质检组」的小组：图纸审阅员（负责审图纸、出审阅意见）、缺陷记录员（负责登记缺陷）";
+
+  const preview = await call(
+    routes.get("/api/dsh-plugin-member-manager/op"),
+    "POST",
+    JSON.stringify({ op: "createGroupFromText", args: { text } }),
+  );
+  assert.equal(preview.status, 200);
+  assert.equal(preview.json.ok, true);
+  assert.equal(preview.json.data.dryRun, true);
+  assert.equal(preview.json.data.group.name, "质检组");
+
+  let state = await call(routes.get("/api/dsh-plugin-member-manager/state"), "GET");
+  assert.equal(state.json.data.groups.length, 0, "预览阶段不应落盘");
+
+  const confirmed = await call(
+    routes.get("/api/dsh-plugin-member-manager/op"),
+    "POST",
+    JSON.stringify({ op: "createGroupFromText", args: { text, confirm: true } }),
+  );
+  assert.equal(confirmed.status, 200);
+  assert.equal(confirmed.json.ok, true);
+  assert.equal(confirmed.json.data.dryRun, false);
+
+  state = await call(routes.get("/api/dsh-plugin-member-manager/state"), "GET");
+  assert.equal(state.json.data.groups.length, 1);
+  assert.equal(state.json.data.groups[0].name, "质检组");
+  const targets = state.json.data.groups[0].members.map((m) => m.target);
+  assert.deepEqual(targets.sort(), ["recorder", "reviewer"]);
 });
