@@ -276,6 +276,7 @@ test("apply() 注册 HTTP 路由，content-type 为 utf-8 JSON", async () => {
     "/api/dsh-member-manager/backups",
     "/api/dsh-member-manager/company/board",
     "/api/dsh-member-manager/company/costs",
+    "/api/dsh-member-manager/company/op",
     "/api/dsh-member-manager/company/orders",
     "/api/dsh-member-manager/company/org",
     "/api/dsh-member-manager/company/overview",
@@ -294,6 +295,36 @@ test("apply() 注册 HTTP 路由，content-type 为 utf-8 JSON", async () => {
   assert.equal(r.status, 200);
   assert.equal(r.json.ok, true);
   assert.match(r.headers["content-type"], /charset=utf-8/);
+});
+
+test("面板写接口：POST /company/op 解析 JSON body，业务错误也回 200 信封", async () => {
+  const { ctx, routes } = mockCtx();
+  PLUGIN.apply(ctx);
+  const op = routes.get("/api/dsh-member-manager/company/op");
+  assert.ok(op, "应注册 /api/dsh-member-manager/company/op");
+
+  const created = await call(op, "POST", JSON.stringify({ action: "createDepartment", args: { name: "HTTP 部门", charter: "接口测试" } }));
+  assert.equal(created.status, 200);
+  assert.equal(created.json.ok, true);
+  assert.ok(created.json.data.departmentId, "应返回 departmentId");
+  assert.match(created.json.data.code, /^D\d+$/, "应返回自动编号");
+
+  const overview = await call(routes.get("/api/dsh-member-manager/company/overview"), "GET");
+  const dept = overview.json.data.org.departments.find((d) => d.id === created.json.data.departmentId);
+  assert.ok(dept, "新建部门应出现在 overview");
+  assert.equal(dept.charter, "接口测试");
+
+  const bad = await call(op, "POST", "{不是 json");
+  assert.equal(bad.status, 400);
+  assert.equal(bad.json.code, "E_BAD_JSON");
+
+  const unknown = await call(op, "POST", JSON.stringify({ action: "nope", args: {} }));
+  assert.equal(unknown.status, 200);
+  assert.equal(unknown.json.data.ok, false);
+  assert.equal(unknown.json.data.code, "E_UNKNOWN_ACTION");
+
+  const wrongMethod = await call(op, "GET");
+  assert.equal(wrongMethod.status, 405);
 });
 
 test("0.3.0 任务作用域组织架构图：/orgmap 只返回当前会话的参与者，?task= 选任务，任务板缺失时降级", async () => {
@@ -848,7 +879,7 @@ test("回归：ctx 访问未声明属性即抛错时，apply 仍能完整执行�
   // 早期实现写了 `ctx.config`，导致 apply 在第一行后中断、工具与路由全部注册不上。
   assert.doesNotThrow(() => PLUGIN.apply(ctx, {  dataDir: dir }));
   assert.equal(tools.size, 29, "29 个工具（16 名册 + 13 公司化）都应注册（真实故障时这里是 0）");
-  assert.equal(routes.size, 15, "15 条路由（10 名册 + 5 公司化只读）都应注册（真实故障时这里是 0）");
+  assert.equal(routes.size, 16, "16 条路由（10 名册 + 5 公司化只读 + 1 面板写接口）都应注册（真实故障时这里是 0）");
 });
 
 test("回归：不给 config 且 ctx 会抛错时，回退默认目录且不崩溃", () => {
@@ -870,7 +901,7 @@ test("回归：不给 config 且 ctx 会抛错时，回退默认目录且不崩�
   });
   assert.doesNotThrow(() => PLUGIN.apply(ctx)); // 无第二个参数
   assert.equal(tools.size, 29);
-  assert.equal(routes.size, 15);
+  assert.equal(routes.size, 16);
 });
 
 test("配置取自第二个参数（与官方 apply(ctx, config) 一致），优先于 ctx.config", async () => {

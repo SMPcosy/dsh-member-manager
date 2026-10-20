@@ -112,12 +112,31 @@ await check("M/P 等级与面板测试文件", () => {
   }
   return "2 个";
 });
-await check("总架构/部门架构弹层字样", () => {
+await check("总架构组织架构图字样", () => {
   const client = readFileSync(path.join(REPO, "lib", "client.js"), "utf8");
-  for (const s of ["总架构", "Overall arch", "部门架构", "Department org", "company/overview", "cpTab", "cpOpenDeptOrg", "dpModalHint", "cpClose", "byEmployee", "byDepartment", "byOrder"]) {
+  for (const s of [
+    "总架构",
+    "Overall arch",
+    "员工中心",
+    "Employee center",
+    "新建部门",
+    "New department",
+    "部门架构",
+    "Department org",
+    "company/overview",
+    "company/op",
+    "cpTab",
+    "cpEmployeeCenter",
+    "cpModalChart",
+    "cpModalMembers",
+    "cpNewDept",
+    "byEmployee",
+    "byDepartment",
+    "byOrder",
+  ]) {
     must(client.includes(s), `lib/client.js 缺少面板字样 ${s}`);
   }
-  return "zh+en+route+costs+modal";
+  return "zh+en+route+chart+costs";
 });
 await check("cordis.patch.yml 品牌", () => {
   const yml = readFileSync(path.join(REPO, "cordis.patch.yml"), "utf8");

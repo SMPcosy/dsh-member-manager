@@ -358,3 +358,175 @@ test("company_hire 指向不存在部门返回 E_NOT_FOUND 且不写文件/员�
   assert.equal(rt.view().org.employees.length, 0);
   await rt.shutdown();
 });
+
+function findOpRoute(rt) {
+  return rt.routes.find((r) => r.method === "POST" && r.path === "/company/op");
+}
+
+test("POST /company/op createDepartment 成功且缺 name 失败", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-op-dept-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  const res = await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { name: "研发部", charter: "核心研发", capacity: 10 } });
+  assert.equal(res.ok, true);
+  assert.ok(res.departmentId.startsWith("dept-"));
+  assert.ok(res.code);
+
+  const store = (await import("../src/shared/company-store.mjs")).CompanyStore;
+  const s = new store(dataDir);
+  const loaded = await s.load();
+  const dept = loaded.company.departments.find((d) => d.id === res.departmentId);
+  assert.ok(dept);
+  assert.equal(dept.name, "研发部");
+  assert.equal(dept.charter, "核心研发");
+  assert.equal(dept.capacity, 10);
+
+  const rows = loaded.ledger.audit.filter((a) => a.type === "department_created");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].departmentId, res.departmentId);
+
+  const bad = await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: {} });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.code, "E_INVALID_INPUT");
+  await rt.shutdown();
+});
+
+test("POST /company/op createEmployee 成功且部门不存在失败", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-op-emp-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+
+  const deptRes = await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { name: "研发部" } });
+  const deptId = deptRes.departmentId;
+
+  const empRes = await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { displayName: "张三", department: deptId, role: "staff", level: "P3" } });
+  assert.equal(empRes.ok, true);
+  assert.ok(empRes.employeeId.startsWith("emp-"));
+  assert.ok(/^E\d{4}$/.test(empRes.code));
+  assert.equal(empRes.level, "P3");
+
+  const storeMod = await import("../src/shared/company-store.mjs");
+  const s = new storeMod.CompanyStore(dataDir);
+  const loaded = await s.load();
+  const emp = loaded.company.employees.find((e) => e.id === empRes.employeeId);
+  assert.ok(emp);
+  assert.equal(emp.department, deptId);
+
+  const bad = await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { displayName: "李四", department: "ghost", role: "staff" } });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.code, "E_NOT_FOUND");
+  await rt.shutdown();
+});
+
+test("POST /company/op promoteEmployee 逐级成功与跨通道失败", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-op-promote-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  const dept = await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { name: "研发部" } });
+  const emp = await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { displayName: "张三", department: dept.departmentId, role: "staff", level: "P3" } });
+
+  const p1 = await op.handler({}, new URL("http://localhost/company/op"), { action: "promoteEmployee", args: { employeeId: emp.employeeId } });
+  assert.equal(p1.ok, true);
+  assert.equal(p1.from.level, "P3");
+  assert.equal(p1.to.level, "P4");
+
+  const bad = await op.handler({}, new URL("http://localhost/company/op"), { action: "promoteEmployee", args: { employeeId: emp.employeeId, channel: "M" } });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.code, "E_CROSS_CHANNEL");
+  await rt.shutdown();
+});
+
+test("POST /company/op fireEmployee 幂等", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-op-fire-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  const dept = await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { name: "研发部" } });
+  const emp = await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { displayName: "张三", department: dept.departmentId, role: "staff" } });
+
+  const f1 = await op.handler({}, new URL("http://localhost/company/op"), { action: "fireEmployee", args: { employeeId: emp.employeeId } });
+  assert.equal(f1.ok, true);
+  assert.equal(f1.state, "fired");
+  const f2 = await op.handler({}, new URL("http://localhost/company/op"), { action: "fireEmployee", args: { employeeId: emp.employeeId } });
+  assert.equal(f2.ok, true);
+
+  const storeMod = await import("../src/shared/company-store.mjs");
+  const s = new storeMod.CompanyStore(dataDir);
+  const loaded = await s.load();
+  const e = loaded.company.employees.find((x) => x.id === emp.employeeId);
+  assert.equal(e.state, "fired");
+  await rt.shutdown();
+});
+
+test("POST /company/op moveEmployee 成功/目标部门不存在/shared 清空", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-op-move-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  const dept1 = await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { name: "研发部" } });
+  const dept2 = await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { name: "产品部" } });
+  const emp = await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { displayName: "张三", department: dept1.departmentId, role: "staff" } });
+
+  const m1 = await op.handler({}, new URL("http://localhost/company/op"), { action: "moveEmployee", args: { employeeId: emp.employeeId, department: dept2.departmentId } });
+  assert.equal(m1.ok, true);
+  assert.equal(m1.department, dept2.departmentId);
+
+  const bad = await op.handler({}, new URL("http://localhost/company/op"), { action: "moveEmployee", args: { employeeId: emp.employeeId, department: "ghost" } });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.code, "E_NOT_FOUND");
+
+  const sharedEmp = await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { displayName: "共享", department: dept1.departmentId, role: "staff", kind: "shared" } });
+  const clear = await op.handler({}, new URL("http://localhost/company/op"), { action: "moveEmployee", args: { employeeId: sharedEmp.employeeId, department: "" } });
+  assert.equal(clear.ok, true);
+  assert.equal(clear.department, "");
+
+  const permanent = await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { displayName: "正式", department: dept1.departmentId, role: "staff", kind: "permanent" } });
+  const bad2 = await op.handler({}, new URL("http://localhost/company/op"), { action: "moveEmployee", args: { employeeId: permanent.employeeId, department: "" } });
+  assert.equal(bad2.ok, false);
+  assert.equal(bad2.code, "E_INVALID_INPUT");
+  await rt.shutdown();
+});
+
+test("POST /company/op unknown action → E_UNKNOWN_ACTION", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-op-unknown-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  const res = await op.handler({}, new URL("http://localhost/company/op"), { action: "destroyEverything", args: {} });
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "E_UNKNOWN_ACTION");
+  await rt.shutdown();
+});
+
+test("POST /company/op updateDepartment 成功并持久化", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-op-update-dept-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  const dept = await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { name: "研发部" } });
+  const updated = await op.handler({}, new URL("http://localhost/company/op"), { action: "updateDepartment", args: { departmentId: dept.departmentId, charter: "新说明", capacity: 8 } });
+  assert.equal(updated.ok, true);
+  assert.equal(updated.departmentId, dept.departmentId);
+
+  const storeMod = await import("../src/shared/company-store.mjs");
+  const s = new storeMod.CompanyStore(dataDir);
+  const loaded = await s.load();
+  const d = loaded.company.departments.find((x) => x.id === dept.departmentId);
+  assert.equal(d.charter, "新说明");
+  assert.equal(d.capacity, 8);
+  await rt.shutdown();
+});
+
+test("POST /company/op fireEmployee 对不存在员工返回 E_NOT_FOUND（审阅建议 R1）", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-op-fire-missing-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  const res = await op.handler({}, new URL("http://localhost/company/op"), { action: "fireEmployee", args: { employeeId: "no-such-employee" } });
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "E_NOT_FOUND");
+  await rt.shutdown();
+});

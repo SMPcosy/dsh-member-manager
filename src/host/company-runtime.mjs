@@ -9,7 +9,7 @@ import { createDispatcher } from "./company-dispatcher.mjs";
 import { createScheduler } from "./company-scheduler.mjs";
 import { CompanyStore } from "../shared/company-store.mjs";
 import { resolveCompanyConfig } from "../shared/company-config.mjs";
-import { emptyCompany, createDepartment, createEmployee, updateDepartment, promoteEmployee, ensureCompanyCodes, describeEmployeeLevel, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY, DEFAULT_LEVELS, DEFAULT_NUMBERING } from "../shared/company-org.mjs";
+import { emptyCompany, createDepartment, createEmployee, updateDepartment, updateEmployee, promoteEmployee, fireEmployee, ensureCompanyCodes, describeEmployeeLevel, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY, DEFAULT_LEVELS, DEFAULT_NUMBERING } from "../shared/company-org.mjs";
 import { emptyLedger, transitionOrder, ORDER_STATES } from "../shared/company-ledger.mjs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -425,6 +425,160 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     return numbering;
   }
 
+  function makeOpId(prefix) {
+    return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  }
+
+  async function withCompanyRefresh(fn) {
+    return store.withLock(async () => {
+      const loaded = await store.load();
+      runtime.company = loaded.company || runtime.company;
+      return fn();
+    });
+  }
+
+  async function handleCompanyOp(req, url, body) {
+    if (!body || typeof body !== "object") {
+      return { ok: false, code: "E_INVALID_INPUT", message: "请求体必须是 JSON 对象" };
+    }
+    const { action, args = {} } = body;
+    try {
+      switch (action) {
+        case "createDepartment": {
+          if (!args.name || typeof args.name !== "string" || args.name.trim() === "") {
+            return { ok: false, code: "E_INVALID_INPUT", message: "name 必填" };
+          }
+          return await withCompanyRefresh(async () => {
+            const id = args.id || makeOpId("dept");
+            runtime.company = createDepartment(runtime.company, {
+              id,
+              name: args.name,
+              code: args.code,
+              charter: args.charter,
+              capacity: args.capacity,
+              accepts: args.accepts,
+            });
+            await store.saveCompany(runtime.company);
+            const dept = runtime.company.departments.find((d) => d.id === id);
+            await store.appendAudit({ type: "department_created", departmentId: id, code: dept?.code });
+            return { ok: true, departmentId: id, code: dept?.code };
+          });
+        }
+        case "updateDepartment": {
+          const departmentId = args.departmentId || args.id;
+          if (!departmentId) {
+            return { ok: false, code: "E_INVALID_INPUT", message: "departmentId 必填" };
+          }
+          return await withCompanyRefresh(async () => {
+            runtime.company = updateDepartment(runtime.company, departmentId, {
+              name: args.name,
+              code: args.code,
+              charter: args.charter,
+              capacity: args.capacity,
+              accepts: args.accepts,
+            });
+            await store.saveCompany(runtime.company);
+            const dept = runtime.company.departments.find((d) => d.id === departmentId);
+            await store.appendAudit({ type: "department_updated", departmentId, code: dept?.code });
+            return { ok: true, departmentId, code: dept?.code };
+          });
+        }
+        case "createEmployee": {
+          if (!args.displayName || typeof args.displayName !== "string" || args.displayName.trim() === "") {
+            return { ok: false, code: "E_INVALID_INPUT", message: "displayName 必填" };
+          }
+          return await withCompanyRefresh(async () => {
+            assertDepartmentExists(args.department);
+            const id = args.id || makeOpId("emp");
+            runtime.company = createEmployee(runtime.company, {
+              id,
+              displayName: args.displayName,
+              department: args.department,
+              role: args.role,
+              kind: args.kind,
+              skills: args.skills,
+              code: args.code,
+              channel: args.channel,
+              level: args.level,
+            });
+            await store.saveCompany(runtime.company);
+            const emp = runtime.company.employees.find((e) => e.id === id);
+            const levelInfo = describeEmployeeLevel(emp, runtime.config.levels);
+            await store.appendAudit({ type: "employee_hired", employeeId: id, code: emp?.code });
+            return { ok: true, employeeId: id, code: emp?.code, channel: levelInfo.channel, level: levelInfo.level, levelName: levelInfo.levelName };
+          });
+        }
+        case "promoteEmployee": {
+          const employeeId = args.employeeId;
+          if (!employeeId) {
+            return { ok: false, code: "E_INVALID_INPUT", message: "employeeId 必填" };
+          }
+          return await withCompanyRefresh(async () => {
+            const result = promoteEmployee(runtime.company, employeeId, { level: args.level, channel: args.channel }, { levels: runtime.config.levels });
+            runtime.company = result.company;
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "employee_promoted", employeeId, from: result.from, to: result.to });
+            return { ok: true, from: result.from, to: result.to };
+          });
+        }
+        case "fireEmployee": {
+          const employeeId = args.employeeId;
+          if (!employeeId) {
+            return { ok: false, code: "E_INVALID_INPUT", message: "employeeId 必填" };
+          }
+          return await withCompanyRefresh(async () => {
+            const target = runtime.company.employees.find((e) => e.id === employeeId);
+            if (!target) {
+              return { ok: false, code: "E_NOT_FOUND", message: `员工 ${employeeId} 不存在` };
+            }
+            runtime.company = fireEmployee(runtime.company, employeeId);
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "employee_fired", employeeId });
+            return { ok: true, employeeId, state: EMPLOYEE_STATE.FIRED };
+          });
+        }
+        case "moveEmployee": {
+          const employeeId = args.employeeId;
+          const department = args.department;
+          if (!employeeId) {
+            return { ok: false, code: "E_INVALID_INPUT", message: "employeeId 必填" };
+          }
+          if (department === undefined) {
+            return { ok: false, code: "E_INVALID_INPUT", message: "department 必填" };
+          }
+          return await withCompanyRefresh(async () => {
+            const emp = runtime.company.employees.find((e) => e.id === employeeId);
+            if (!emp) {
+              throw Object.assign(new Error(`员工 ${employeeId} 不存在`), { code: "E_NOT_FOUND" });
+            }
+            if (department === "") {
+              if (emp.kind !== EMPLOYEE_KIND.SHARED) {
+                return { ok: false, code: "E_INVALID_INPUT", message: "仅 shared 类型允许清空部门" };
+              }
+              runtime.company = updateEmployee(runtime.company, employeeId, { department: "" });
+            } else {
+              const dept = runtime.company.departments.find((d) => d.id === department);
+              if (!dept) {
+                return { ok: false, code: "E_NOT_FOUND", message: `部门 ${department} 不存在` };
+              }
+              if (emp.kind !== EMPLOYEE_KIND.SHARED) {
+                // permanent/temp/manager 目标部门必须非空（已由 department 非空保证）
+              }
+              runtime.company = updateEmployee(runtime.company, employeeId, { department });
+            }
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "employee_moved", employeeId, department });
+            return { ok: true, employeeId, department };
+          });
+        }
+        default:
+          return { ok: false, code: "E_UNKNOWN_ACTION", message: `未知 action: ${action}` };
+      }
+    } catch (err) {
+      return { ok: false, code: err.code || "E_INTERNAL", message: err.message };
+    }
+  }
+
   function defineRoutes() {
     return [
       { method: "GET", path: "/company/overview", handler: (req, url) => view() },
@@ -432,6 +586,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
       { method: "GET", path: "/company/board", handler: (req, url) => view().board },
       { method: "GET", path: "/company/costs", handler: (req, url) => view().costs },
       { method: "GET", path: "/company/orders", handler: (req, url) => view().orders },
+      { method: "POST", path: "/company/op", handler: handleCompanyOp },
     ];
   }
 

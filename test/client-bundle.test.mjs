@@ -229,21 +229,18 @@ function treeText(node) {
   return self + (node.children || []).map(treeText).join(" ") + " " + JSON.stringify(node.props || {});
 }
 
-test("Panel：部门架构弹层渲染出小组名 + 中文显示名 + target", () => {
-  // seed：tab 用默认 company，deptOrg 在 briefOpen 之后（索引 7）设为 "__all__" 打开弹层
-  const react = makeReact([sampleView(), null, false, "company", null, null, false, "__all__"]);
+test("Panel：v4 默认「总架构」页挂载组织架构面板，注册小组版弹层已移除", () => {
+  // seed 只给前三个 hook：tab 走组件内 useState("company")
+  const react = makeReact([sampleView(), null, false]);
   const { exports } = loadBundle(react);
   const tree = exports.__internals.Panel({ t: (k) => k });
 
   assert.equal(tree.type, "div");
-  const text = treeText(tree);
-  assert.match(text, /数据组/);
-  assert.match(text, /数据整理员/);
-  assert.match(text, /data-organizer/);
-  assert.match(text, /知识库整理员/);
-  assert.match(text, /office-docx/);
-  // 统计行（t 替身直接用 key 作文案，故这里断言统计键出现）
-  assert.match(text, /stats/);
+  const { CompanyOrgPanel } = exports.__internals;
+  assert.ok(findComponent(tree, CompanyOrgPanel), "默认应渲染总架构组织架构面板（CompanyOrgPanel）");
+  assert.equal("DeptOrgPanel" in exports.__internals, false, "v4 已移除注册小组版 DeptOrgPanel（组织架构一律走公司化）");
+  // Panel 自身只负责页签与数据加载；组织架构内容由 CompanyOrgPanel 渲染（其断言见 company-panel.test.mjs）
+  assert.match(treeText(tree), /cpTab/);
 });
 
 test("Panel：state 为 null 时渲染占位而不抛错", () => {
@@ -302,9 +299,8 @@ test("Panel：默认落在「总架构」页，页签顺序总架构→部门架
   );
   assert.equal(labels.some((l) => l.startsWith("tabOrg")), false, "不应再有「部门架构」页签");
 
-  const { CompanyOrgPanel, DeptOrgPanel } = exports.__internals;
+  const { CompanyOrgPanel } = exports.__internals;
   assert.ok(findComponent(tree, CompanyOrgPanel), "默认应渲染总架构页（CompanyOrgPanel）");
-  assert.equal(findComponent(tree, DeptOrgPanel), null, "默认不应渲染部门架构弹层");
 });
 
 test("Panel：「未登记」页可对单个成员发出 addMember 请求", async () => {
@@ -321,34 +317,6 @@ test("Panel：「未登记」页可对单个成员发出 addMember 请求", asyn
   const op = calls.find((c) => c.url.endsWith("/op"));
   assert.equal(op.body.op, "addMember");
   assert.equal(op.body.args.target, "brand-new-member");
-});
-
-/** 渲染 Panel 的「部门架构」弹层，并把内嵌的 DeptOrgPanel 真正展开成元素树。
- *  Panel 用 h(DeptOrgPanel, props) 挂子组件，但它不是 Panel 树里的 DOM，
- *  所以要取出该元素的 props 再调用一次组件函数；弹层由 deptOrg（索引 7）seed 打开。 */
-function renderDeptOrgPage(exports) {
-  const { Panel, DeptOrgPanel } = exports.__internals;
-  const el = findComponent(Panel({ t: (k) => k }), DeptOrgPanel);
-  assert.ok(el, "部门架构弹层应渲染 DeptOrgPanel");
-  return DeptOrgPanel(el.props);
-}
-
-/** 部门架构弹层的 seed：tab 默认 company，deptOrg="__all__" 打开弹层 */
-const DEPT_ORG_MODAL_SEED = () => [sampleView(), null, false, "company", null, null, false, "__all__"];
-
-test("部门架构弹层：部门「移除」按钮先弹确认，确认后才发 deleteGroup", async () => {
-  const calls = [];
-  // 用户取消 → 不发请求
-  const denied = loadBundle(makeReact(DEPT_ORG_MODAL_SEED()), { fetch: recordingFetch(calls), confirm: () => false });
-  await collectButtons(renderDeptOrgPage(denied.exports)).find((b) => b.label === "remove").onClick();
-  assert.equal(calls.length, 0, "取消确认后不应发请求");
-
-  // 用户确认 → 发 deleteGroup
-  const allowed = loadBundle(makeReact(DEPT_ORG_MODAL_SEED()), { fetch: recordingFetch(calls), confirm: () => true });
-  await collectButtons(renderDeptOrgPage(allowed.exports)).find((b) => b.label === "remove").onClick();
-  const op = calls.find((c) => c.url.endsWith("/op"));
-  assert.equal(op.body.op, "deleteGroup");
-  assert.equal(op.body.args.id, "g-1");
 });
 
 test("Panel：后端不可用时 fetch 失败被捕获为错误条，不抛到渲染层", async () => {
