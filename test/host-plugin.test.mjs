@@ -252,6 +252,23 @@ test("apply() 注册 29 个工具（16 名册 + 13 公司化），且参数 sche
   }
 });
 
+test("M/P 双通道：company_hire 暴露 code/channel/level，company_admin 暴露新 action", () => {
+  const { ctx, tools } = mockCtx();
+  PLUGIN.apply(ctx);
+
+  const hire = tools.get("company_hire");
+  for (const key of ["code", "channel", "level"]) {
+    assert.ok(hire.parameters.properties[key], `company_hire.parameters 缺少 ${key}`);
+  }
+  assert.deepEqual(hire.parameters.properties.channel.enum, ["M", "P"], "channel 枚举应为 M/P");
+
+  const admin = tools.get("company_admin");
+  const actions = admin.parameters.properties.action.enum;
+  for (const action of ["createDepartment", "createEmployee", "setRoutingRules", "updateDepartment", "promoteEmployee", "setNumbering"]) {
+    assert.ok(actions.includes(action), `company_admin.action 缺少 ${action}`);
+  }
+});
+
 test("apply() 注册 HTTP 路由，content-type 为 utf-8 JSON", async () => {
   const { ctx, routes } = mockCtx();
   PLUGIN.apply(ctx);

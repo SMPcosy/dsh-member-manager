@@ -8,7 +8,11 @@
  * - 双读兼容：先读 config.org（公司化章节），读不到再回落 config 根层同名键。
  *   兼容 plugin-builder 既有宿主代码（resolveCompanyConfig(rawConfig)，rawConfig 可为 undefined）。
  * - org.enabled === false 才关闭（默认 true）；根层 enabled 不回读（插件自身开关与公司开关分离）。
+ * - 0.3.0 增量（docs/16）：levels（M/P 双通道等级目录）与 numbering（编号体系），
+ *   均走 org 优先 + 根层回落；任一非法回退默认（DEFAULT_LEVELS / DEFAULT_NUMBERING）+ warning。
  */
+
+import { DEFAULT_LEVELS, DEFAULT_NUMBERING } from "./company-org.mjs";
 
 const limitDefaults = Object.freeze({
   maxConcurrentPerProvider: 4,
@@ -27,6 +31,61 @@ const enumFields = Object.freeze({
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const isNonEmptyString = (v) => typeof v === "string" && v.trim() !== "";
 const isBoolish = (v) => typeof v === "boolean";
+
+/* ------------------------------------------------------------------ */
+/* M/P 双通道等级与编号配置校验（docs/16 §1.1 / §6）                    */
+/* ------------------------------------------------------------------ */
+
+const LEVEL_CHANNELS = ["M", "P"];
+const SEQ_PLACEHOLDER = /^seq(?::[1-8])?$/;
+const STATIC_PLACEHOLDERS = new Set(["dept", "channel", "level"]);
+
+/**
+ * 校验等级目录，返回 {ok, value}；value 为规范化深拷贝（保留 description 等扩展字段）。
+ * 任一非法 → ok:false（调用侧整体回退 DEFAULT_LEVELS + 一条 warning）。
+ */
+function validateLevels(candidate) {
+  if (!isPlainObject(candidate)) return { ok: false };
+  const out = {};
+  for (const ch of LEVEL_CHANNELS) {
+    const track = candidate[ch];
+    if (!isPlainObject(track)) return { ok: false };
+    if (!isNonEmptyString(track.label)) return { ok: false };
+    if (!Array.isArray(track.levels) || track.levels.length === 0) return { ok: false };
+    const seen = new Set();
+    const outLevels = [];
+    for (const entry of track.levels) {
+      if (!isPlainObject(entry)) return { ok: false };
+      if (!isNonEmptyString(entry.code) || !isNonEmptyString(entry.name)) return { ok: false };
+      const code = entry.code.trim();
+      if (!code.startsWith(ch)) return { ok: false };
+      if (seen.has(code)) return { ok: false };
+      seen.add(code);
+      outLevels.push({ ...entry, code });
+    }
+    out[ch] = { ...track, label: track.label, levels: outLevels };
+  }
+  return { ok: true, value: out };
+}
+
+/**
+ * 校验编号条目（pattern/start 已与默认值合并后的形态）。
+ * pattern 必须含 {seq} 或 {seq:N}(1≤N≤8)，所有占位符 ∈ {seq, seq:N, dept, channel, level}；start 正整数。
+ */
+function validateNumberingEntry(merged) {
+  if (!isPlainObject(merged)) return false;
+  const pattern = merged.pattern;
+  if (typeof pattern !== "string" || pattern.length === 0) return false;
+  const matches = [...pattern.matchAll(/\{([^{}]+)\}/g)].map((m) => m[1]);
+  if (matches.length === 0) return false;
+  let hasSeq = false;
+  for (const p of matches) {
+    if (SEQ_PLACEHOLDER.test(p)) hasSeq = true;
+    else if (!STATIC_PLACEHOLDERS.has(p)) return false;
+  }
+  if (!hasSeq) return false;
+  return Number.isInteger(merged.start) && merged.start > 0;
+}
 
 /**
  * org 小节优先、根层回落的双读字段。返回 { value?, present, source }。
@@ -179,6 +238,50 @@ export function resolveCompanyConfig(raw) {
     }
   }
 
+  // levels：M/P 双通道等级目录（org 优先、根层回落）。任一非法 → 整体回退默认 + 一条 warning。
+  const levelsResolved = withDefault(
+    readField("levels", root).value,
+    DEFAULT_LEVELS,
+    "levels",
+    warnings,
+    (v) => validateLevels(v).ok,
+  ).value;
+  const levels = (() => {
+    const v = validateLevels(levelsResolved);
+    return v.ok ? v.value : JSON.parse(JSON.stringify(DEFAULT_LEVELS));
+  })();
+
+  // numbering：非对象 → 整体回退默认 + warning；条目级校验，非法条目单独回退。
+  const numberingRaw = withDefault(
+    readField("numbering", root).value,
+    DEFAULT_NUMBERING,
+    "numbering",
+    warnings,
+    (v) => isPlainObject(v),
+  ).value;
+  const numbering = {};
+  for (const key of ["employee", "department"]) {
+    const fallbackEntry = DEFAULT_NUMBERING[key];
+    const rawEntry = isPlainObject(numberingRaw) ? numberingRaw[key] : undefined;
+    const merged = {};
+    for (const k of ["pattern", "start"]) {
+      merged[k] = rawEntry?.[k] !== undefined ? rawEntry[k] : fallbackEntry[k];
+    }
+    if (rawEntry !== undefined && !isPlainObject(rawEntry)) {
+      warnings.push(`配置 numbering.${key} 非法（必须为对象），已回退默认`);
+      numbering[key] = JSON.parse(JSON.stringify(fallbackEntry));
+    } else if (validateNumberingEntry(merged)) {
+      numbering[key] = { ...merged, ...(rawEntry ?? {}), pattern: merged.pattern, start: merged.start };
+    } else if (rawEntry !== undefined) {
+      warnings.push(
+        `配置 numbering.${key} 非法（pattern 须含 {seq}/{seq:N}(1≤N≤8)，占位符限 {seq,seq:N,dept,channel,level}，start 正整数），已回退默认`,
+      );
+      numbering[key] = JSON.parse(JSON.stringify(fallbackEntry));
+    } else {
+      numbering[key] = JSON.parse(JSON.stringify(fallbackEntry));
+    }
+  }
+
   const config = {
     enabled,
     autoBoot,
@@ -191,6 +294,8 @@ export function resolveCompanyConfig(raw) {
     departments,
     routingRules,
     toolPolicies,
+    levels,
+    numbering,
   };
   return { config, warnings };
 }

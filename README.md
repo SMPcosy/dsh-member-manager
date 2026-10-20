@@ -37,6 +37,8 @@ Click a heading below to view **English** or **中文** .
 - 💰 **成本与审计**：员工/经理会话的 token 与请求数按「员工 / 部门 / 工单」聚合（`GET /company/costs`）；组织与账本落 `company.json`，审计追加到 `audit.jsonl`（append-only、加载时对账重放）。`company_admin` 当前支持 `createDepartment` / `createEmployee` / `setRoutingRules`。
 - 🧯 **全链路降级**：宿主没有 `agents` / `subagents` 服务时，公司化工具返回 `E_NO_AGENTS`，名册覆盖层（既有 16 个名册工具 + 面板 + 路由）不受影响；Agent 启动失败只记 warning，不阻断插件加载。
 - 🧩 **新增 Web 只读接口**：`GET /company/{overview,org,board,costs,orders}`，统一 `{ ok: true, data }` 信封；`GET /state` 附带 `company` 摘要。
+- 🎖️ **M/P 双通道等级与编号体系**：管理通道（M1 主管 → M5 副总裁）与专业技术通道（P1 初级工程师 → P6 首席专家）双通道；每名员工有唯一工号（默认 `E0001`、`E0002`…）并标注等级与部门，每个部门有唯一编号（默认 `D01`、`D02`…），两者都支持自定义模板。`company_hire` 可指定 `code/channel/level`，`company_admin` 新增 `updateDepartment` / `promoteEmployee` / `setNumbering`；历史数据在 boot 时自动补号，不丢员工。
+- 🖥️ **「公司架构」可视化面板**：设置页/侧栏面板新增第 6 个页签，只读展示部门编号、编制与 M/P 分栏的员工（工号 / 等级徽章 / 姓名 / 岗位 / 状态），5 秒轮询 + 手动刷新，数据源 `GET /api/dsh-member-manager/company/overview`。
 - 🎯 **组织架构图任务视角（并入本版）**：组织架构图从「全团队」改为**任务作用域**——一个 root 会话就是一个任务，图上只出现这个任务真正需要的参与者（大总管 + `parentSession` 指向它的成员），不再把整个名册都铺出来。
 - 🔽 **任务下拉切换（并入本版）**：右栏 tab 顶部新增任务选择器（由 `GET /orgmap` 返回的 `tasks[]` 驱动，带运行中标记与人数），切任务即换图；没有任何任务时显示空态并禁用下拉。
 - 🧭 布局不变（并入本版）：仍是并联横向 / 串联纵向的三层视图（大总管 → 分组色块 → 组内成员），工作区卡片、结构线与动态引导线保留；任务内成员的 token / 用时只统计该任务各会话的用量。
@@ -52,6 +54,38 @@ Click a heading below to view **English** or **中文** .
 5. 停机/卸载时运行时按「停派工 → 等 idle（超时）→ cancel → drainChildren → dispose owner」顺序优雅收尾，审计落盘。
 
 > 公司化数据只写 `~/.dsh/storages/member-manager/`（`company.json`、`ledger/`、`audit/`），绝不写入插件目录或工作区。配置见下一节「公司化配置」。
+
+## M/P 双通道等级与编号
+
+**双通道**：`manager` 走管理通道 M，`staff` / `window` 走专业技术通道 P；等级目录默认：
+
+| 通道 | 等级 |
+| --- | --- |
+| 管理 M | M1 主管 → M2 经理 → M3 高级经理 → M4 总监 → M5 副总裁 |
+| 专业技术 P | P1 初级工程师 → P2 工程师 → P3 高级工程师 → P4 资深工程师 → P5 技术专家 → P6 首席专家 |
+
+`company_hire` 不传等级时按岗位取默认（manager→M2，staff→P3，window→P1）；`company_admin({action:"promoteEmployee"})` 同通道只允许逐级晋升（±1 级），跨通道必须显式指定目标等级且 `role` 随之改变（window 不可转 M，转 M 前必须有部门）。历史数据缺等级/编号时在启动时自动补齐（等级非法回退默认、不丢员工）。
+
+**编号**：员工编号默认 `E{seq:4}`（E0001 起），部门编号默认 `D{seq:2}`（D01 起）；模板占位符 `{seq}` / `{seq:N}` / `{dept}` / `{channel}` / `{level}`，全公司唯一，已占用则自动跳号。自定义示例：
+
+```json
+{
+  "company": {
+    "numbering": {
+      "employee": { "pattern": "E{dept}-{seq:4}", "start": 1 },
+      "department": { "pattern": "D{seq:2}", "start": 1 }
+    },
+    "levels": {
+      "M": { "label": "管理通道", "levels": [{ "code": "M1", "name": "主管" }, { "code": "M2", "name": "经理" }] },
+      "P": { "label": "专业技术通道", "levels": [{ "code": "P1", "name": "初级工程师" }, { "code": "P2", "name": "工程师" }] }
+    }
+  }
+}
+```
+
+优先级：`company.json` 内持久化的 `numbering`（如 `company_admin.setNumbering` 写入）> 配置 `company.numbering` > 内置默认；等级同理。员工提示词头部会带一行身份（工号 / 等级 / 通道 / 部门编号），派工时员工直接看得到。
+
+**面板**：设置页 →「成员管理」→「公司架构」页签（第 6 个页签）只读展示以上内容，改动请用 `company_hire` / `company_admin`。
 
 ## v0.2.4 更新要点
 
@@ -199,6 +233,8 @@ dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 | `company.departments` | `[]`                    | 种子部门：`[{id,name,manager,skills,capacity}]` |
 | `company.routingRules` | `[]`                  | 下单路由规则：`[{match, dept}]`（按标题/类型匹配部门） |
 | `company.toolPolicies` | `{}`                   | 每条线的工具策略覆盖：`{window:{allow,deny}, manager:{...}, staff:{...}}` |
+| `company.levels` | 内置 M1–M5 / P1–P6 目录 | 双通道等级目录覆盖：`{M:{label,levels:[{code,name}]},P:{...}}`（非法整体回退默认 + warning） |
+| `company.numbering` | `{employee:{pattern:"E{seq:4}",start:1}, department:{pattern:"D{seq:2}",start:1}}` | 工号/部门编号模板；占位符 `{seq}`/`{seq:N}`/`{dept}`/`{channel}`/`{level}`；也可用 `company_admin.setNumbering` 运行时修改 |
 
 > 自动更新默认**不**在启动时自动检查（`checkOnBoot:false`），且**永远不会**在进程运行中替换自身：面板的「应用」会拒绝并给出命令，需退出 DSH 后在终端运行 `node scripts/apply-pending.mjs --data-dir ... --install-dir ... --yes`。只有显式设置 `allowOnlineApply:true` 才允许在线应用（不推荐）。
 
@@ -240,8 +276,8 @@ dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 | `company_escalate` | 经理 | 升级：`{orderId,reason?}`，记录 `escalatedAt/reason` 并转发 owner |
 | `company_accept` | 员工 | 接受派工：`{attemptId}` |
 | `company_ask_help` | 员工 | 求助：`{attemptId,question?}`，落账并转发经理 |
-| `company_hire` | OWNER | 新增员工：`{id,displayName?,department?,role?,kind?}` |
-| `company_admin` | OWNER | 控制面：`{action:"createDepartment"|"createEmployee"|"setRoutingRules",args}` |
+| `company_hire` | OWNER | 新增员工：`{id,displayName?,department?,role?,kind?,code?,channel?,level?}`（可指定工号/通道/等级，缺省按 role 推导并自动编号） |
+| `company_admin` | OWNER | 控制面：`{action:"createDepartment"|"createEmployee"|"updateDepartment"|"promoteEmployee"|"setRoutingRules"|"setNumbering",args}`（`promoteEmployee` 同通道逐级晋升/跨通道显式转，`setNumbering` 改编号模板） |
 
 > 越权调用（例如员工线调 `company_assign`）返回 `{ ok:false, code:"E_TOOL_LINE" }`；公司运行时未就绪（宿主缺 `agents`/`subagents`）返回 `{ ok:false, code:"E_NO_AGENTS" }`。
 
@@ -254,6 +290,7 @@ dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 | `settings.section`  | 设置页 →「成员管理」分区   |
 | `sidebar.panellist` | 侧栏「👥 成员管理」图标   |
 | `main`              | 独立主页面（keyed 面板） |
+| 面板页签            | 「公司架构」（第 6 个页签，只读）：部门编号 + 编制 + M/P 分栏员工 + 等级图例，5 秒轮询 `GET /company/overview` |
 
 后端 HTTP 路由：`/api/dsh-member-manager/{state, op, skills, models, overrides, health, backups, update, workflow}`；
 公司化只读路由：`/api/dsh-member-manager/company/{overview, org, board, costs, orders}`（返回 `{ ok: true, data }` 信封）。
@@ -307,11 +344,45 @@ MIT
 - 💰 **Cost & audit**: employee/manager session tokens and request counts are aggregated per employee / department / order (`GET /company/costs`); org and ledger live in `company.json` while an append-only `audit.jsonl` is replayed on load. `company_admin` currently supports `createDepartment` / `createEmployee` / `setRoutingRules`.
 - 🧯 **Degrades everywhere**: with no `agents` / `subagents` service the company tools answer `E_NO_AGENTS` while the roster overlay (existing 16 roster tools, panel, routes) keeps working; agent boot failures only log a warning and never break plugin load.
 - 🧩 **New read-only web routes**: `GET /company/{overview,org,board,costs,orders}` in a uniform `{ ok: true, data }` envelope; `GET /state` carries a `company` summary.
+- 🎖️ **M/P dual-channel levels & numbering**: two career channels — Management (M1 Supervisor → M5 VP) and Professional (P1 Junior Engineer → P6 Principal Expert). Every employee gets a unique employee code (default `E0001`, `E0002`…) plus a level and department; every department gets a unique code (default `D01`, `D02`…). Both patterns are customizable. `company_hire` accepts `code/channel/level`; `company_admin` gains `updateDepartment` / `promoteEmployee` / `setNumbering`; legacy data is back-filled on boot without dropping employees.
+- 🖥️ **"Company org" visual panel**: a sixth tab in the settings/sidebar panel shows department codes, headcount and M/P-split employee rows (code / level badge / name / title / status), polled every 5s with manual refresh from `GET /api/dsh-member-manager/company/overview`.
 - 🎯 **Task-scoped org chart (folded into this release)**: the chart shows only the current task's participants (lead + members whose `parentSession` points at it) instead of the whole roster.
 - 🔽 **Task switcher (folded into this release)**: a selector driven by `tasks[]` from `GET /orgmap` (running marker + member count); empty state disables the picker.
 - 🧭 Layout unchanged: the three-level parallel-across / serial-down view (lead → group chips → members) keeps its workspace cards, structural lines and animated guide lines; token/elapsed numbers count only that task's sessions.
 - 🔌 `GET /orgmap` is now contract `version: 2` with `tasks` / `task` / `lead` / `groups` / `members` / `dispatch` / `dependency` / `totals`, and accepts `?task=<rootSessionId>`; an unknown/absent id falls back to the most recently active task.
 - 🧪 Tests: all existing tests stay green, plus new company unit tests (org / ledger / router / store / config), fake-host closed-loop runtime tests and package-metadata tests (final count follows `npm test` in this repo).
+
+## M/P dual-channel levels & numbering
+
+**Channels**: `manager` belongs to the Management channel M, `staff` / `window` to the Professional channel P. Default level catalog:
+
+| Channel | Levels |
+| --- | --- |
+| Management M | M1 Supervisor → M2 Manager → M3 Senior Manager → M4 Director → M5 VP |
+| Professional P | P1 Junior Engineer → P2 Engineer → P3 Senior Engineer → P4 Staff Engineer → P5 Technical Expert → P6 Principal Expert |
+
+`company_hire` defaults the level from the role (manager→M2, staff→P3, window→P1). `company_admin({action:"promoteEmployee"})` allows ±1 step within the same channel; crossing channels requires an explicit target level and flips `role` (window cannot become M; M requires a department). Legacy records missing a level/code are back-filled on boot — an invalid level falls back to the role default and the employee is kept.
+
+**Numbering**: employee codes default to `E{seq:4}` (from E0001), department codes to `D{seq:2}` (from D01). Template placeholders: `{seq}` / `{seq:N}` / `{dept}` / `{channel}` / `{level}`; codes are company-unique and numbering skips taken values. Example:
+
+```json
+{
+  "company": {
+    "numbering": {
+      "employee": { "pattern": "E{dept}-{seq:4}", "start": 1 },
+      "department": { "pattern": "D{seq:2}", "start": 1 }
+    },
+    "levels": {
+      "M": { "label": "Management", "levels": [{ "code": "M1", "name": "Supervisor" }, { "code": "M2", "name": "Manager" }] },
+      "P": { "label": "Professional", "levels": [{ "code": "P1", "name": "Junior Engineer" }, { "code": "P2", "name": "Engineer" }] }
+    }
+  }
+}
+```
+
+Precedence: persisted `numbering` in `company.json` (e.g. via `company_admin.setNumbering`) > config `company.numbering` > built-in defaults; levels work the same way. Employee prompts start with an identity line (code / level / channel / department code) so a dispatched employee sees exactly who they are.
+
+**Panel**: Settings → "Member Manager" → "Company org" tab (the sixth tab) renders all of the above read-only; mutate through `company_hire` / `company_admin`.
 
 ## v0.2.4 highlights
 
@@ -456,6 +527,8 @@ All options are optional (omitted ⇒ default):
 | `company.departments` | `[]`                    | Seed departments: `[{id,name,manager,skills,capacity}]` |
 | `company.routingRules` | `[]`                  | Order routing rules: `[{match, dept}]` |
 | `company.toolPolicies` | `{}`                   | Per-line tool policy overrides: `{window:{allow,deny}, manager:{...}, staff:{...}}` |
+| `company.levels` | built-in M1–M5 / P1–P6 catalog | Dual-channel level catalog override: `{M:{label,levels:[{code,name}]},P:{...}}` (invalid input falls back to defaults with a warning) |
+| `company.numbering` | `{employee:{pattern:"E{seq:4}",start:1}, department:{pattern:"D{seq:2}",start:1}}` | Employee/department code templates; placeholders `{seq}`/`{seq:N}`/`{dept}`/`{channel}`/`{level}`; also mutable at runtime via `company_admin.setNumbering` |
 
 > Auto-update does **not** check on boot by default (`checkOnBoot:false`) and **never** replaces the running plugin in-process: the panel's Apply refuses with a command; quit DSH and run `node scripts/apply-pending.mjs --data-dir ... --install-dir ... --yes`. Only `allowOnlineApply:true` (not recommended) enables in-process apply.
 
@@ -497,8 +570,8 @@ All options are optional (omitted ⇒ default):
 | `company_escalate` | manager | Escalate: `{orderId,reason?}` records `escalatedAt/reason` and forwards to the owner |
 | `company_accept` | staff | Accept a dispatch: `{attemptId}` |
 | `company_ask_help` | staff | Ask for help: `{attemptId,question?}` records and forwards to the manager |
-| `company_hire` | OWNER | Add an employee: `{id,displayName?,department?,role?,kind?}` |
-| `company_admin` | OWNER | Control plane: `{action:"createDepartment"|"createEmployee"|"setRoutingRules",args}` |
+| `company_hire` | OWNER | Add an employee: `{id,displayName?,department?,role?,kind?,code?,channel?,level?}` (code/channel/level optional; derived from role and auto-numbered when omitted) |
+| `company_admin` | OWNER | Control plane: `{action:"createDepartment"|"createEmployee"|"updateDepartment"|"promoteEmployee"|"setRoutingRules"|"setNumbering",args}` (`promoteEmployee` steps one level in-channel or crosses explicitly; `setNumbering` changes code templates) |
 
 > Cross-line calls (e.g. a staff session calling `company_assign`) return `{ ok:false, code:"E_TOOL_LINE" }`; when the host lacks `agents`/`subagents` the company tools return `{ ok:false, code:"E_NO_AGENTS" }`.
 
@@ -511,6 +584,7 @@ All options are optional (omitted ⇒ default):
 | `settings.section`  | Settings → "Member Manager" section |
 | `sidebar.panellist` | "👥 Member Manager" sidebar icon    |
 | `main`              | Standalone main page (keyed panel)  |
+| Panel tab           | "Company org" (6th tab, read-only): department codes + headcount + M/P-split employees + level legend, polls `GET /company/overview` every 5s |
 
 Backend HTTP routes: `/api/dsh-member-manager/{state, op, skills, models, overrides, health, backups, update, workflow}`;
 company read-only routes: `/api/dsh-member-manager/company/{overview, org, board, costs, orders}` (wrapped in `{ ok: true, data }`).

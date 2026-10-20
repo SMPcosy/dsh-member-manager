@@ -89,7 +89,14 @@ await check("四套角色提示词", () => {
   return files.join(",");
 });
 await check("设计/审阅/交付文档", () => {
-  const docs = ["11-公司化改造-接口契约.md", "12-宿主契约实测.md", "13-独立审阅报告.md", "14-验证与安装.md", "15-交付说明与回滚.md"];
+  const docs = [
+    "11-公司化改造-接口契约.md",
+    "12-宿主契约实测.md",
+    "13-独立审阅报告.md",
+    "14-验证与安装.md",
+    "15-交付说明与回滚.md",
+    "16-MP双通道等级与编号契约.md",
+  ];
   for (const d of docs) must(existsSync(path.join(REPO, "docs", d)), `缺少 docs/${d}`);
   return `${docs.length} 篇`;
 });
@@ -98,6 +105,19 @@ await check("安装/切换/回滚脚本", () => {
     must(existsSync(path.join(REPO, "scripts", f)), `缺少 scripts/${f}`);
   }
   return "3 个";
+});
+await check("M/P 等级与面板测试文件", () => {
+  for (const f of ["company-levels.test.mjs", "company-panel.test.mjs"]) {
+    must(existsSync(path.join(REPO, "test", f)), `缺少 test/${f}`);
+  }
+  return "2 个";
+});
+await check("公司架构面板字样", () => {
+  const client = readFileSync(path.join(REPO, "lib", "client.js"), "utf8");
+  for (const s of ["公司架构", "Company org", "company/overview", "cpTab"]) {
+    must(client.includes(s), `lib/client.js 缺少面板字样 ${s}`);
+  }
+  return "zh+en+route";
 });
 await check("cordis.patch.yml 品牌", () => {
   const yml = readFileSync(path.join(REPO, "cordis.patch.yml"), "utf8");
@@ -137,7 +157,23 @@ await check("语法检查 node --check", () => {
 await check("共享内核导出", async () => {
   const mods = {
     "company-config": ["resolveCompanyConfig"],
-    "company-org": ["EMPLOYEE_ROLE", "EMPLOYEE_STATE", "SESSION_POLICY"],
+    "company-org": [
+      "EMPLOYEE_ROLE",
+      "EMPLOYEE_STATE",
+      "SESSION_POLICY",
+      "LEVEL_CHANNEL",
+      "DEFAULT_LEVELS",
+      "DEFAULT_EMPLOYEE_LEVEL",
+      "DEFAULT_NUMBERING",
+      "channelForRole",
+      "resolveLevel",
+      "describeEmployeeLevel",
+      "formatCode",
+      "nextEmployeeCode",
+      "nextDepartmentCode",
+      "ensureCompanyCodes",
+      "promoteEmployee",
+    ],
     "company-ledger": ["createOrder", "transitionOrder", "isOrderReady"],
     "company-router": ["routeTypeToDept", "selectEmployee"],
     "company-store": ["CompanyStore"],

@@ -9,7 +9,7 @@ import { createDispatcher } from "./company-dispatcher.mjs";
 import { createScheduler } from "./company-scheduler.mjs";
 import { CompanyStore } from "../shared/company-store.mjs";
 import { resolveCompanyConfig } from "../shared/company-config.mjs";
-import { emptyCompany, createDepartment, createEmployee, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY } from "../shared/company-org.mjs";
+import { emptyCompany, createDepartment, createEmployee, updateDepartment, promoteEmployee, ensureCompanyCodes, describeEmployeeLevel, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY, DEFAULT_LEVELS, DEFAULT_NUMBERING } from "../shared/company-org.mjs";
 import { emptyLedger, transitionOrder, ORDER_STATES } from "../shared/company-ledger.mjs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -159,8 +159,32 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
       mkTool("company_escalate", { type: "object", properties: { orderId: { type: "string" }, reason: { type: "string" } }, required: ["orderId"] }, company_escalate),
       mkTool("company_accept", { type: "object", properties: { attemptId: { type: "string" } }, required: ["attemptId"] }, company_accept),
       mkTool("company_ask_help", { type: "object", properties: { attemptId: { type: "string" }, question: { type: "string" } }, required: ["attemptId"] }, company_ask_help),
-      mkTool("company_hire", { type: "object", properties: { id: { type: "string" }, displayName: { type: "string" }, department: { type: "string" }, role: { type: "string" }, kind: { type: "string" } }, required: ["id"] }, company_hire),
-      mkTool("company_admin", { type: "object", properties: { action: { type: "string" }, args: { type: "object" } }, required: ["action"] }, company_admin),
+      mkTool("company_hire", {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          displayName: { type: "string" },
+          department: { type: "string" },
+          role: { type: "string" },
+          kind: { type: "string" },
+          code: { type: "string", description: "员工编号，可选" },
+          channel: { type: "string", enum: ["M", "P"], description: "通道：M 管理/P 专业" },
+          level: { type: "string", description: "等级 code，如 M2/P4" },
+        },
+        required: ["id"],
+      }, company_hire),
+      mkTool("company_admin", {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: ["createDepartment", "createEmployee", "setRoutingRules", "updateDepartment", "promoteEmployee", "setNumbering"],
+            description: "管理动作",
+          },
+          args: { type: "object" },
+        },
+        required: ["action"],
+      }, company_admin),
     ];
   }
 
@@ -263,21 +287,37 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     return { ok: true, forwardedTo: res.forwardedTo };
   }
 
+  function assertDepartmentExists(departmentId) {
+    if (departmentId && !runtime.company.departments.find((d) => d.id === departmentId)) {
+      throw Object.assign(new Error(`部门不存在: ${departmentId}`), { code: "E_NOT_FOUND" });
+    }
+  }
+
   async function company_hire(args) {
     return store.withLock(async () => {
-      const loaded = await store.load();
-      runtime.company = loaded.company || runtime.company;
-      runtime.ledger = loaded.ledger || runtime.ledger;
-      runtime.company = createEmployee(runtime.company, {
-        id: args.id,
-        displayName: args.displayName,
-        department: args.department,
-        role: args.role || "staff",
-        kind: args.kind || "permanent",
-      });
-      await store.saveCompany(runtime.company);
-      await store.appendAudit({ type: "employee_hired", employeeId: args.id });
-      return { ok: true };
+      try {
+        const loaded = await store.load();
+        runtime.company = loaded.company || runtime.company;
+        runtime.ledger = loaded.ledger || runtime.ledger;
+        assertDepartmentExists(args.department);
+        runtime.company = createEmployee(runtime.company, {
+          id: args.id,
+          displayName: args.displayName,
+          department: args.department,
+          role: args.role || "staff",
+          kind: args.kind || "permanent",
+          code: args.code,
+          channel: args.channel,
+          level: args.level,
+        });
+        await store.saveCompany(runtime.company);
+        await store.appendAudit({ type: "employee_hired", employeeId: args.id });
+        const emp = runtime.company.employees.find((e) => e.id === args.id);
+        const levelInfo = describeEmployeeLevel(emp, runtime.config.levels);
+        return { ok: true, employeeId: args.id, code: emp.code, channel: levelInfo.channel, level: levelInfo.level, levelName: levelInfo.levelName };
+      } catch (err) {
+        return { ok: false, code: err.code || "E_INVALID_INPUT", message: err.message };
+      }
     });
   }
 
@@ -286,12 +326,27 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
       try {
         switch (args.action) {
           case "createDepartment": {
-            runtime.company = createDepartment(runtime.company, { id: args.args.id, name: args.args.name });
+            runtime.company = createDepartment(runtime.company, { id: args.args.id, name: args.args.name, code: args.args.code });
             await store.saveCompany(runtime.company);
             await store.appendAudit({ type: "department_created", departmentId: args.args.id });
-            break;
+            const newDept = runtime.company.departments.find((d) => d.id === args.args.id);
+            return { ok: true, departmentId: args.args.id, code: newDept?.code };
+          }
+          case "updateDepartment": {
+            runtime.company = updateDepartment(runtime.company, args.args.id, {
+              name: args.args.name,
+              code: args.args.code,
+              accepts: args.args.accepts,
+              capacity: args.args.capacity,
+              charter: args.args.charter,
+            });
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "department_updated", departmentId: args.args.id });
+            const updatedDept = runtime.company.departments.find((d) => d.id === args.args.id);
+            return { ok: true, departmentId: args.args.id, code: updatedDept?.code };
           }
           case "createEmployee": {
+            assertDepartmentExists(args.args.department);
             runtime.company = createEmployee(runtime.company, {
               id: args.args.id,
               displayName: args.args.displayName,
@@ -299,16 +354,36 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
               role: args.args.role,
               kind: args.args.kind,
               skills: args.args.skills,
+              code: args.args.code,
+              channel: args.args.channel,
+              level: args.args.level,
             });
             await store.saveCompany(runtime.company);
             await store.appendAudit({ type: "employee_created", employeeId: args.args.id });
-            break;
+            const createdEmp = runtime.company.employees.find((e) => e.id === args.args.id);
+            const createdLevelInfo = describeEmployeeLevel(createdEmp, runtime.config.levels);
+            return { ok: true, employeeId: args.args.id, code: createdEmp.code, channel: createdLevelInfo.channel, level: createdLevelInfo.level, levelName: createdLevelInfo.levelName };
           }
           case "setRoutingRules": {
             runtime.config.routingRules = args.args.rules || [];
             runtime.company = { ...runtime.company, routingRules: runtime.config.routingRules };
             await store.saveCompany(runtime.company);
             await store.appendAudit({ type: "routing_rules_set", count: (args.args.rules || []).length });
+            break;
+          }
+          case "promoteEmployee": {
+            const result = promoteEmployee(runtime.company, args.args.employeeId, { level: args.args.level, channel: args.args.channel }, { levels: runtime.config.levels });
+            runtime.company = result.company;
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "employee_promoted", employeeId: args.args.employeeId, from: result.from, to: result.to });
+            return { ok: true, from: result.from, to: result.to };
+          }
+          case "setNumbering": {
+            const numbering = validateNumberingArgs(args.args, runtime.config.numbering);
+            runtime.config.numbering = numbering;
+            runtime.company = { ...runtime.company, numbering };
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "numbering_set", numbering });
             break;
           }
           default:
@@ -319,6 +394,35 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         return { ok: false, code: err.code || "E_INTERNAL", message: err.message };
       }
     });
+  }
+
+  function validateNumberingArgs(args, fallback = DEFAULT_NUMBERING) {
+    const numbering = JSON.parse(JSON.stringify(fallback));
+    if (!args || typeof args !== "object") return numbering;
+    const allowed = new Set(["seq", "seq:1", "seq:2", "seq:3", "seq:4", "seq:5", "seq:6", "seq:7", "seq:8", "dept", "channel", "level"]);
+    for (const key of ["employee", "department"]) {
+      const entry = args[key] || args[`${key}Pattern`] || args[`${key}Start`] !== undefined ? {} : undefined;
+      if (!entry) continue;
+      const pattern = args[key]?.pattern ?? args[`${key}Pattern`];
+      const start = args[key]?.start ?? args[`${key}Start`];
+      if (typeof pattern === "string") {
+        if (!pattern.includes("{seq") && !pattern.includes("{seq:")) {
+          throw Object.assign(new Error("编号模板必须包含 {seq} 或 {seq:N}"), { code: "E_INVALID_NUMBERING" });
+        }
+        const found = pattern.match(/\{([^}]*)\}/g) || [];
+        for (const ph of found) {
+          const name = ph.slice(1, -1);
+          if (!allowed.has(name)) {
+            throw Object.assign(new Error(`编号模板含非法占位符 ${name}`), { code: "E_INVALID_NUMBERING" });
+          }
+        }
+        numbering[key].pattern = pattern;
+      }
+      if (typeof start === "number" && Number.isInteger(start) && start > 0) {
+        numbering[key].start = start;
+      }
+    }
+    return numbering;
   }
 
   function defineRoutes() {
@@ -340,13 +444,34 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     if (!caps.hasSubagents) {
       bootWarnings.push("ctx.subagents 不可用，运行时降级");
     }
+    let loadedCompany = null;
     try {
       const loaded = await store.load();
       runtime.company = loaded.company || runtime.company;
       runtime.ledger = loaded.ledger || runtime.ledger;
+      loadedCompany = loaded.company || null;
       if (loaded.warnings) bootWarnings.push(...loaded.warnings);
     } catch (err) {
       bootWarnings.push(`store.load 失败: ${err.message}`);
+    }
+    // 编号：company.numbering > config.numbering > DEFAULT_NUMBERING
+    const numbering = runtime.company.numbering || config.numbering || DEFAULT_NUMBERING;
+    runtime.config.numbering = numbering;
+    if (!runtime.company.numbering) {
+      runtime.company = { ...runtime.company, numbering };
+    }
+    // 自动补号（历史数据迁移）
+    try {
+      const before = JSON.stringify(runtime.company);
+      const ensured = ensureCompanyCodes(runtime.company, { levels: runtime.config.levels, numbering: runtime.config.numbering });
+      runtime.company = ensured.company;
+      if (ensured.warnings.length > 0) bootWarnings.push(...ensured.warnings);
+      if (JSON.stringify(runtime.company) !== before) {
+        await store.saveCompany(runtime.company);
+        await store.appendAudit({ type: "company.codes.backfilled", count: ensured.warnings.length });
+      }
+    } catch (err) {
+      bootWarnings.push(`补号失败: ${err.message}`);
     }
     if (runtime.company.routingRules) {
       runtime.config.routingRules = runtime.company.routingRules;
@@ -469,18 +594,35 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
   }
 
   function view() {
+    const deptMap = new Map((runtime.company.departments || []).map((d) => [d.id, d]));
+    const employees = (runtime.company.employees || []).map((e) => {
+      const dept = deptMap.get(e.department);
+      const levelInfo = describeEmployeeLevel(e, runtime.config.levels);
+      return {
+        ...e,
+        departmentCode: dept?.code ?? null,
+        levelName: levelInfo.levelName,
+      };
+    });
+    const departments = (runtime.company.departments || []).map((d) => {
+      const manager = employees.find((e) => e.department === d.id && e.role === EMPLOYEE_ROLE.MANAGER);
+      return {
+        ...d,
+        employeeCount: employees.filter((e) => e.department === d.id).length,
+        managerId: manager?.id ?? null,
+      };
+    });
     return {
       enabled: config.enabled,
       status: booted ? "running" : "stopped",
       warnings: bootWarnings,
-      org: {
-        departments: runtime.company.departments || [],
-        employees: runtime.company.employees || [],
-      },
+      org: { departments, employees },
       board: {
         orders: (runtime.ledger.orders || []).length,
         done: (runtime.ledger.orders || []).filter((o) => o.state === "done").length,
       },
+      levels: runtime.config.levels,
+      numbering: runtime.config.numbering,
       costs: runtime.costs,
       orders: (runtime.ledger.orders || []).slice(-50),
     };

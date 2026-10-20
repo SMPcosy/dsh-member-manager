@@ -3,7 +3,7 @@
  * 员工/会话生命周期：resident/per_task 策略、幂等键、互斥、行隔离。
  */
 
-import { EMPLOYEE_ROLE, EMPLOYEE_STATE, SESSION_POLICY } from "../shared/company-org.mjs";
+import { EMPLOYEE_ROLE, EMPLOYEE_STATE, SESSION_POLICY, describeEmployeeLevel } from "../shared/company-org.mjs";
 import { restrictTools, guardTools, LINE_TOOLS, TOOL_LINES, SOURCE_KIND, normalizeUsage } from "./company-compat.mjs";
 
 export function createEmployeeSessionManager({ runtime, logger }) {
@@ -97,7 +97,7 @@ export function createEmployeeSessionManager({ runtime, logger }) {
         result = await subagents.startActivation({
           provider,
           label: `company-${employee.role}-${employee.id}`,
-          request: { parent: parentAgent, prompt: [{ type: "text", text: buildPromptFor(employee, config, orderId) }], cwd },
+          request: { parent: parentAgent, prompt: [{ type: "text", text: buildPromptFor(employee, orderId, runtime) }], cwd },
           delivery,
           signal: controller.signal,
         });
@@ -230,12 +230,15 @@ export function createEmployeeSessionManager({ runtime, logger }) {
   };
 }
 
-function buildPromptFor(employee, config, orderId) {
+function buildPromptFor(employee, orderId, runtime) {
   const isManager = employee.role === EMPLOYEE_ROLE.MANAGER;
   const isWindow = employee.role === EMPLOYEE_ROLE.WINDOW;
   const roleName = isManager ? "经理" : isWindow ? "窗口" : "员工";
   const line = isManager ? TOOL_LINES.MANAGER : isWindow ? TOOL_LINES.WINDOW : TOOL_LINES.STAFF;
   const toolList = `本角色白名单（越权调用会被拒绝）：${(LINE_TOOLS[line] || []).join("、")}`;
+  const dept = runtime.company?.departments?.find((d) => d.id === employee.department);
+  const levelInfo = describeEmployeeLevel(employee, runtime.config?.levels);
+  const identityLine = `工号：${employee.code || ""} · 等级：${levelInfo.level}（${levelInfo.levelName}，${levelInfo.channel} 通道） · 部门：${dept?.name || "未分配"}（${dept?.code || "-"}）`;
   const duties = isWindow
     ? [
         "- 你负责接单、查询进度与催办：company_order / company_status / company_ask / company_cancel。",
@@ -260,6 +263,8 @@ function buildPromptFor(employee, config, orderId) {
     : "";
 
   return `# 公司运行时 ${roleName}
+
+${identityLine}
 
 你是公司运行时的 ${roleName}（${employee.displayName || employee.id}）。
 

@@ -18,8 +18,19 @@
 - 用工：共享员工借调（`company_borrow`）、员工升级（`company_escalate`）、求助（`company_ask_help`）均落账并转发经理/owner。
 - 稳态：token / 请求数成本按「员工 / 部门 / 工单」拆分统计（`/company/costs`）、单实例文件锁（`E_COMPANY_LOCKED`）、开机自举失败退避重试、shutdown 优雅停工七步（停派工 → 停工 followup → whenIdle 超时 → cancel → drainChildren → dispose owner → 审计）。
 - Web：`/api/dsh-member-manager/company/*` 只读接口（overview / org / board / costs / orders）。
-- 新增测试：共享内核纯函数（org / ledger / router / store / config）、host 运行时 fake 闭环（dispatcher / employees / runtime）、打包/元数据与切换回滚脚本用例（临时 profile），全量 320 用例。
-- 交付自检：`node scripts/verify-company.mjs`（17 项：元数据/文件/语法/导出契约/全量测试/测试不污染用户数据），切换/回滚脚本默认 dry-run。
+- 新增测试：共享内核纯函数（org / ledger / router / store / config）、host 运行时 fake 闭环（dispatcher / employees / runtime）、打包/元数据与切换回滚脚本用例（临时 profile），全量 369 用例。
+- 交付自检：`node scripts/verify-company.mjs`（19 项：元数据/文件/语法/导出契约/M/P 等级与面板/全量测试/测试不污染用户数据），切换/回滚脚本默认 dry-run。
+
+### 新增：M/P 双通道等级、编号与公司架构面板
+
+- **双通道等级**：管理通道（M1 主管 → M2 经理 → M3 高级经理 → M4 总监 → M5 副总裁）与专业技术通道（P1 初级工程师 → P6 首席专家）两套等级目录；`manager` 固定走 M，`staff` / `window` 固定走 P；`company_hire` 可显式指定 `channel`/`level`，缺省按岗位取默认（manager→M2、staff→P3、window→P1）。
+- **员工编号与部门编号**：员工默认 `E{seq:4}`（E0001 起），部门默认 `D{seq:2}`（D01 起）；支持模板占位符 `{seq}`/`{seq:N}`/`{dept}`/`{channel}`/`{level}` 与自定义起始值，编号全公司唯一、已占用自动跳号；可在配置 `company.numbering` 或运行时 `company_admin.setNumbering` 修改，优先级 `company.json` > 配置 > 内置默认。
+- **历史数据迁移**：`normalizeCompany` / boot 阶段 `ensureCompanyCodes` 为缺编号、缺等级的历史员工与部门自动补号补级；等级非法回退岗位默认并记 warning，**不丢弃员工**。
+- **晋升**：`company_admin({action:"promoteEmployee"})` 同通道只允许 ±1 级，跨通道须显式指定目标等级且 `role` 随之改写（window 不可转 M，转 M 前必须有部门）；`updateDepartment` 支持改写部门名称/编号等元数据。
+- **视图与提示词**：`GET /company/overview` / `company_status` 的 `org.departments` 增加 `code`/`employeeCount`/`managerId`，`org.employees` 增加 `code`/`departmentCode`/`channel`/`level`/`levelName`，新增 `levels`/`numbering`；员工提示词头部带「工号 / 等级 / 通道 / 部门编号」身份行。
+- **公司架构面板**：面板新增第 6 个页签「公司架构」，只读展示统计卡、编号规则、M/P 等级图例、部门卡片（编号 + 编制 + M/P 分栏员工行 + 状态点）与无部门员工，5 秒轮询 + 手动刷新；中英双语文案。
+- **工具层校验**：`company_hire` / `company_admin({action:"createEmployee"})` 传入不存在的部门 id 时返回 `{ok:false, code:"E_NOT_FOUND", message:"部门不存在: <id>"}`，不再落孤儿员工（空部门仍允许，由 shared 校验 manager 必须有部门）。
+- **新增测试**：shared 等级/编号纯函数与 config 解析（`test/company-levels.test.mjs`）、面板纯函数与渲染（`test/company-panel.test.mjs`）；冻结的 `company-org` 契约测试全绿。
 
 ### 修复（真实宿主端到端验证发现）
 

@@ -193,3 +193,136 @@ test("resolveDefaultLlmOptions 服务缺失或异常时返回空对象（交给�
   const partial = makeCtx({ agentDefaultModel: { currentSelection: () => ({ provider: "only-provider" }) } });
   assert.deepEqual(resolveDefaultLlmOptions(partial), {});
 });
+
+test("view() 包含 code/channel/level/levelName/departmentCode/levels/numbering", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-view-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), {
+    dataDir,
+    config: { fake: true, departments: [{ id: "dev", name: "研发部" }] },
+  });
+  await rt.boot();
+  const ownerExec = { exec: { agent: { session: { id: rt.ownerSessionId } } } };
+  await rt.tools.find((t) => t.name === "company_hire").execute({ id: "e1", displayName: "员工A", department: "dev", role: "staff" }, ownerExec);
+  const v = rt.view();
+  assert.ok(v.levels?.M, "view 应包含 levels.M");
+  assert.ok(v.numbering?.employee, "view 应包含 numbering.employee");
+  const emp = v.org.employees.find((e) => e.id === "e1");
+  assert.ok(emp.code, "员工应自动补号");
+  assert.equal(emp.channel, "P");
+  assert.equal(emp.level, "P3");
+  assert.ok(emp.levelName, "应含 levelName");
+  assert.equal(emp.departmentCode, "D01");
+  const dept = v.org.departments.find((d) => d.id === "dev");
+  assert.equal(dept.employeeCount, 1);
+  assert.equal(dept.managerId, null);
+  await rt.shutdown();
+});
+
+test("company_hire 自定义编号、通道、等级成功，重复编号失败", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-hire-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), {
+    dataDir,
+    config: { fake: true, departments: [{ id: "dev", name: "研发部" }] },
+  });
+  await rt.boot();
+  const ownerExec = { exec: { agent: { session: { id: rt.ownerSessionId } } } };
+  const hire = rt.tools.find((t) => t.name === "company_hire");
+  const r1 = await hire.execute({ id: "e1", displayName: "员工A", department: "dev", role: "staff", code: "E9999", channel: "P", level: "P4" }, ownerExec);
+  assert.equal(r1.ok, true);
+  assert.equal(r1.code, "E9999");
+  assert.equal(r1.channel, "P");
+  assert.equal(r1.level, "P4");
+  assert.equal(r1.levelName, "资深工程师");
+  // 自动编号：code 形如 E0001
+  const rAuto = await hire.execute({ id: "e2", displayName: "员工B", department: "dev", role: "staff" }, ownerExec);
+  assert.equal(rAuto.ok, true);
+  assert.ok(/^E\d{4}$/.test(rAuto.code), `自动编号应为 E0001 形式，实际为 ${rAuto.code}`);
+  assert.equal(rAuto.channel, "P");
+  assert.equal(rAuto.level, "P3");
+  const r2 = await hire.execute({ id: "e3", displayName: "员工C", department: "dev", role: "staff", code: "E9999" }, ownerExec);
+  assert.equal(r2.ok, false);
+  assert.equal(r2.code, "E_DUPLICATE_CODE");
+  const r3 = await hire.execute({ id: "e4", displayName: "员工D", department: "dev", role: "staff", level: "M2" }, ownerExec);
+  assert.equal(r3.ok, false);
+  assert.equal(r3.code, "E_INVALID_LEVEL");
+  await rt.shutdown();
+});
+
+test("company_admin updateDepartment/promoteEmployee/setNumbering", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-admin-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), {
+    dataDir,
+    config: { fake: true, departments: [{ id: "dev", name: "研发部" }] },
+  });
+  await rt.boot();
+  const ownerExec = { exec: { agent: { session: { id: rt.ownerSessionId } } } };
+  await rt.tools.find((t) => t.name === "company_hire").execute({ id: "e1", displayName: "员工A", department: "dev", role: "staff" }, ownerExec);
+  const admin = rt.tools.find((t) => t.name === "company_admin");
+
+  const upd = await admin.execute({ action: "updateDepartment", args: { id: "dev", code: "RD" } }, ownerExec);
+  assert.equal(upd.ok, true);
+  assert.equal(upd.departmentId, "dev");
+  assert.equal(upd.code, "RD");
+  assert.equal(rt.view().org.departments.find((d) => d.id === "dev").code, "RD");
+
+  const pro = await admin.execute({ action: "promoteEmployee", args: { employeeId: "e1" } }, ownerExec);
+  assert.equal(pro.ok, true);
+  assert.equal(pro.to.level, "P4");
+
+  const bad = await admin.execute({ action: "promoteEmployee", args: { employeeId: "e1", level: "P6" } }, ownerExec);
+  assert.equal(bad.ok, false);
+  assert.equal(bad.code, "E_LEVEL_STEP");
+
+  const createEmp = await admin.execute({ action: "createEmployee", args: { id: "e2", displayName: "员工B", department: "dev", role: "staff" } }, ownerExec);
+  assert.equal(createEmp.ok, true);
+  assert.equal(createEmp.employeeId, "e2");
+  assert.ok(/^E\d{4}$/.test(createEmp.code));
+  assert.equal(createEmp.channel, "P");
+  assert.equal(createEmp.level, "P3");
+
+  const num = await admin.execute({ action: "setNumbering", args: { employeePattern: "N{seq:3}", employeeStart: 10 } }, ownerExec);
+  assert.equal(num.ok, true);
+  assert.equal(rt.view().numbering.employee.pattern, "N{seq:3}");
+  assert.equal(rt.view().numbering.employee.start, 10);
+  await rt.shutdown();
+});
+
+test("boot 自动为历史无 code 数据补号并持久化", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-codes-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), {
+    dataDir,
+    config: { fake: true },
+  });
+  await rt.boot();
+  const ownerExec = { exec: { agent: { session: { id: rt.ownerSessionId } } } };
+  await rt.tools.find((t) => t.name === "company_admin").execute({ action: "createDepartment", args: { id: "dev", name: "研发部" } }, ownerExec);
+  await rt.tools.find((t) => t.name === "company_hire").execute({ id: "e1", displayName: "员工A", department: "dev", role: "staff" }, ownerExec);
+  await rt.shutdown();
+
+  const rt2 = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt2.boot();
+  const emp = rt2.view().org.employees.find((e) => e.id === "e1");
+  assert.ok(emp.code, "重启后员工仍应有编号");
+  assert.ok(emp.channel, "重启后员工仍应有通道");
+  await rt2.shutdown();
+});
+
+test("company_hire 指向不存在部门返回 E_NOT_FOUND 且不写文件/员工数不变", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-hire-dept-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), {
+    dataDir,
+    config: { fake: true, departments: [{ id: "dev", name: "研发部" }] },
+  });
+  await rt.boot();
+  const ownerExec = { exec: { agent: { session: { id: rt.ownerSessionId } } } };
+  const r = await rt.tools.find((t) => t.name === "company_hire").execute({ id: "e1", displayName: "员工A", department: "ghost", role: "staff" }, ownerExec);
+  assert.equal(r.ok, false);
+  assert.equal(r.code, "E_NOT_FOUND");
+  assert.equal(rt.view().org.employees.length, 0);
+  const admin = rt.tools.find((t) => t.name === "company_admin");
+  const r2 = await admin.execute({ action: "createEmployee", args: { id: "e2", displayName: "员工B", department: "ghost", role: "staff" } }, ownerExec);
+  assert.equal(r2.ok, false);
+  assert.equal(r2.code, "E_NOT_FOUND");
+  assert.equal(rt.view().org.employees.length, 0);
+  await rt.shutdown();
+});
