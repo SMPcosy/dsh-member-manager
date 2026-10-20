@@ -97,6 +97,16 @@ export function resolveCompanyConfig(raw) {
     (v) => enumFields.defaultOrderMode.includes(v),
   ).value;
 
+  // provider：派工使用的 subagent provider 名。宿主注册名是 "spawn"/"fork" 等，
+  // 不能写死 "default"（未注册会在 startActivation 抛 NO_PROVIDER）。
+  const provider = withDefault(
+    readField("provider", root).value,
+    "spawn",
+    "provider",
+    warnings,
+    (v) => isNonEmptyString(v),
+  ).value;
+
   // limits：键级别合并与校验。
   const limitsProvided = isPlainObject(root.limits) ? root.limits : {};
   if (!isPlainObject(root.limits) && root.limits !== undefined) {
@@ -175,6 +185,7 @@ export function resolveCompanyConfig(raw) {
     defaultSessionPolicy,
     managerActsAsStaff,
     defaultOrderMode,
+    provider,
     requireManagerReview,
     limits,
     departments,

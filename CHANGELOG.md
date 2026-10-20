@@ -21,6 +21,11 @@
 - 新增测试：共享内核纯函数（org / ledger / router / store / config）、host 运行时 fake 闭环（dispatcher / employees / runtime）、打包/元数据与切换回滚脚本用例（临时 profile），全量 315 用例。
 - 交付自检：`node scripts/verify-company.mjs`（17 项：元数据/文件/语法/导出契约/全量测试/测试不污染用户数据），切换/回滚脚本默认 dry-run。
 
+### 修复（真实宿主端到端验证发现）
+
+- **派工 provider 名**：`company.provider` 默认值由错误的 `"default"` 改为宿主真实注册名 `"spawn"`（`"default"` 会让 `subagents.startActivation` 抛 `NO_PROVIDER`）；配置支持 `company.provider`，非法值回退默认并 warning。
+- **验收标准归一**：`company_order` 的 `acceptance`/`deps` 传字符串时自动归一为数组，不再被账本层丢弃。
+
 ### 保留
 
 - 名册覆盖层、16 个既有 `member_*` / `group_*` 工具、组织架构图、可视化工作流、备份、更新、一键建组等 0.2.x 能力全部保留，既有测试不回归（全量计数以 `npm test` 为准）。

@@ -73,3 +73,18 @@ test("report 不带 attemptId 视为陈旧", async () => {
   assert.equal(bad.ok, false);
   assert.equal(bad.code, "E_STALE_ATTEMPT");
 });
+
+test("acceptance 字符串归一为数组，不再被账本丢弃", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-disp3-${Date.now()}`;
+  const ctx = makeCtx();
+  const runtime = makeRuntime(ctx);
+  runtime.dataDir = dataDir;
+  const store = new CompanyStore(dataDir, { now: () => "2026-01-01T00:00:00.000Z" });
+  await store.saveCompany(runtime.company);
+  const employeeManager = createEmployeeSessionManager({ runtime, logger: console });
+  const dispatcher = createDispatcher({ runtime, store, employeeManager, logger: console });
+  const place = await dispatcher.placeOrder({ type: "code_impl", title: "x", acceptance: "summary 含 sum=5" });
+  assert.equal(place.ok, true);
+  const order = runtime.ledger.orders.find((o) => o.id === place.orderId);
+  assert.deepEqual(order.acceptance, ["summary 含 sum=5"]);
+});

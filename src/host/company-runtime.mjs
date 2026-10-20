@@ -59,7 +59,8 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     ownerAgent: null,
     ownerHandle: null,
     ownerSessionId: null,
-    provider: rawConfig.provider || "default",
+    // 宿主已注册的 provider 名是 "spawn"/"fork" 等；"default" 会抛 NO_PROVIDER。
+    provider: rawConfig.provider || config.provider || "spawn",
     shuttingDown: false,
     costs: { tokens: 0, requests: 0, byEmployee: {}, byDepartment: {}, byOrder: {} },
   };

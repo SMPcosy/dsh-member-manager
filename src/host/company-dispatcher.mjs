@@ -52,6 +52,14 @@ export function createDispatcher({ runtime, store, employeeManager, logger }) {
     await store.appendAudit({ type, ...payload });
   }
 
+  // 工具 schema 把 deps/acceptance 声明为 string 或 string[]，统一归一成数组，
+  // 避免字符串被账本层按 Array.isArray 丢弃。
+  function normalizeStringList(value) {
+    if (Array.isArray(value)) return value.filter((v) => typeof v === "string" && v.trim() !== "");
+    if (typeof value === "string" && value.trim() !== "") return [value.trim()];
+    return Array.isArray(value) ? value : undefined;
+  }
+
   function normalizeInput(args) {
     return {
       project: args.project,
@@ -60,8 +68,8 @@ export function createDispatcher({ runtime, store, employeeManager, logger }) {
       detail: args.detail,
       priority: args.priority,
       dept: args.dept,
-      deps: Array.isArray(args.deps) ? args.deps : [],
-      acceptance: args.acceptance,
+      deps: normalizeStringList(args.deps),
+      acceptance: normalizeStringList(args.acceptance),
       mode: args.mode,
       timeoutMs: typeof args.timeoutMs === "number" ? args.timeoutMs : undefined,
       clientOrderId: args.clientOrderId,

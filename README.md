@@ -193,6 +193,7 @@ dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 | `company.defaultSessionPolicy` | `"per_task"`         | 员工会话策略：`per_task`（一单一会话）或 `resident`（常驻经理） |
 | `company.managerActsAsStaff` | `false`             | 经理是否可被派活 |
 | `company.defaultOrderMode` | `"async"`            | 下单默认模式：`async` 立即返回 / `wait` 等验收 |
+| `company.provider` | `"spawn"`           | 派工使用的 subagent provider 名，必须与宿主已注册名一致（内置 `spawn`；需 fork 隔离时改 `fork`）。写错会在派工时返回 `NO_PROVIDER` |
 | `company.requireManagerReview` | `true`         | 带验收标准的工单是否需要经理 review 才 done |
 | `company.limits` | `{maxConcurrentPerProvider:4, maxTemps:4, budgetTokensPerDay:5000000, attemptTimeoutMs:1800000, lostReportGraceMs:120000, staleAttemptMs:3600000}` | 容量/预算/超时配置（结构校验 + 非法值回退默认并产生 warning；`staleAttemptMs` 用作调度 tick 周期；并发/预算闸门为后续里程碑，当前仅校验与展示） |
 | `company.departments` | `[]`                    | 种子部门：`[{id,name,manager,skills,capacity}]` |
@@ -449,6 +450,7 @@ All options are optional (omitted ⇒ default):
 | `company.defaultSessionPolicy` | `"per_task"`         | Staff session policy: `per_task` or `resident` |
 | `company.managerActsAsStaff` | `false`             | Whether managers can be assigned work |
 | `company.defaultOrderMode` | `"async"`            | Default order mode: `async` (return at once) or `wait` (until accepted) |
+| `company.provider` | `"spawn"`           | Subagent provider name used to dispatch work; must match a provider registered in the host (`spawn` ships built-in, use `fork` for fork isolation). A wrong name fails assignment with `NO_PROVIDER` |
 | `company.requireManagerReview` | `true`         | Orders with acceptance criteria need manager review before `done` |
 | `company.limits` | `{maxConcurrentPerProvider:4, maxTemps:4, budgetTokensPerDay:5000000, attemptTimeoutMs:1800000, lostReportGraceMs:120000, staleAttemptMs:3600000}` | Capacity / budget / timeout gates (invalid values fall back with a warning) |
 | `company.departments` | `[]`                    | Seed departments: `[{id,name,manager,skills,capacity}]` |

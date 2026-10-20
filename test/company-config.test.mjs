@@ -8,6 +8,7 @@ const DEFAULTS = {
   defaultSessionPolicy: "per_task",
   managerActsAsStaff: false,
   defaultOrderMode: "async",
+  provider: "spawn",
   requireManagerReview: true,
   limits: {
     maxConcurrentPerProvider: 4,
@@ -159,4 +160,13 @@ test("defaultOrderMode 非法枚举回退 async 并告警", () => {
   const { config, warnings } = resolveCompanyConfig({ defaultOrderMode: "sync" });
   assert.equal(config.defaultOrderMode, "async");
   assert.ok(warnings.some((w) => w.includes("defaultOrderMode")));
+});
+test("provider 默认 spawn，可经 org/根层覆盖，非法值回退并告警", () => {
+  assert.equal(resolveCompanyConfig(undefined).config.provider, "spawn");
+  assert.equal(resolveCompanyConfig({}).config.provider, "spawn");
+  assert.equal(resolveCompanyConfig({ org: { provider: "fork" } }).config.provider, "fork");
+  assert.equal(resolveCompanyConfig({ provider: "fork" }).config.provider, "fork");
+  const bad = resolveCompanyConfig({ org: { provider: "" } });
+  assert.equal(bad.config.provider, "spawn");
+  assert.ok(bad.warnings.some((w) => w.includes("provider")), "非法 provider 应产生 warning");
 });
