@@ -757,6 +757,25 @@ test("EmployeeCenterPanel：按部门筛选 / 未启用筛选", () => {
   assert.match(text, new RegExp(disabled.t("cpStateFired")));
 });
 
+test("EmployeeCenterPanel：部门下拉在工具栏、位于刷新按钮之前", () => {
+  const { t, tree } = renderEmployees();
+  const selects = collectElements(tree, (n) => n.type === "select");
+  assert.equal(selects.length, 1, "员工中心页只应有一个部门下拉");
+  const rows = collectElements(
+    tree,
+    (n) =>
+      n.type === "div" &&
+      (n.children || []).some((c) => c && c.type === "select") &&
+      (n.children || []).some((c) => c && c.type === "button"),
+  );
+  assert.equal(rows.length, 1, "下拉与刷新按钮应在同一行工具栏内");
+  const kids = rows[0].children;
+  const selectIdx = kids.findIndex((c) => c && c.type === "select");
+  const refreshIdx = kids.findIndex((c) => c && c.type === "button" && textOf(c) === t("cpRefresh"));
+  assert.ok(selectIdx >= 0 && refreshIdx >= 0, "应同时找到下拉与刷新按钮");
+  assert.ok(selectIdx < refreshIdx, "下拉应在刷新按钮之前");
+});
+
 test("EmployeeCenterPanel：空组织 = cpECEmpty 空态，下拉只剩全体员工/未启用成员", () => {
   const { t, tree } = renderEmployees({ overview: emptyOrgFixture() });
   assert.match(treeText(tree), new RegExp(t("cpECEmpty")));
