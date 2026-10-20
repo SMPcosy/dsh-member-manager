@@ -137,6 +137,8 @@ await check("总架构组织架构图字样", () => {
     "人事管理",
     "cpHr",
     "cpRegistryMembers",
+    "cpAddDuty",
+    "cpRemoveDuty",
     "pickSkills",
     "pickModel",
     "rosterPicker",

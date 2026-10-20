@@ -2137,7 +2137,7 @@ test("人事详情：四操作都在详情页内，点击向下展开原表单�
   assert.ok(primaryButton(tree, made.t("cpMove")), "详情页下方应展开调岗表单");
 });
 
-test("名册资料：展示可编辑字段，保存依次 POST renameMember/setRole/setSkills/setModel/assignGroup 并刷新", async () => {
+test("名册资料：展示可编辑字段，保存依次 POST renameMember/setRole/setSkills/setModel 并刷新", async () => {
   const calls = [];
   let refreshed = 0;
   const made = renderCompany({
@@ -2189,7 +2189,12 @@ test("名册资料：展示可编辑字段，保存依次 POST renameMember/setR
 
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
-  inputByPlaceholder(tree, made.t("dutiesHint")).props.onChange({ target: { value: "带队\n汇报" } });
+  buttonByLabel(tree, made.t("cpAddDuty"))[0].onClick();
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const dutyInputs = collectElements(tree, (n) => n.type === "input" && n.props.placeholder === made.t("duties"));
+  assert.equal(dutyInputs.length, 2, "职责按条目单列展示");
+  dutyInputs[1].props.onChange({ target: { value: "汇报" } });
 
   // v5.5：技能走选择弹层（从名册现有技能出发勾选），模型同样走选择弹层
   made.react.reset();
@@ -2216,12 +2221,6 @@ test("名册资料：展示可编辑字段，保存依次 POST renameMember/setR
 
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
-  const groupSelect = collectElements(tree, (n) => n.type === "select" && n.props.value === "g-1")[0];
-  assert.ok(groupSelect, "应有名册部门下拉");
-  groupSelect.props.onChange({ target: { value: "g-2" } });
-
-  made.react.reset();
-  tree = made.internals.CompanyOrgPanel(made.panelProps);
   const save = buttonByLabel(tree, made.t("cpHrSave"))[0];
   assert.ok(save, "应有保存名册资料按钮");
   assert.equal(save.disabled, false);
@@ -2231,18 +2230,77 @@ test("名册资料：展示可编辑字段，保存依次 POST renameMember/setR
   const ops = calls.filter((c) => c.url.endsWith("/op")).map((c) => c.body);
   assert.deepEqual(
     ops.map((op) => op.op),
-    ["renameMember", "setRole", "setSkills", "setModel", "assignGroup"],
-    "保存名册资料应依次发 5 个 op",
+    ["renameMember", "setRole", "setSkills", "setModel"],
+    "保存名册资料应依次发 4 个 op（名册部门改由调岗表单处理）",
   );
   assert.deepEqual(ops[0].args, { target: "emp-lead", patch: { displayName: "新负责人", aliases: ["老负", "副手"] } });
   assert.deepEqual(ops[1].args, { target: "emp-lead", patch: { title: "负责人", duties: ["带队", "汇报"] } });
   assert.deepEqual(ops[2].args, { target: "emp-lead", patch: { skills: ["react", "node"] } });
   assert.deepEqual(ops[3].args, { target: "emp-lead", model: "m-2", provider: "p-2" });
-  assert.deepEqual(ops[4].args, { target: "emp-lead", groupId: "g-2" });
-  assert.equal(refreshed, 1, "保存后应刷新名册");
+  assert.equal(refreshed, 1, "保存名册资料后刷新名册");
   assert.ok(calls.some((c) => c.url.endsWith("/company/overview")), "保存后应刷新 overview");
   assert.equal(String(made.seed[10].kind), "hr", "保存后详情保持打开");
   assert.equal(made.seed[14], made.t("cpHrSave"), "保存成功提示");
+});
+
+test("调岗表单：名册部门下拉随调岗提交，保存时 POST moveEmployee + assignGroup", async () => {
+  const calls = [];
+  let refreshed = 0;
+  const made = renderCompany({
+    deptModal: "dept-plugin",
+    modalTab: "members",
+    fetch: companyFetch(calls),
+    registryMembers: [
+      { target: "emp-dev", displayName: "插件工程师", title: "工程师", duties: [], skills: [], aliases: [], groupId: "g-1", status: "active", isRetired: false },
+    ],
+    registryGroups: [
+      { id: "g-1", name: "数据组" },
+      { id: "g-2", name: "文档组" },
+    ],
+    onRegistryRefresh: async () => {
+      refreshed += 1;
+    },
+  });
+
+  openHrAction(made, "E0002", made.t("cpMove"));
+  assert.equal(made.seed[10].rosterTarget, "emp-dev", "调岗表单应带名册 target");
+  assert.equal(made.seed[10].groupId, "g-1", "调岗表单应带当前名册部门");
+
+  made.react.reset();
+  let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const groupSelect = collectElements(tree, (n) => n.type === "select" && n.props.value === "g-1")[0];
+  assert.ok(groupSelect, "调岗表单应有名册部门下拉");
+  groupSelect.props.onChange({ target: { value: "g-2" } });
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  await primaryButton(tree, made.t("cpMove")).onClick();
+  await tick();
+
+  const companyOps = calls.filter((c) => c.url.endsWith("/company/op")).map((c) => c.body);
+  assert.deepEqual(companyOps[0], { action: "moveEmployee", args: { employeeId: "emp-dev", department: "dept-doc" } });
+  const registryOps = calls.filter((c) => c.url.endsWith("/op") && !c.url.endsWith("/company/op")).map((c) => c.body);
+  assert.deepEqual(registryOps[0], { op: "assignGroup", args: { target: "emp-dev", groupId: "g-2" } });
+  assert.equal(refreshed, 1, "改分组后应刷新名册");
+  assert.equal(String(made.seed[10].kind), "hr", "调岗成功后回到人事详情");
+});
+
+test("名册资料：岗位职责按条目单列，最多 8 条且不再要求每行一条", () => {
+  const made = renderCompany({
+    deptModal: "dept-plugin",
+    modalTab: "members",
+    registryMembers: [
+      { target: "emp-dev", displayName: "插件工程师", duties: ["a", "b", "c", "d", "e", "f", "g", "h"], skills: [], aliases: [], groupId: "g-1", status: "active", isRetired: false },
+    ],
+    registryGroups: [{ id: "g-1", name: "数据组" }],
+  });
+  openHr(made, "E0002");
+  made.react.reset();
+  const tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const inputs = collectElements(tree, (n) => n.type === "input" && n.props.placeholder === made.t("duties"));
+  assert.equal(inputs.length, 8, "岗位职责应按条目单列");
+  assert.equal(buttonByLabel(tree, made.t("cpAddDuty")).length, 0, "达到 8 条后不再显示添加按钮");
+  assert.equal(inputByPlaceholder(tree, made.t("dutiesHint")), undefined, "不再有「每行一条」文本框");
 });
 
 test("v5.5 技能选择弹层：打开时拉 /skills 目录，支持关键词过滤与勾选", async () => {
