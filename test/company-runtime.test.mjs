@@ -830,6 +830,25 @@ test("POST /company/op updateEmployeeProfile 截断 duties 并审计", async () 
   await rt.shutdown();
 });
 
+test("POST /company/op updateEmployeeProfile 档案文本 trim，未提供的字段不覆盖", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-update-profile-trim-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d1", name: "研发部" } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "e1", displayName: "张三", department: "d1", role: "staff", title: "架构师" } });
+  const res = await op.handler({}, new URL("http://localhost/company/op"), {
+    action: "updateEmployeeProfile",
+    args: { employeeId: "e1", displayName: "  李四  ", title: "  高级工程师  ", provider: "  openai  " },
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.employee.displayName, "李四", "显示名应 trim");
+  assert.equal(res.employee.title, "高级工程师", "岗位应 trim");
+  assert.equal(res.employee.provider, "openai", "provider 应 trim");
+  assert.equal(res.employee.model, "", "未提供的 model 不应被覆盖/写入");
+  await rt.shutdown();
+});
+
 test("POST /company/op updateEmployeeProfile 不存在返回 E_NOT_FOUND", async () => {
   const dataDir = `/tmp/test-dsh-member-manager-update-profile-notfound-${Date.now()}`;
   const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });

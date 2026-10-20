@@ -299,7 +299,14 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     }
   }
 
-  function normalizeDutiesInput(v) {
+  
+    // v5.8（reviewer docs/23 R1/R2）：档案文本字段统一 trim；空串按「未提供」处理，避免覆盖已有值
+    function cleanProfileText(value) {
+      if (value === undefined) return undefined;
+      if (value === null) return "";
+      return String(value).trim();
+    }
+    function normalizeDutiesInput(v) {
     if (!Array.isArray(v)) return [];
     return v.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean).slice(0, 8);
   }
@@ -580,11 +587,11 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
             const patch = {};
             const fields = [];
             if (args.displayName !== undefined) {
-              patch.displayName = args.displayName;
+              patch.displayName = cleanProfileText(args.displayName);
               fields.push("displayName");
             }
             if (args.title !== undefined) {
-              patch.title = args.title;
+              patch.title = cleanProfileText(args.title);
               fields.push("title");
             }
             if (args.duties !== undefined) {
@@ -596,11 +603,11 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
               fields.push("skills");
             }
             if (args.model !== undefined) {
-              patch.model = args.model;
+              patch.model = cleanProfileText(args.model);
               fields.push("model");
             }
             if (args.provider !== undefined) {
-              patch.provider = args.provider;
+              patch.provider = cleanProfileText(args.provider);
               fields.push("provider");
             }
             if (fields.length === 0) {
@@ -643,11 +650,11 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
               const fields = [];
               const isDisplayNameEmpty = !emp.displayName || emp.displayName === emp.id;
               if (isDisplayNameEmpty && member.displayName) {
-                patch.displayName = member.displayName;
+                patch.displayName = cleanProfileText(member.displayName);
                 fields.push("displayName");
               }
               if (!emp.title && member.duties?.title) {
-                patch.title = member.duties.title;
+                patch.title = cleanProfileText(member.duties.title);
                 fields.push("title");
               }
               const incomingDuties = Array.isArray(member.duties?.duties) ? member.duties.duties.filter(Boolean) : [];
@@ -661,11 +668,11 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
                 fields.push("skills");
               }
               if (!emp.model && member.model) {
-                patch.model = member.model;
+                patch.model = cleanProfileText(member.model);
                 fields.push("model");
               }
               if (!emp.provider && member.provider) {
-                patch.provider = member.provider;
+                patch.provider = cleanProfileText(member.provider);
                 fields.push("provider");
               }
               if (fields.length === 0) {
