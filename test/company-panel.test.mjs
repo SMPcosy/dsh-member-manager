@@ -345,41 +345,61 @@ function overviewFetch(calls = [], data = overviewFixture()) {
 
 /* ==================== ① 源码与字典 ==================== */
 
-test("源码：新增「公司架构」中英文案与 overview 轮询，且不把动态文本拼成 innerHTML", () => {
+test("源码：总架构/部门架构文案、overview 轮询、成本归因接线，且不把动态文本拼成 innerHTML", () => {
   const src = fs.readFileSync(BUNDLE, "utf8");
-  assert.match(src, /cpTab: "公司架构"/);
-  assert.match(src, /cpTab: "Company org"/);
+  assert.match(src, /cpTab: "总架构"/);
+  assert.match(src, /cpTab: "Overall arch"/);
+  assert.match(src, /cpTitle: "总架构"/);
+  assert.match(src, /cpTitle: "Overall architecture"/);
+  assert.match(src, /tabOrg: "部门架构"/);
+  assert.match(src, /tabOrg: "Department org"/);
   assert.match(src, /CompanyOrgPanel/);
+  assert.match(src, /DeptOrgPanel/);
   assert.match(src, /api\("\/company\/overview"\)/);
   assert.match(src, /setInterval\(pull, CP_POLL_MS\)/);
   assert.match(src, /const CP_POLL_MS = 5000;/);
-  // 页签与分支接线
-  assert.match(src, /tabBtn\("company", t\("cpTab"\), ""\)/);
+
+  // 默认 tab = company，且 company 页签排在 org 之前
+  assert.match(src, /useState\("company"\)/);
+  assert.ok(src.indexOf('tabBtn("company"') >= 0, "源码应注册 company 页签");
+  assert.ok(src.indexOf('tabBtn("company"') < src.indexOf('tabBtn("org"'), "总架构页签应排在部门架构之前");
+
+  // 两个页面的分支接线
   assert.match(src, /tab === "company" \? h\(CompanyOrgPanel, \{ t: t \}\) : null/);
+  assert.match(src, /tab === "org"\s*\? h\(DeptOrgPanel,/);
+
+  // 成本归因：三个维度统一走 cpCostRows 并按 tokens 降序，渲染时取前 5
+  assert.match(src, /cpCostRows/);
+  assert.match(src, /slice\(0, 5\)/);
+  assert.match(src, /cpNormalizeBoard/);
+
   // 安全：不写 HTML 字符串
   assert.equal(/\.innerHTML\s*=/.test(src), false, "不应给 innerHTML 赋值");
   assert.equal(src.includes("dangerouslySetInnerHTML"), false, "不应使用 dangerouslySetInnerHTML");
 });
 
-test("字典：cp* 文案 zh/en 一一对应，中文与 docs/16 §5 一致", () => {
+test("字典：cp*/dp* 文案 zh/en 一一对应，中文与 docs/16 §5 及 m02493 重构一致", () => {
   const { zh, en } = dictionaries();
   const zhCp = Object.keys(zh)
-    .filter((k) => k.startsWith("cp"))
+    .filter((k) => k.startsWith("cp") || k.startsWith("dp"))
     .sort();
   const enCp = Object.keys(en)
-    .filter((k) => k.startsWith("cp"))
+    .filter((k) => k.startsWith("cp") || k.startsWith("dp"))
     .sort();
-  assert.ok(zhCp.length >= 30, `cp* 文案过少：${zhCp.length}`);
+  assert.ok(zhCp.length >= 45, `cp*/dp* 文案过少：${zhCp.length}`);
   assert.deepEqual(zhCp, enCp);
   assert.deepEqual(Object.keys(zh).sort(), Object.keys(en).sort(), "zh 与 en 的 key 必须完全一致");
 
-  // 契约点名的 key
-  assert.equal(zh.cpTab, "公司架构");
-  assert.equal(en.cpTab, "Company org");
-  assert.equal(zh.cpTitle, "公司架构");
+  // 页签与页面标题（任务重构后的文案）
+  assert.equal(zh.cpTab, "总架构");
+  assert.equal(en.cpTab, "Overall arch");
+  assert.equal(zh.cpTitle, "总架构");
+  assert.equal(en.cpTitle, "Overall architecture");
+  assert.equal(zh.tabOrg, "部门架构");
+  assert.equal(en.tabOrg, "Department org");
+  // 总架构页：原有 KPI
   assert.equal(zh.cpDeptCount, "部门");
   assert.equal(zh.cpChannelM, "管理通道");
-  // 需求点名的文案
   assert.equal(zh.cpEmpCount, "员工");
   assert.equal(zh.cpChannelP, "专业技术通道");
   assert.equal(zh.cpCode, "工号");
@@ -390,6 +410,27 @@ test("字典：cp* 文案 zh/en 一一对应，中文与 docs/16 §5 一致", ()
   assert.equal(zh.cpRefresh, "刷新");
   assert.equal(zh.cpLoadFailed, "加载失败");
   assert.equal(zh.cpEmptyOrg, "暂无部门");
+  // 总架构页：工单/成本 KPI 与成本归因
+  assert.equal(zh.cpOrders, "工单数");
+  assert.equal(zh.cpDone, "已完成");
+  assert.equal(zh.cpTokens, "Token 合计");
+  assert.equal(zh.cpRequests, "请求数");
+  assert.equal(zh.cpCost, "成本归因");
+  assert.equal(zh.cpByEmployee, "按员工");
+  assert.equal(zh.cpByDepartment, "按部门");
+  assert.equal(zh.cpByOrder, "按工单");
+  assert.equal(zh.cpNoCost, "暂无成本数据");
+  assert.ok(zh.cpCostTotal.includes("{tokens}") && zh.cpCostTotal.includes("{requests}"));
+  assert.ok(zh.cpCostRow.includes("{tokens}") && zh.cpCostRow.includes("{requests}"));
+  // 部门架构页工具条与空态
+  assert.equal(zh.dpTitle, "部门架构 · 按部门管理成员");
+  assert.equal(zh.dpAllDepts, "全部部门");
+  assert.equal(zh.dpNoDept, "未分配部门");
+  assert.equal(zh.dpNoMatch, "没有匹配的成员");
+  assert.ok(zh.dpSearch.includes("技能"));
+  assert.equal(zh.addGroup, "新建部门");
+  assert.equal(zh.groupName, "部门名称");
+  assert.ok(zh.groupDesc.includes("部门说明"));
 
   // 英文侧不能漏翻成中文
   for (const key of enCp) {
@@ -403,46 +444,55 @@ test("字典：cp* 文案 zh/en 一一对应，中文与 docs/16 §5 一致", ()
 
 /* ==================== ② Panel 页签 ==================== */
 
-test("Panel：默认仍停在 org，页签条出现第 6 个「公司架构」", () => {
+test("Panel：默认页签为总架构（company），页签顺序 company → org → retired → unregistered → workflow → maintain", () => {
   const t = translator("zh");
-  const { exports } = loadBundle(makeReact([sampleView(), null, false, "org", null, null, false]));
+  const { exports } = loadBundle(makeReact([sampleView(), null, false, "company", null, null, false]));
   const tree = exports.__internals.Panel({ t });
 
   const labels = collectButtons(tree).map((b) => b.label);
-  const tabLabels = [t("tabOrg"), t("tabRetired"), t("tabUnregistered"), t("tabWorkflow"), t("tabMaintain"), t("cpTab")];
+  const tabLabels = [t("cpTab"), t("tabOrg"), t("tabRetired"), t("tabUnregistered"), t("tabWorkflow"), t("tabMaintain")];
   assert.deepEqual(
     labels.filter((label) => tabLabels.includes(label)),
     tabLabels,
-    "页签顺序应为 org/retired/unregistered/workflow/maintain/company",
+    "页签顺序应为 company/org/retired/unregistered/workflow/maintain",
   );
-  assert.ok(labels.includes("公司架构"), "第 6 个页签文案应为「公司架构」");
+  assert.equal(tabLabels[0], "总架构");
+  assert.equal(tabLabels[1], "部门架构");
 
-  // 默认 tab=org：不渲染公司架构面板
+  // 默认 tab=company：渲染总架构面板，不渲染部门架构面板
   const panelType = exports.__internals.CompanyOrgPanel;
-  assert.equal(collectElements(tree, (n) => n.type === panelType).length, 0);
+  const deptType = exports.__internals.DeptOrgPanel;
+  assert.equal(collectElements(tree, (n) => n.type === panelType).length, 1, "默认应渲染 CompanyOrgPanel");
+  assert.equal(collectElements(tree, (n) => n.type === deptType).length, 0, "默认不应渲染 DeptOrgPanel");
 });
 
-test("Panel：点「公司架构」页签后 tab 切到 company 并渲染 CompanyOrgPanel", () => {
+test("Panel：点「部门架构」/「总架构」页签在两类面板间切换", () => {
   const t = translator("zh");
-  const seed = [sampleView(), null, false, "org", null, null, false];
+  const seed = [sampleView(), null, false, "company", null, null, false];
   const react = makeReact(seed, { mutable: true });
   const { exports } = loadBundle(react);
 
   let tree = exports.__internals.Panel({ t });
-  const tabButton = collectButtons(tree).find((b) => b.label === "公司架构");
-  assert.ok(tabButton, "找不到「公司架构」页签按钮");
-  assert.equal(typeof tabButton.onClick, "function");
+  const orgButton = collectButtons(tree).find((b) => b.label === "部门架构");
+  assert.ok(orgButton, "找不到「部门架构」页签按钮");
+  assert.equal(typeof orgButton.onClick, "function");
 
-  tabButton.onClick();
-  assert.equal(seed[3], "company", "点击页签应把 tab 置为 company");
-
-  // 重渲染：hooks 游标归零，useState 重新按顺序读同一份 state
+  orgButton.onClick();
+  assert.equal(seed[3], "org", "点击页签应把 tab 置为 org");
   react.reset();
   tree = exports.__internals.Panel({ t });
-  const panelType = exports.__internals.CompanyOrgPanel;
-  const rendered = collectElements(tree, (n) => n.type === panelType);
-  assert.equal(rendered.length, 1, "tab=company 时应渲染一个 CompanyOrgPanel");
-  assert.equal(typeof rendered[0].props.t, "function", "CompanyOrgPanel 需要拿到 t");
+  const rendered = collectElements(tree, (n) => n.type === exports.__internals.DeptOrgPanel);
+  assert.equal(rendered.length, 1, "tab=org 时应渲染一个 DeptOrgPanel");
+  assert.equal(typeof rendered[0].props.t, "function", "DeptOrgPanel 需要拿到 t");
+  assert.ok(Array.isArray(rendered[0].props.groups), "DeptOrgPanel 需要拿到分组列表");
+
+  const companyButton = collectButtons(tree).find((b) => b.label === "总架构");
+  assert.ok(companyButton, "找不到「总架构」页签按钮");
+  companyButton.onClick();
+  assert.equal(seed[3], "company");
+  react.reset();
+  tree = exports.__internals.Panel({ t });
+  assert.equal(collectElements(tree, (n) => n.type === exports.__internals.CompanyOrgPanel).length, 1);
 });
 
 /* ==================== ③ 完整数据渲染 ==================== */
@@ -713,4 +763,327 @@ test("buildCompanyOrgView：自定义编号模板按 {seq:n} 宽度补齐起始�
   assert.equal(bad.numbering.employee.start, 1);
   assert.equal(bad.numbering.employee.sample, "E0001");
   assert.equal(bad.numbering.department.sample, "D01");
+});
+
+/* ==================== ⑦ 总架构页：工单/成本 KPI 与成本归因 ==================== */
+
+/** 在 overviewFixture 上补 board + costs（shape 同 docs/16 §4.1 与宿主 runtime.costs） */
+function costOverviewFixture() {
+  const data = overviewFixture();
+  data.board = { orders: 7, done: 5 };
+  data.costs = {
+    tokens: 12345,
+    requests: 42,
+    byEmployee: {
+      "emp-lead": { tokens: 1000, requests: 5 },
+      "emp-dev": { tokens: 6000, requests: 20 },
+      "emp-doc": { tokens: 900, requests: 3 },
+      "emp-free": { tokens: 0, requests: 0 },
+    },
+    byDepartment: {
+      "dept-plugin": { tokens: 7000, requests: 25 },
+      "dept-doc": { tokens: 900, requests: 3 },
+      "dept-ghost": { tokens: 500, requests: 1 },
+    },
+    byOrder: {
+      "ord-9": { tokens: 5000, requests: 12 },
+      "ord-1": { tokens: 2000, requests: 8 },
+    },
+  };
+  return data;
+}
+
+test("CompanyOrgPanel：KPI 扩展到工单数/已完成/Token 合计/请求数", () => {
+  const t = translator("zh");
+  const { exports } = loadBundle(makeReact([costOverviewFixture(), null, false, null]));
+  const text = treeText(exports.__internals.CompanyOrgPanel({ t }));
+
+  assert.match(text, /工单数 7/);
+  assert.match(text, /已完成 5/);
+  assert.match(text, /Token 合计 12,345/);
+  assert.match(text, /请求数 42/);
+  // 原有 KPI 不能被顶掉
+  assert.match(text, /部门 2/);
+  assert.match(text, /员工 4/);
+  assert.match(text, /管理通道 1/);
+  assert.match(text, /专业技术通道 3/);
+});
+
+test("CompanyOrgPanel：成本归因区渲染总量 + 三列（姓名+工号 / 编号+名称 / orderId）", () => {
+  const t = translator("zh");
+  const { exports } = loadBundle(makeReact([costOverviewFixture(), null, false, null]));
+  const text = treeText(exports.__internals.CompanyOrgPanel({ t }));
+
+  assert.match(text, /成本归因/);
+  assert.match(text, /合计 12,345 tokens · 42 次请求/);
+  assert.match(text, /按员工/);
+  assert.match(text, /按部门/);
+  assert.match(text, /按工单/);
+
+  // 员工列：姓名 + 工号
+  assert.match(text, /插件工程师 E0002/);
+  assert.match(text, /插件组负责人 E0001/);
+  // 部门列：编号 + 名称；未知部门 id 回落成 key 本身
+  assert.match(text, /D01 插件组/);
+  assert.match(text, /D02 文档组/);
+  assert.match(text, /dept-ghost/);
+  // 工单列：orderId
+  assert.match(text, /ord-9/);
+  assert.match(text, /ord-1/);
+  // 每行附 tokens / requests
+  assert.match(text, /6,000 tokens · 20 请求/);
+  assert.match(text, /5,000 tokens · 12 请求/);
+});
+
+test("CompanyOrgPanel：三列各按 tokens 降序只展示 top5", () => {
+  const t = translator("zh");
+  const data = overviewFixture();
+  data.board = { orders: 6, done: 0 };
+  data.costs = { tokens: 2100, requests: 21, byEmployee: {}, byDepartment: {}, byOrder: {} };
+  const employees = [];
+  for (let i = 1; i <= 6; i += 1) {
+    const id = "emp-" + i;
+    employees.push({ id, code: "E900" + i, displayName: "员工" + i, department: "dept-plugin", departmentCode: "D01", channel: "P", level: "P2", levelName: "工程师", role: "staff", state: "idle" });
+    data.costs.byEmployee[id] = { tokens: 700 - i * 100, requests: i };
+  }
+  data.org.employees = employees;
+
+  const { exports } = loadBundle(makeReact([data, null, false, null]));
+  const text = treeText(exports.__internals.CompanyOrgPanel({ t }));
+
+  // 降序：员工1(600) → 员工5(200) 渲染；员工6(100) 被截掉
+  const i1 = text.indexOf("员工1 E9001");
+  const i2 = text.indexOf("员工2 E9002");
+  const i5 = text.indexOf("员工5 E9005");
+  assert.ok(i1 >= 0 && i2 >= 0 && i5 >= 0, "top5 应包含员工1/2/5");
+  assert.ok(i1 < i2 && i2 < i5, "员工列应按 tokens 降序");
+  assert.equal(text.includes("员工6 E9006"), false, "第 6 名不应出现在 top5 里");
+
+  // 纯函数保留完整降序列表，截断只发生在渲染层
+  const view = exports.__internals.buildCompanyOrgView(data);
+  assert.equal(view.costs.byEmployee.length, 6);
+  assert.equal(view.costs.byEmployee.map((row) => row.tokens).join(","), "600,500,400,300,200,100");
+  assert.equal(view.costs.byEmployee[0].label, "员工1 E9001");
+});
+
+test("CompanyOrgPanel：旧宿主没有 costs/board → 成本空态与 0 KPI，不崩", () => {
+  const t = translator("zh");
+  const old = overviewFixture(); // 无 board / costs
+  const { exports } = loadBundle(makeReact([old, null, false, null]));
+  const text = treeText(exports.__internals.CompanyOrgPanel({ t }));
+
+  assert.match(text, /成本归因/);
+  assert.match(text, /暂无成本数据/);
+  assert.match(text, /工单数 0/);
+  assert.match(text, /已完成 0/);
+  assert.match(text, /Token 合计 0/);
+  assert.match(text, /请求数 0/);
+});
+
+/* ==================== ⑧ 纯函数 buildCompanyOrgView 的 costs/board 归一 ==================== */
+
+test("buildCompanyOrgView：board 与 costs 归一为有序数组，并保留缺省兜底", () => {
+  const { exports } = loadBundle(makeReact());
+  const view = exports.__internals.buildCompanyOrgView(costOverviewFixture());
+
+  assert.equal(view.board.orders, 7);
+  assert.equal(view.board.done, 5);
+  assert.equal(view.costs.tokens, 12345);
+  assert.equal(view.costs.requests, 42);
+  assert.equal(view.costs.hasData, true);
+
+  // 按员工：tokens 降序，0 值行被丢弃，标签 = 姓名 + 工号
+  assert.equal(view.costs.byEmployee.length, 3, "0 值成本行应被过滤");
+  assert.equal(view.costs.byEmployee.map((row) => row.label).join("|"), "插件工程师 E0002|插件组负责人 E0001|文档工程师 E0003");
+  assert.equal(view.costs.byEmployee.map((row) => row.tokens).join(","), "6000,1000,900");
+
+  // 按部门：编号 + 名称；未知部门回落 key
+  assert.equal(view.costs.byDepartment.map((row) => row.label).join("|"), "D01 插件组|D02 文档组|dept-ghost");
+
+  // 按工单：orderId 原样
+  assert.equal(view.costs.byOrder.map((row) => row.label).join("|"), "ord-9|ord-1");
+
+  // 老宿主：全缺 → 0 / 空数组 / hasData=false
+  const empty = exports.__internals.buildCompanyOrgView({});
+  assert.deepEqual({ ...empty.board }, { orders: 0, done: 0 });
+  assert.equal(empty.costs.tokens, 0);
+  assert.equal(empty.costs.requests, 0);
+  assert.equal(empty.costs.hasData, false);
+  assert.equal(empty.costs.byEmployee.length, 0);
+  assert.equal(empty.costs.byDepartment.length, 0);
+  assert.equal(empty.costs.byOrder.length, 0);
+
+  // board 缺失但 orders 数组存在 → 用长度兜底
+  const withOrders = exports.__internals.buildCompanyOrgView({ orders: [{}, {}, {}] });
+  assert.equal(withOrders.board.orders, 3);
+  assert.equal(withOrders.board.done, 0);
+
+  // costs 只有分桶没有总量 → 总量用员工桶求和兜底
+  const summed = exports.__internals.buildCompanyOrgView({
+    costs: { byEmployee: { a: { tokens: 10, requests: 2 }, b: { tokens: 5, requests: 1 } } },
+  });
+  assert.equal(summed.costs.tokens, 15);
+  assert.equal(summed.costs.requests, 3);
+  assert.equal(summed.costs.hasData, true);
+});
+
+/* ==================== ⑨ 部门架构页（DeptOrgPanel） ==================== */
+
+function deptSampleView() {
+  const view = sampleView();
+  view.groups.push({
+    id: "g-2",
+    name: "插件组",
+    description: "插件实现",
+    members: [
+      { target: "plugin-smith", displayName: "插件匠", title: "插件工程师", duties: ["实现页签"], skills: ["cordis-plugin"], groupId: "g-2", isRetired: false },
+      { target: "plugin-old", displayName: "已退休插件工", title: "退休", skills: ["cordis-plugin"], groupId: "g-2", isRetired: true },
+    ],
+  });
+  view.ungrouped = [{ target: "free-agent", displayName: "自由成员", title: "顾问", skills: ["research"], isRetired: false }];
+  return view;
+}
+
+function deptTableProps(t, groups) {
+  return {
+    t,
+    busy: false,
+    groups: groups.map((g) => ({ id: g.id, name: g.name })),
+    onEdit() {},
+    onRetire() {},
+    onRestore() {},
+    onAssign() {},
+    emptyText: t("emptyGroup"),
+  };
+}
+
+/** 把 MemberTable / MemberRow 元素展开成真实渲染树，便于断言成员行 */
+function expandTables(node, internals) {
+  if (!node || typeof node !== "object") return node;
+  if (node.type === internals.MemberTable) return expandTables(internals.MemberTable(node.props), internals);
+  if (node.type === internals.MemberRow) return internals.MemberRow(node.props);
+  return Object.assign({}, node, { children: (node.children || []).map((child) => expandTables(child, internals)) });
+}
+
+/** 渲染 DeptOrgPanel：seed = [filter, query] */
+function renderDept(view, { filter = "all", query = "" } = {}) {
+  const t = translator("zh");
+  const react = makeReact([filter, query]);
+  const { exports } = loadBundle(react);
+  const internals = exports.__internals;
+  const calls = { refresh: 0, deleted: [] };
+  const tree = internals.DeptOrgPanel({
+    t,
+    groups: view.groups,
+    ungrouped: view.ungrouped,
+    busy: false,
+    tableProps: deptTableProps(t, view.groups),
+    onRefresh: () => {
+      calls.refresh += 1;
+    },
+    onDeleteGroup: (g) => calls.deleted.push(g.id),
+  });
+  return { t, internals, tree, expanded: expandTables(tree, internals), calls };
+}
+
+test("DeptOrgPanel：工具条 + 部门 pills + 搜索框 + 按部门分卡", () => {
+  const view = deptSampleView();
+  const { t, tree, expanded, calls } = renderDept(view);
+  const text = treeText(expanded);
+
+  // 工具条标题与刷新
+  assert.match(text, /部门架构 · 按部门管理成员/);
+  const buttons = collectButtons(tree);
+  assert.ok(buttons.some((b) => b.label === "刷新"), "应有刷新按钮");
+  buttons.find((b) => b.label === "刷新").onClick();
+  assert.equal(calls.refresh, 1, "点刷新应触发 onRefresh");
+
+  // 部门 pills：全部部门 + 每个部门名 + 未分配部门
+  const pillLabels = buttons.map((b) => b.label);
+  for (const label of ["全部部门", "数据组", "插件组", "未分配部门"]) {
+    assert.ok(pillLabels.includes(label), `缺少部门 pill：${label}`);
+  }
+
+  // 搜索框占位符
+  const inputs = collectElements(tree, (n) => n.type === "input");
+  assert.equal(inputs.length, 1);
+  assert.equal(inputs[0].props.placeholder, t("dpSearch"));
+  assert.match(inputs[0].props.placeholder, /技能/);
+
+  // 卡片：名称 + 人数 + 说明，成员行显示姓名/岗位；已停用成员被过滤
+  assert.match(text, /数据组 1 人 知识库与核查/);
+  assert.match(text, /插件组 1 人 插件实现/);
+  assert.match(text, /数据整理员/);
+  assert.match(text, /知识库整理员/);
+  assert.match(text, /插件匠/);
+  assert.match(text, /插件工程师/);
+  assert.equal(text.includes("已退休插件工"), false, "已停用成员不应出现在成员表里");
+  // 未分组 → 「未分配部门」卡
+  assert.match(text, /未分配部门 1 人/);
+  assert.match(text, /自由成员/);
+
+  // 删除按钮绑到对应小组
+  const removeButtons = collectButtons(tree).filter((b) => b.label === "移除");
+  assert.equal(removeButtons.length, 2, "两个部门卡各一个删除按钮，未分配部门卡没有");
+  removeButtons[0].onClick();
+  assert.deepEqual(calls.deleted, ["g-1"]);
+});
+
+test("DeptOrgPanel：部门 pill 只显示该部门成员", () => {
+  const view = deptSampleView();
+  const { expanded } = renderDept(view, { filter: "g-2" });
+  const text = treeText(expanded);
+
+  assert.match(text, /插件匠/);
+  assert.equal(text.includes("数据整理员"), false, "筛选 g-2 时不应出现数据组成员");
+  assert.equal(text.includes("自由成员"), false, "筛选 g-2 时不应出现未分配部门成员");
+  assert.equal(text.includes("数据组 1 人"), false, "筛选 g-2 时不应渲染别的部门卡");
+});
+
+test("DeptOrgPanel：搜索按姓名 / DSH 名 / 岗位 / 技能过滤，无命中显示空态", () => {
+  const view = deptSampleView();
+
+  // 姓名
+  let text = treeText(renderDept(view, { query: "插件匠" }).expanded);
+  assert.match(text, /插件匠/);
+  assert.equal(text.includes("数据整理员"), false);
+
+  // DSH 名（target）
+  text = treeText(renderDept(view, { query: "data-organizer" }).expanded);
+  assert.match(text, /数据整理员/);
+  assert.equal(text.includes("插件匠"), false);
+
+  // 岗位
+  text = treeText(renderDept(view, { query: "顾问" }).expanded);
+  assert.match(text, /自由成员/);
+
+  // 技能
+  text = treeText(renderDept(view, { query: "cordis-plugin" }).expanded);
+  assert.match(text, /插件匠/);
+  assert.equal(text.includes("数据整理员"), false);
+
+  // 无命中：空态文案，且不显示任何部门卡
+  text = treeText(renderDept(view, { query: "并不存在的成员" }).expanded);
+  assert.match(text, /没有匹配的成员/);
+  assert.equal(text.includes("数据组 1 人"), false);
+});
+
+test("DeptOrgPanel：过滤值指向已消失的部门时回落到「全部部门」", () => {
+  const view = deptSampleView();
+  const { expanded } = renderDept(view, { filter: "g-already-deleted" });
+  const text = treeText(expanded);
+  assert.match(text, /数据组 1 人/);
+  assert.match(text, /插件组 1 人/);
+  assert.match(text, /未分配部门 1 人/);
+});
+
+test("DeptOrgPanel：一个成员都没有时沿用「还没有成员」空态", () => {
+  const view = sampleView();
+  view.groups = [];
+  view.ungrouped = [];
+  const { expanded } = renderDept(view);
+  const text = treeText(expanded);
+  assert.match(text, /还没有成员/);
+  assert.match(text, /同步核心成员/);
+  assert.equal(text.includes("没有匹配的成员"), false);
 });

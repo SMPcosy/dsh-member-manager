@@ -28,9 +28,17 @@
 - **历史数据迁移**：`normalizeCompany` / boot 阶段 `ensureCompanyCodes` 为缺编号、缺等级的历史员工与部门自动补号补级；等级非法回退岗位默认并记 warning，**不丢弃员工**。
 - **晋升**：`company_admin({action:"promoteEmployee"})` 同通道只允许 ±1 级，跨通道须显式指定目标等级且 `role` 随之改写（window 不可转 M，转 M 前必须有部门）；`updateDepartment` 支持改写部门名称/编号等元数据。
 - **视图与提示词**：`GET /company/overview` / `company_status` 的 `org.departments` 增加 `code`/`employeeCount`/`managerId`，`org.employees` 增加 `code`/`departmentCode`/`channel`/`level`/`levelName`，新增 `levels`/`numbering`；员工提示词头部带「工号 / 等级 / 通道 / 部门编号」身份行。
-- **公司架构面板**：面板新增第 6 个页签「公司架构」，只读展示统计卡、编号规则、M/P 等级图例、部门卡片（编号 + 编制 + M/P 分栏员工行 + 状态点）与无部门员工，5 秒轮询 + 手动刷新；中英双语文案。
+- **公司架构面板**：面板新增第 6 个页签「公司架构」，只读展示统计卡、编号规则、M/P 等级图例、部门卡片（编号 + 编制 + M/P 分栏员工行 + 状态点）与无部门员工，5 秒轮询 + 手动刷新；中英双语文案。（后续版本升级为「总架构」首屏页，见下节）
 - **工具层校验**：`company_hire` / `company_admin({action:"createEmployee"})` 传入不存在的部门 id 时返回 `{ok:false, code:"E_NOT_FOUND", message:"部门不存在: <id>"}`，不再落孤儿员工（空部门仍允许，由 shared 校验 manager 必须有部门）。
 - **新增测试**：shared 等级/编号纯函数与 config 解析（`test/company-levels.test.mjs`）、面板纯函数与渲染（`test/company-panel.test.mjs`）；冻结的 `company-org` 契约测试全绿。
+
+### 变更：面板信息架构重构（总架构 / 部门架构）
+
+- **页签重排**：「总架构」（`company`）提到第一个页签并成为默认落地页；原「组织架构」页调整为第二个页签「部门架构」（`org`）；其余页签（已停用 / 未登记 / 工作流 / 备份与更新）顺延，功能不变。
+- **总架构页（原公司架构页升级）**：在原有统计卡 / 编号规则 / M/P 等级图例 / 部门卡片之外，新增工单数、已完成工单、Token 合计、请求数 KPI，并新增**成本归因区**：按员工（姓名 + 工号）/ 按部门（编号 + 名称）/ 按工单（orderId）三列展示 tokens 前 5 名，附请求数；无用量时空态提示。数据来自 `GET /company/overview` 的 `board` 与 `costs`，仍为 5 秒轮询 + 手动刷新。
+- **部门架构页（原组织架构页升级）**：按部门分组管理成员，新增顶部工具条——标题、刷新按钮、部门过滤 pills（全部部门 + 各小组）、搜索框（姓名 / DSH 名 / 岗位 / 技能，大小写不敏感）；未分组卡文案改为「未分配部门」，筛选无结果时显示「没有匹配的成员」；新建部门表单文案同步为 新建部门 / 部门名称 / 部门说明。
+- **视图归一扩展**：`buildCompanyOrgView(overview)` 新增 `costs`（按 tokens 降序、各 5 条的 byEmployee/byDepartment/byOrder 数组）与 `board` 字段，缺省/类型异常一律兜底为空值，不抛异常。
+- **测试**：`test/company-panel.test.mjs` 更新页签/默认页断言并新增成本归因、部门过滤、搜索、空态与归一兜底用例；`test/client-bundle.test.mjs` 适配新默认页签；全量用例数随更新调整。
 
 ### 修复（真实宿主端到端验证发现）
 
