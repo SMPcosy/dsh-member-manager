@@ -135,6 +135,7 @@ export function normalizeCompany(raw, now = new Date().toISOString()) {
         lastUsed: emp.lastUsed ?? 0,
         channel: emp.channel,
         level: emp.level,
+        channels: Array.isArray(emp.channels) ? emp.channels : undefined,
         code: emp.code,
       };
       // 等级迁移：非法 level/channel 回退默认 + warning，不丢员工（docs/16 §1.3）。
@@ -260,28 +261,147 @@ export function describeEmployeeLevel(employee, levels = DEFAULT_LEVELS) {
  * - channel 缺失 → 按 role 推导；channel 非法或与岗位冲突 → 按 role 归正 + warning。
  * - level 缺失或不在该通道目录 → 回退 DEFAULT_EMPLOYEE_LEVEL[role] + warning。
  */
-function migrateIdentity(source, target, warnings) {
-  const role = target.role;
-  const expected = channelForRole(role) ?? LEVEL_CHANNEL.PROFESSIONAL;
-  let channel = target.channel;
-  if (channel !== undefined && !CHANNELS.has(channel)) {
-    if (channel !== null && channel !== "") warnings.push(`员工 ${target.id} channel 非法（${source.channel}），按岗位推导为 ${expected}`);
-    channel = expected;
-  }
-  if (channel === undefined || channel === null || channel === "") channel = expected;
-  if (channel !== expected && target.channel !== undefined) {
-    warnings.push(`员工 ${target.id} channel ${channel} 与岗位 ${role} 不一致，按岗位归正为 ${expected}`);
-    channel = expected;
-  }
-  target.channel = channel;
-  const track = DEFAULT_LEVELS[channel];
-  const levelValid = target.level !== undefined && Array.isArray(track?.levels) && track.levels.some((l) => l?.code === target.level);
-  if (!levelValid) {
-    if (target.level !== undefined && target.level !== null && target.level !== "") {
-      warnings.push(`员工 ${target.id} level 非法（${source.level}），回退默认 ${DEFAULT_EMPLOYEE_LEVEL[role]}`);
+const CHANNEL_ORDER = Object.freeze({ M: 0, P: 1 });
+
+function sortChannels(list) {
+  return [...list].sort((a, b) => CHANNEL_ORDER[a.channel] - CHANNEL_ORDER[b.channel]);
+}
+
+function defaultLevelFor(channel, role) {
+  const preferred = DEFAULT_EMPLOYEE_LEVEL[role];
+  if (typeof preferred === "string" && preferred.startsWith(channel)) return preferred;
+  return channel === LEVEL_CHANNEL.MANAGEMENT ? DEFAULT_EMPLOYEE_LEVEL.manager : DEFAULT_EMPLOYEE_LEVEL.staff;
+}
+
+/** 主通道：含 M 即 M，否则 P（docs/21 §1.1）。 */
+export function primaryChannelOf(channels) {
+  return Array.isArray(channels) && channels.some((c) => c?.channel === LEVEL_CHANNEL.MANAGEMENT)
+    ? LEVEL_CHANNEL.MANAGEMENT
+    : LEVEL_CHANNEL.PROFESSIONAL;
+}
+
+/**
+ * 把任意员工档案（旧 channel/level 或新 channels）归一为规范通道列表。
+ * 永不抛：非法通道/等级丢弃或回退默认；role 规则（manager 必含 M、window 禁 M）在此归正。
+ */
+export function normalizeChannels(employeeLike, levels = DEFAULT_LEVELS) {
+  const warnings = [];
+  const id = employeeLike?.id ?? "?";
+  const role = employeeLike?.role ?? EMPLOYEE_ROLE.STAFF;
+  const seen = [];
+
+  const push = (channel, level) => {
+    if (seen.some((c) => c.channel === channel)) {
+      warnings.push(`员工 ${id} 通道重复（${channel}），已去重`);
+      return;
     }
-    target.level = DEFAULT_EMPLOYEE_LEVEL[role] ?? DEFAULT_EMPLOYEE_LEVEL.staff;
+    const track = levels?.[channel]?.levels;
+    if (!Array.isArray(track) || track.length === 0) {
+      warnings.push(`员工 ${id} 通道 ${channel} 缺少等级目录，已忽略`);
+      return;
+    }
+    let lv = level;
+    if (!track.some((l) => l?.code === lv)) {
+      lv = defaultLevelFor(channel, role);
+      if (level !== undefined && level !== null && level !== "") {
+        warnings.push(`员工 ${id} ${channel} 等级非法（${level}），回退默认 ${lv}`);
+      }
+    }
+    seen.push({ channel, level: lv });
+  };
+
+  const raw = Array.isArray(employeeLike?.channels) ? employeeLike.channels : [];
+  for (const item of raw) {
+    if (!item || !CHANNELS.has(item.channel)) {
+      warnings.push(`员工 ${id} 通道非法（${item?.channel}），已忽略`);
+      continue;
+    }
+    push(item.channel, item.level);
   }
+  if (seen.length === 0) {
+    const legacyChannel = CHANNELS.has(employeeLike?.channel) ? employeeLike.channel : null;
+    const fallback = legacyChannel ?? (role === EMPLOYEE_ROLE.MANAGER ? LEVEL_CHANNEL.MANAGEMENT : LEVEL_CHANNEL.PROFESSIONAL);
+    push(fallback, employeeLike?.level);
+  }
+
+  if (role === EMPLOYEE_ROLE.WINDOW) {
+    const ix = seen.findIndex((c) => c.channel === LEVEL_CHANNEL.MANAGEMENT);
+    if (ix >= 0) {
+      seen.splice(ix, 1);
+      warnings.push(`员工 ${id} 为 window 岗位，M 通道已按规则移除`);
+    }
+  }
+  if (role === EMPLOYEE_ROLE.MANAGER && !seen.some((c) => c.channel === LEVEL_CHANNEL.MANAGEMENT)) {
+    push(LEVEL_CHANNEL.MANAGEMENT, undefined);
+    warnings.push(`员工 ${id} 为 manager，已补 M 通道`);
+  }
+  if (seen.length === 0) push(LEVEL_CHANNEL.PROFESSIONAL, undefined);
+
+  return { channels: sortChannels(seen), warnings };
+}
+
+/** 员工在某通道的等级；没有该通道返回 null；永不抛。 */
+export function resolveChannelLevel(employee, channel, levels = DEFAULT_LEVELS) {
+  if (!CHANNELS.has(channel)) return null;
+  const { channels } = normalizeChannels(employee, levels);
+  const hit = channels.find((c) => c.channel === channel);
+  if (!hit) return null;
+  const track = levels?.[channel]?.levels;
+  const entry = Array.isArray(track) ? track.find((l) => l?.code === hit.level) : undefined;
+  return { channel, level: hit.level, name: entry?.name ?? hit.level };
+}
+
+/** 员工全部通道的展示描述（主通道标记 primary）。 */
+export function describeEmployeeChannels(employee, levels = DEFAULT_LEVELS) {
+  const { channels } = normalizeChannels(employee, levels);
+  const primary = primaryChannelOf(channels);
+  return channels.map((c) => {
+    const track = levels?.[c.channel]?.levels;
+    const entry = Array.isArray(track) ? track.find((l) => l?.code === c.level) : undefined;
+    return { channel: c.channel, level: c.level, levelName: entry?.name ?? c.level, primary: c.channel === primary };
+  });
+}
+
+/**
+ * 直接设置员工通道列表（docs/21 §1.2）。返回 { company, from, to }。
+ * 校验：≥1（E_LAST_CHANNEL）、通道合法（E_INVALID_CHANNEL）、重复（E_CHANNEL_CONFLICT）、
+ * 等级合法（E_INVALID_LEVEL）、role 规则（manager 必含 M / window 禁 M，均 E_CHANNEL_CONFLICT）。
+ */
+export function setEmployeeChannels(company, employeeId, channels, { levels = DEFAULT_LEVELS } = {}) {
+  const c = clone(company);
+  const emp = findEmployee(c, employeeId);
+  if (!emp) throw orgError(`员工 ${employeeId} 不存在`, "E_NOT_FOUND");
+  if (!Array.isArray(channels) || channels.length === 0) throw orgError("至少保留一个通道", "E_LAST_CHANNEL");
+
+  const seen = [];
+  for (const item of channels) {
+    const channel = item?.channel;
+    if (!CHANNELS.has(channel)) throw orgError(`非法通道: ${channel}`, "E_INVALID_CHANNEL");
+    if (seen.some((x) => x.channel === channel)) throw orgError(`通道重复: ${channel}`, "E_CHANNEL_CONFLICT");
+    resolveLevel(channel, item?.level, levels);
+    seen.push({ channel, level: item.level });
+  }
+  if (emp.role === EMPLOYEE_ROLE.WINDOW && seen.some((x) => x.channel === LEVEL_CHANNEL.MANAGEMENT)) {
+    throw orgError("window 岗位不能拥有 M 通道", "E_CHANNEL_CONFLICT");
+  }
+  if (emp.role === EMPLOYEE_ROLE.MANAGER && !seen.some((x) => x.channel === LEVEL_CHANNEL.MANAGEMENT)) {
+    throw orgError("manager 岗位必须保留 M 通道", "E_CHANNEL_CONFLICT");
+  }
+
+  const from = { channels: describeEmployeeChannels(emp, levels).map(({ channel, level }) => ({ channel, level })) };
+  const next = sortChannels(seen);
+  emp.channels = next;
+  emp.channel = primaryChannelOf(next);
+  emp.level = next.find((x) => x.channel === emp.channel).level;
+  return { company: c, from, to: { channels: next.map((x) => ({ ...x })), channel: emp.channel, level: emp.level } };
+}
+
+function migrateIdentity(source, target, warnings) {
+  const { channels, warnings: chWarnings } = normalizeChannels(target, DEFAULT_LEVELS);
+  for (const w of chWarnings) warnings.push(w);
+  target.channels = channels;
+  target.channel = primaryChannelOf(channels);
+  target.level = channels.find((c) => c.channel === target.channel).level;
 }
 
 /* ------------------------------------------------------------------ */
@@ -457,7 +577,7 @@ export function updateDepartment(company, id, patch) {
 
 export function createEmployee(
   company,
-  { id, displayName, department, role, kind, sessionPolicy, state, skills, code, channel, level, ...rest },
+  { id, displayName, department, role, kind, sessionPolicy, state, skills, code, channel, level, channels, ...rest },
 ) {
   const c = clone(company);
   if (findEmployee(c, id)) throw new OrgError(`员工 ${id} 已存在`);
@@ -475,17 +595,37 @@ export function createEmployee(
     throw new OrgError(`manager 必须来自存在的部门: ${department}`);
   }
 
-  // 通道：缺省按岗位推导；显式必须合法且与岗位一致（docs/16 §1.3 一致性硬校验）。
+  // 通道（docs/21 §1.1）：显式 channels 优先；否则旧 channel/level；否则按岗位默认。
   const expectedChannel = channelForRole(r);
-  let ch = channel === undefined || channel === null || channel === "" ? expectedChannel : channel;
-  if (!CHANNELS.has(ch)) throw orgError(`非法 channel: ${ch}`, "E_INVALID_CHANNEL");
-  if (ch !== expectedChannel) {
-    throw orgError(`channel ${ch} 与岗位 ${r} 不一致（应 ${expectedChannel}）`, "E_CHANNEL_CONFLICT");
+  let channelList;
+  if (Array.isArray(channels)) {
+    if (channels.length === 0) throw orgError("至少保留一个通道", "E_LAST_CHANNEL");
+    channelList = channels.map((item) => {
+      if (!item || !CHANNELS.has(item.channel)) throw orgError(`非法 channel: ${item?.channel}`, "E_INVALID_CHANNEL");
+      const resolved = resolveLevel(item.channel, item.level ?? defaultLevelFor(item.channel, r));
+      return { channel: resolved.channel, level: resolved.code };
+    });
+    if (new Set(channelList.map((x) => x.channel)).size !== channelList.length) {
+      throw orgError("通道重复", "E_CHANNEL_CONFLICT");
+    }
+  } else {
+    const ch = channel === undefined || channel === null || channel === "" ? expectedChannel : channel;
+    if (!CHANNELS.has(ch)) throw orgError(`非法 channel: ${ch}`, "E_INVALID_CHANNEL");
+    if (ch !== expectedChannel) {
+      throw orgError(`channel ${ch} 与岗位 ${r} 不一致（应 ${expectedChannel}）`, "E_CHANNEL_CONFLICT");
+    }
+    const resolved = resolveLevel(ch, level ?? defaultLevelFor(ch, r));
+    channelList = [{ channel: resolved.channel, level: resolved.code }];
   }
-
-  // 等级：缺省用 DEFAULT_EMPLOYEE_LEVEL[role]；显式必须属于该通道目录。
-  const lv = level ?? DEFAULT_EMPLOYEE_LEVEL[r];
-  const resolved = resolveLevel(ch, lv); // 非法 → OrgError(E_INVALID_LEVEL / E_INVALID_CHANNEL)
+  if (r === EMPLOYEE_ROLE.MANAGER && !channelList.some((x) => x.channel === LEVEL_CHANNEL.MANAGEMENT)) {
+    throw orgError("manager 岗位必须含 M 通道", "E_CHANNEL_CONFLICT");
+  }
+  if (r === EMPLOYEE_ROLE.WINDOW && channelList.some((x) => x.channel === LEVEL_CHANNEL.MANAGEMENT)) {
+    throw orgError("window 岗位不能拥有 M 通道", "E_CHANNEL_CONFLICT");
+  }
+  const sortedChannels = sortChannels(channelList);
+  const primaryChannel = primaryChannelOf(sortedChannels);
+  const primaryLevel = sortedChannels.find((x) => x.channel === primaryChannel).level;
 
   // 编号：缺省自动生成；显式全公司唯一。
   const deptRow = findDepartment(c, department);
@@ -494,8 +634,8 @@ export function createEmployee(
     code === undefined
       ? nextCodeFromSet(c.numbering?.employee ?? DEFAULT_NUMBERING.employee, usedCodes, "员工", {
           dept: typeof deptRow?.code === "string" ? deptRow.code : "",
-          channel: ch,
-          level: resolved.code,
+          channel: primaryChannel,
+          level: primaryLevel,
         })
       : normalizeCodeInput(code, "员工", usedCodes);
 
@@ -510,8 +650,9 @@ export function createEmployee(
     skills: Array.isArray(skills) ? skills : [],
     lastUsed: 0,
     code: empCode,
-    channel: ch,
-    level: resolved.code,
+    channel: primaryChannel,
+    level: primaryLevel,
+    channels: sortedChannels.map((x) => ({ ...x })),
     ...rest,
   });
   return c;
@@ -548,63 +689,88 @@ export function promoteEmployee(company, employeeId, patch = {}, { levels = DEFA
   const emp = findEmployee(c, employeeId);
   if (!emp) throw new OrgError(`员工 ${employeeId} 不存在`);
 
-  const from = describeEmployeeLevel(emp, levels);
-  const hasChannel = patch.channel !== undefined && patch.channel !== null && patch.channel !== "";
-  const hasLevel = patch.level !== undefined && patch.level !== null && patch.level !== "";
+  const described = describeEmployeeChannels(emp, levels);
+  const current = described.find((x) => x.primary) ?? described[0];
+  const from = { channel: current.channel, level: current.level };
+  let next = described.map(({ channel, level }) => ({ channel, level }));
 
-  let targetChannel = from.channel;
-  let targetLevel;
-  if (hasChannel) {
-    if (!CHANNELS.has(patch.channel)) throw orgError(`非法 channel: ${patch.channel}`, "E_INVALID_CHANNEL");
-    targetChannel = patch.channel;
-    if (patch.channel !== from.channel && !hasLevel) {
-      throw orgError("跨通道转岗必须显式给出 level", "E_CROSS_CHANNEL");
-    }
-    targetLevel = hasLevel ? patch.level : undefined;
-  } else if (hasLevel) {
-    const prefix = String(patch.level).charAt(0).toUpperCase();
-    if (CHANNELS.has(prefix) && prefix !== from.channel) {
-      throw orgError("跨通道转岗必须显式给出 channel", "E_CROSS_CHANNEL");
-    }
-    targetLevel = patch.level;
-  }
-
-  const track = levels?.[targetChannel]?.levels;
-  if (!Array.isArray(track) || track.length === 0) throw orgError(`通道 ${targetChannel} 缺少等级目录`, "E_INVALID_CHANNEL");
-  const indexOf = (lv) => {
+  const trackOf = (channel) => {
+    const track = levels?.[channel]?.levels;
+    if (!Array.isArray(track) || track.length === 0) throw orgError(`通道 ${channel} 缺少等级目录`, "E_INVALID_CHANNEL");
+    return track;
+  };
+  const indexOfLevel = (channel, lv) => {
+    const track = trackOf(channel);
     const ix = track.findIndex((l) => l?.code === lv);
-    if (ix < 0) throw orgError(`非法等级 ${lv}（通道 ${targetChannel}）`, "E_INVALID_LEVEL");
+    if (ix < 0) throw orgError(`非法等级 ${lv}（通道 ${channel}）`, "E_INVALID_LEVEL");
     return ix;
   };
 
-  if (targetLevel === undefined) {
-    // 无参（或同通道未给 level）：同通道 +1。
-    const cur = indexOf(from.level);
-    if (cur + 1 >= track.length) throw orgError(`员工 ${employeeId} 已是最高等级 ${from.level}`, "E_MAX_LEVEL");
-    targetLevel = track[cur + 1].code;
-  } else if (targetChannel === from.channel) {
-    const cur = indexOf(from.level);
-    const next = indexOf(targetLevel);
-    if (next === cur) throw orgError("目标等级与当前等级相同", "E_LEVEL_STEP");
-    if (Math.abs(next - cur) !== 1) throw orgError(`等级必须逐级晋升/降级（±1），当前 ${from.level} 目标 ${targetLevel}`, "E_LEVEL_STEP");
+  const hasChannel = patch.channel !== undefined && patch.channel !== null && patch.channel !== "";
+  const hasLevel = patch.level !== undefined && patch.level !== null && patch.level !== "";
+
+  if (patch.addChannel && typeof patch.addChannel === "object") {
+    const ch = patch.addChannel.channel;
+    if (!CHANNELS.has(ch)) throw orgError(`非法 channel: ${ch}`, "E_INVALID_CHANNEL");
+    if (next.some((x) => x.channel === ch)) throw orgError(`通道已存在: ${ch}`, "E_CHANNEL_CONFLICT");
+    if (emp.role === EMPLOYEE_ROLE.WINDOW && ch === LEVEL_CHANNEL.MANAGEMENT) {
+      throw orgError("window 岗位不能加 M 通道", "E_CHANNEL_CONFLICT");
+    }
+    const resolved = resolveLevel(ch, patch.addChannel.level ?? defaultLevelFor(ch, emp.role), levels);
+    next.push({ channel: resolved.channel, level: resolved.code });
+  } else if (patch.removeChannel !== undefined && patch.removeChannel !== null && patch.removeChannel !== "") {
+    const ch = patch.removeChannel;
+    if (!CHANNELS.has(ch)) throw orgError(`非法 channel: ${ch}`, "E_INVALID_CHANNEL");
+    if (!next.some((x) => x.channel === ch)) throw orgError(`通道不存在: ${ch}`, "E_INVALID_CHANNEL");
+    if (emp.role === EMPLOYEE_ROLE.MANAGER && ch === LEVEL_CHANNEL.MANAGEMENT) {
+      throw orgError("manager 不可移除 M 通道", "E_CHANNEL_CONFLICT");
+    }
+    if (next.length <= 1) throw orgError("至少保留一个通道", "E_LAST_CHANNEL");
+    next = next.filter((x) => x.channel !== ch);
   } else {
-    indexOf(targetLevel); // 跨通道：目标通道任意合法等级。
-  }
-
-  if (targetChannel !== from.channel) {
-    if (emp.role === EMPLOYEE_ROLE.WINDOW && targetChannel === LEVEL_CHANNEL.MANAGEMENT) {
-      throw orgError("window 岗位不能转 M 管理通道", "E_WINDOW_TO_M");
+    const targetChannel = hasChannel ? patch.channel : from.channel;
+    if (!CHANNELS.has(targetChannel)) throw orgError(`非法 channel: ${targetChannel}`, "E_INVALID_CHANNEL");
+    const existing = next.find((x) => x.channel === targetChannel);
+    if (!existing) {
+      // 旧语义：跨通道转岗（单通道员工），必须显式 level，role 跟随。
+      if (!hasLevel) throw orgError("跨通道转岗必须显式给出 level", "E_CROSS_CHANNEL");
+      if (emp.role === EMPLOYEE_ROLE.WINDOW && targetChannel === LEVEL_CHANNEL.MANAGEMENT) {
+        throw orgError("window 岗位不能转 M 管理通道", "E_WINDOW_TO_M");
+      }
+      if (targetChannel === LEVEL_CHANNEL.MANAGEMENT && !emp.department) {
+        throw orgError("转 M 管理通道必须已有部门", "E_DEPT_REQUIRED");
+      }
+      const resolved = resolveLevel(targetChannel, patch.level, levels);
+      next = [{ channel: resolved.channel, level: resolved.code }];
+      emp.role = resolved.channel === LEVEL_CHANNEL.MANAGEMENT ? EMPLOYEE_ROLE.MANAGER : EMPLOYEE_ROLE.STAFF;
+    } else {
+      const track = trackOf(targetChannel);
+      const cur = indexOfLevel(targetChannel, existing.level);
+      let targetLevel;
+      if (!hasLevel) {
+        if (cur + 1 >= track.length) throw orgError(`员工 ${employeeId} 在通道 ${targetChannel} 已是最高等级 ${existing.level}`, "E_MAX_LEVEL");
+        targetLevel = track[cur + 1].code;
+      } else {
+        const nextIx = indexOfLevel(targetChannel, patch.level);
+        if (nextIx === cur) throw orgError("目标等级与当前等级相同", "E_LEVEL_STEP");
+        if (Math.abs(nextIx - cur) !== 1) throw orgError(`等级必须逐级晋升/降级（±1），当前 ${existing.level} 目标 ${patch.level}`, "E_LEVEL_STEP");
+        targetLevel = track[nextIx].code;
+      }
+      next = next.map((x) => (x.channel === targetChannel ? { channel: targetChannel, level: targetLevel } : x));
     }
-    if (targetChannel === LEVEL_CHANNEL.MANAGEMENT && !emp.department) {
-      throw orgError("转 M 管理通道必须已有部门", "E_DEPT_REQUIRED");
-    }
   }
 
-  emp.channel = targetChannel;
-  emp.level = targetLevel;
-  if (targetChannel !== from.channel) {
-    emp.role = targetChannel === LEVEL_CHANNEL.MANAGEMENT ? EMPLOYEE_ROLE.MANAGER : EMPLOYEE_ROLE.STAFF;
+  if (emp.role === EMPLOYEE_ROLE.MANAGER && !next.some((x) => x.channel === LEVEL_CHANNEL.MANAGEMENT)) {
+    throw orgError("manager 岗位必须保留 M 通道", "E_CHANNEL_CONFLICT");
   }
+  if (emp.role === EMPLOYEE_ROLE.WINDOW && next.some((x) => x.channel === LEVEL_CHANNEL.MANAGEMENT)) {
+    throw orgError("window 岗位不能拥有 M 通道", "E_CHANNEL_CONFLICT");
+  }
+  if (next.length === 0) throw orgError("至少保留一个通道", "E_LAST_CHANNEL");
 
-  return { company: c, from: { channel: from.channel, level: from.level }, to: { channel: targetChannel, level: targetLevel } };
+  const sorted = sortChannels(next);
+  emp.channels = sorted;
+  emp.channel = primaryChannelOf(sorted);
+  emp.level = sorted.find((x) => x.channel === emp.channel).level;
+  return { company: c, from, to: { channel: emp.channel, level: emp.level } };
 }

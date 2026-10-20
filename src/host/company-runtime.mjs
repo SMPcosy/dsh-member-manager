@@ -9,7 +9,7 @@ import { createDispatcher } from "./company-dispatcher.mjs";
 import { createScheduler } from "./company-scheduler.mjs";
 import { CompanyStore } from "../shared/company-store.mjs";
 import { resolveCompanyConfig } from "../shared/company-config.mjs";
-import { emptyCompany, createDepartment, createEmployee, updateDepartment, updateEmployee, promoteEmployee, fireEmployee, ensureCompanyCodes, describeEmployeeLevel, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY, DEFAULT_LEVELS, DEFAULT_NUMBERING } from "../shared/company-org.mjs";
+import { emptyCompany, createDepartment, createEmployee, updateDepartment, updateEmployee, promoteEmployee, fireEmployee, ensureCompanyCodes, describeEmployeeLevel, describeEmployeeChannels, setEmployeeChannels, primaryChannelOf, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY, DEFAULT_LEVELS, DEFAULT_NUMBERING } from "../shared/company-org.mjs";
 import { emptyLedger, transitionOrder, ORDER_STATES } from "../shared/company-ledger.mjs";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
@@ -169,8 +169,9 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
           role: { type: "string" },
           kind: { type: "string" },
           code: { type: "string", description: "员工编号，可选" },
-          channel: { type: "string", enum: ["M", "P"], description: "通道：M 管理/P 专业" },
-          level: { type: "string", description: "等级 code，如 M2/P4" },
+          channel: { type: "string", enum: ["M", "P"], description: "通道：M 管理/P 专业（旧字段，与 channels 互斥）" },
+          level: { type: "string", description: "等级 code，如 M2/P4（旧字段，与 channels 互斥）" },
+          channels: { type: "array", items: { type: "object", properties: { channel: { type: "string", enum: ["M", "P"] }, level: { type: "string" } }, required: ["channel", "level"], additionalProperties: false }, description: "双通道配置，优先于旧 channel/level" },
         },
         required: ["id"],
       }, company_hire),
@@ -179,7 +180,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         properties: {
           action: {
             type: "string",
-            enum: ["createDepartment", "createEmployee", "setRoutingRules", "updateDepartment", "promoteEmployee", "setNumbering"],
+            enum: ["createDepartment", "createEmployee", "setRoutingRules", "updateDepartment", "promoteEmployee", "setNumbering", "setChannels"],
             description: "管理动作",
           },
           args: { type: "object" },
@@ -308,6 +309,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
           role: args.role || "staff",
           kind: args.kind || "permanent",
           code: args.code,
+          channels: Array.isArray(args.channels) ? args.channels : undefined,
           channel: args.channel,
           level: args.level,
         });
@@ -315,7 +317,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         await store.appendAudit({ type: "employee_hired", employeeId: args.id });
         const emp = runtime.company.employees.find((e) => e.id === args.id);
         const levelInfo = describeEmployeeLevel(emp, runtime.config.levels);
-        return { ok: true, employeeId: args.id, code: emp.code, channel: levelInfo.channel, level: levelInfo.level, levelName: levelInfo.levelName };
+        return { ok: true, employeeId: args.id, code: emp.code, channel: levelInfo.channel, level: levelInfo.level, levelName: levelInfo.levelName, channels: emp.channels };
       } catch (err) {
         return { ok: false, code: err.code || "E_INVALID_INPUT", message: err.message };
       }
@@ -356,6 +358,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
               kind: args.args.kind,
               skills: args.args.skills,
               code: args.args.code,
+              channels: Array.isArray(args.args.channels) ? args.args.channels : undefined,
               channel: args.args.channel,
               level: args.args.level,
             });
@@ -363,7 +366,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
             await store.appendAudit({ type: "employee_created", employeeId: args.args.id });
             const createdEmp = runtime.company.employees.find((e) => e.id === args.args.id);
             const createdLevelInfo = describeEmployeeLevel(createdEmp, runtime.config.levels);
-            return { ok: true, employeeId: args.args.id, code: createdEmp.code, channel: createdLevelInfo.channel, level: createdLevelInfo.level, levelName: createdLevelInfo.levelName };
+            return { ok: true, employeeId: args.args.id, code: createdEmp.code, channel: createdLevelInfo.channel, level: createdLevelInfo.level, levelName: createdLevelInfo.levelName, channels: createdEmp.channels };
           }
           case "setRoutingRules": {
             runtime.config.routingRules = args.args.rules || [];
@@ -372,8 +375,15 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
             await store.appendAudit({ type: "routing_rules_set", count: (args.args.rules || []).length });
             break;
           }
+          case "setChannels": {
+            const result = setEmployeeChannels(runtime.company, args.args.employeeId, args.args.channels, { levels: runtime.config.levels });
+            runtime.company = result.company;
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "employee_channels_set", employeeId: args.args.employeeId, channels: result.to.channels });
+            return { ok: true, employeeId: args.args.employeeId, channels: result.to.channels, channel: result.to.channel, level: result.to.level };
+          }
           case "promoteEmployee": {
-            const result = promoteEmployee(runtime.company, args.args.employeeId, { level: args.args.level, channel: args.args.channel }, { levels: runtime.config.levels });
+            const result = promoteEmployee(runtime.company, args.args.employeeId, { level: args.args.level, channel: args.args.channel, addChannel: args.args.addChannel, removeChannel: args.args.removeChannel }, { levels: runtime.config.levels });
             runtime.company = result.company;
             await store.saveCompany(runtime.company);
             await store.appendAudit({ type: "employee_promoted", employeeId: args.args.employeeId, from: result.from, to: result.to });
@@ -499,6 +509,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
               kind: args.kind,
               skills: args.skills,
               code: args.code,
+              channels: Array.isArray(args.channels) ? args.channels : undefined,
               channel: args.channel,
               level: args.level,
             });
@@ -515,11 +526,24 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
             return { ok: false, code: "E_INVALID_INPUT", message: "employeeId 必填" };
           }
           return await withCompanyRefresh(async () => {
-            const result = promoteEmployee(runtime.company, employeeId, { level: args.level, channel: args.channel }, { levels: runtime.config.levels });
+            const result = promoteEmployee(runtime.company, employeeId, { level: args.level, channel: args.channel, addChannel: args.addChannel, removeChannel: args.removeChannel }, { levels: runtime.config.levels });
             runtime.company = result.company;
             await store.saveCompany(runtime.company);
             await store.appendAudit({ type: "employee_promoted", employeeId, from: result.from, to: result.to });
             return { ok: true, from: result.from, to: result.to };
+          });
+        }
+        case "setChannels": {
+          const employeeId = args.employeeId;
+          if (!employeeId) {
+            return { ok: false, code: "E_INVALID_INPUT", message: "employeeId 必填" };
+          }
+          return await withCompanyRefresh(async () => {
+            const res = setEmployeeChannels(runtime.company, employeeId, args.channels, { levels: runtime.config.levels });
+            runtime.company = res.company;
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "employee_channels_set", employeeId, channels: res.to.channels });
+            return { ok: true, employeeId, channels: res.to.channels, channel: res.to.channel, level: res.to.level };
           });
         }
         case "fireEmployee": {
@@ -587,7 +611,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
           return await store.withLock(async () => {
             const loaded = await store.load();
             runtime.company = loaded.company || runtime.company;
-            let workingCompany = runtime.company;
+                let workingCompany = runtime.company;
             const wouldCreateDepartments = [];
             const wouldCreateEmployees = [];
             const wouldUpdateEmployees = [];
@@ -866,6 +890,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         ...e,
         departmentCode: dept?.code ?? null,
         levelName: levelInfo.levelName,
+        channels: describeEmployeeChannels(e, runtime.config.levels),
       };
     });
     const departments = (runtime.company.departments || []).map((d) => {
@@ -876,11 +901,45 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         managerId: manager?.id ?? null,
       };
     });
+
+    // 管理层：所有含 M 通道员（虚拟聚合，不写 company）。排序：部门编号升序（无部门最后）→ M 等级降序 → 工号升序
+    const managementEmployees = employees
+      .filter((e) => e.channels?.some((c) => c.channel === "M"))
+      .sort((a, b) => {
+        const deptA = deptMap.get(a.department);
+        const deptB = deptMap.get(b.department);
+        const codeA = deptA?.code ?? "\uFFFF";
+        const codeB = deptB?.code ?? "\uFFFF";
+        if (codeA !== codeB) return String(codeA).localeCompare(String(codeB));
+        const mA = a.channels.find((c) => c.channel === "M")?.level ?? "";
+        const mB = b.channels.find((c) => c.channel === "M")?.level ?? "";
+        if (mA !== mB) return String(mB).localeCompare(String(mA));
+        const codeEmpA = a.code ?? "";
+        const codeEmpB = b.code ?? "";
+        return String(codeEmpA).localeCompare(String(codeEmpB));
+      })
+      .map((e) => {
+        const dept = deptMap.get(e.department);
+        const mChannel = e.channels.find((c) => c.channel === "M");
+        return {
+          id: e.id,
+          code: e.code,
+          displayName: e.displayName,
+          departmentId: e.department ?? null,
+          departmentCode: dept?.code ?? null,
+          departmentName: dept?.name ?? null,
+          level: mChannel?.level ?? null,
+          levelName: mChannel?.levelName ?? null,
+          role: e.role,
+        };
+      });
+
     return {
       enabled: config.enabled,
       status: booted ? "running" : "stopped",
       warnings: bootWarnings,
       org: { departments, employees },
+      management: { channel: "M", employees: managementEmployees },
       board: {
         orders: (runtime.ledger.orders || []).length,
         done: (runtime.ledger.orders || []).filter((o) => o.state === "done").length,

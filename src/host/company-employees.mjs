@@ -3,7 +3,7 @@
  * 员工/会话生命周期：resident/per_task 策略、幂等键、互斥、行隔离。
  */
 
-import { EMPLOYEE_ROLE, EMPLOYEE_STATE, SESSION_POLICY, describeEmployeeLevel } from "../shared/company-org.mjs";
+import { EMPLOYEE_ROLE, EMPLOYEE_STATE, SESSION_POLICY, describeEmployeeLevel, describeEmployeeChannels, LEVEL_CHANNEL } from "../shared/company-org.mjs";
 import { restrictTools, guardTools, LINE_TOOLS, TOOL_LINES, SOURCE_KIND, normalizeUsage } from "./company-compat.mjs";
 
 export function createEmployeeSessionManager({ runtime, logger }) {
@@ -230,15 +230,21 @@ export function createEmployeeSessionManager({ runtime, logger }) {
   };
 }
 
-function buildPromptFor(employee, orderId, runtime) {
+export function buildPromptFor(employee, orderId, runtime) {
   const isManager = employee.role === EMPLOYEE_ROLE.MANAGER;
   const isWindow = employee.role === EMPLOYEE_ROLE.WINDOW;
   const roleName = isManager ? "经理" : isWindow ? "窗口" : "员工";
   const line = isManager ? TOOL_LINES.MANAGER : isWindow ? TOOL_LINES.WINDOW : TOOL_LINES.STAFF;
   const toolList = `本角色白名单（越权调用会被拒绝）：${(LINE_TOOLS[line] || []).join("、")}`;
   const dept = runtime.company?.departments?.find((d) => d.id === employee.department);
-  const levelInfo = describeEmployeeLevel(employee, runtime.config?.levels);
-  const identityLine = `工号：${employee.code || ""} · 等级：${levelInfo.level}（${levelInfo.levelName}，${levelInfo.channel} 通道） · 部门：${dept?.name || "未分配"}（${dept?.code || "-"}）`;
+  const channelDescs = describeEmployeeChannels(employee, runtime.config?.levels);
+  const primaryCh = channelDescs.find((c) => c.primary);
+  const sortedDescs = channelDescs.sort((a, b) => {
+    // 主通道在前
+    if (a.primary !== b.primary) return a.primary ? -1 : 1;
+    return (a.channel === b.channel ? 0 : a.channel.localeCompare(b.channel));
+  });
+  const identityLine = `工号：${employee.code || ""} · 等级：${sortedDescs.map((c) => `${c.level}（${c.levelName}，${c.channel}）`).join("、")} · 部门：${dept?.name || "未分配"}（${dept?.code || "-"}）`;
   const duties = isWindow
     ? [
         "- 你负责接单、查询进度与催办：company_order / company_status / company_ask / company_cancel。",

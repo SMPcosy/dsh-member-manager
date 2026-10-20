@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createCompanyRuntime, TOOL_NAMES } from "../src/host/company-runtime.mjs";
 import { resolveDefaultLlmOptions } from "../src/host/company-compat.mjs";
+import { buildPromptFor } from "../src/host/company-employees.mjs";
 
 function makeCtx(opts = {}) {
   return {
@@ -628,5 +629,153 @@ test("POST /company/op fireEmployee 对不存在员工返回 E_NOT_FOUND（审�
   const res = await op.handler({}, new URL("http://localhost/company/op"), { action: "fireEmployee", args: { employeeId: "no-such-employee" } });
   assert.equal(res.ok, false);
   assert.equal(res.code, "E_NOT_FOUND");
+  await rt.shutdown();
+});
+
+test("view 返回 channels 与 management 聚合（含双通道排序）", async () => {
+  const rt = createCompanyRuntime(makeCtx(), { dataDir: `/tmp/test-dsh-member-manager-view-${Date.now()}`, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d1", name: "研发部" } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d2", name: "产品部" } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "m1", displayName: "张总", department: "d1", role: "manager", channels: [{ channel: "M", level: "M2" }] } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "s1", displayName: "李四", department: "d1", role: "staff", channels: [{ channel: "P", level: "P3" }, { channel: "M", level: "M1" }] } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "s2", displayName: "王五", department: "d2", role: "staff", channels: [{ channel: "P", level: "P4" }] } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "s3", displayName: "赵六", role: "staff", kind: "shared", channels: [{ channel: "M", level: "M3" }] } });
+
+  const v = rt.view();
+  const e1 = v.org.employees.find((e) => e.id === "s1");
+  assert.ok(e1.channels.length >= 2);
+  assert.ok(e1.channels.some((c) => c.channel === "M" && c.primary));
+  assert.equal(e1.channel, "M");
+
+  const mgmt = v.management;
+  assert.equal(mgmt.channel, "M");
+  const ids = mgmt.employees.map((e) => e.id);
+  assert.deepEqual(ids, ["m1", "s1", "s3"]); // d1 在前，无部门最后；d1 内 M2 > M1 所以 m1 前；s3 无部门
+  assert.equal(mgmt.employees[0].level, "M2");
+  assert.equal(mgmt.employees[1].level, "M1");
+  assert.equal(mgmt.employees[2].departmentId, null);
+  await rt.shutdown();
+});
+
+test("company_hire 支持 channels 配置", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-hire-channels-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d1", name: "研发部" } });
+  const tool = rt.tools.find((t) => t.name === "company_hire");
+  const res = await tool.execute({ id: "e-dual", displayName: "双通", department: "d1", channels: [{ channel: "M", level: "M1" }, { channel: "P", level: "P3" }] }, {});
+  assert.equal(res.ok, true);
+  assert.equal(res.channel, "M");
+  assert.equal(res.level, "M1");
+  assert.equal(res.channels.length, 2);
+  const v = rt.view().org.employees.find((e) => e.id === "e-dual");
+  assert.ok(v.channels.some((c) => c.channel === "M"));
+  assert.ok(v.channels.some((c) => c.channel === "P"));
+  await rt.shutdown();
+});
+
+test("company_hire 非法 channels 返回 E_INVALID_CHANNEL", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-hire-err-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d1", name: "研发部" } });
+  const tool = rt.tools.find((t) => t.name === "company_hire");
+  const res = await tool.execute({ id: "e-bad", displayName: "坏通道", department: "d1", channels: [{ channel: "X", level: "L1" }] }, {});
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "E_INVALID_CHANNEL");
+  await rt.shutdown();
+});
+
+test("company_admin setChannels 成功并审计", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-setchannels-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d1", name: "研发部" } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "e1", displayName: "李四", department: "d1", role: "staff", channels: [{ channel: "P", level: "P3" }] } });
+  const tool = rt.tools.find((t) => t.name === "company_admin");
+  const res = await tool.execute({ action: "setChannels", args: { employeeId: "e1", channels: [{ channel: "M", level: "M2" }, { channel: "P", level: "P4" }] } }, {});
+  assert.equal(res.ok, true);
+  assert.equal(res.employeeId, "e1");
+  assert.equal(res.channels.length, 2);
+  assert.equal(res.channel, "M");
+  const v = rt.view().org.employees.find((e) => e.id === "e1");
+  assert.ok(v.channels.some((c) => c.channel === "M" && c.level === "M2"));
+  const storeMod = await import("../src/shared/company-store.mjs");
+  const s = new storeMod.CompanyStore(dataDir);
+  const loaded = await s.load();
+  const audit = loaded.ledger.audit.find((a) => a.type === "employee_channels_set");
+  assert.ok(audit);
+  assert.equal(audit.employeeId, "e1");
+  await rt.shutdown();
+});
+
+test("company_admin setChannels 错误返回对应 code", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-setchannels-err-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d1", name: "研发部" } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "e1", displayName: "李四", department: "d1", role: "staff", channels: [{ channel: "P", level: "P3" }] } });
+  const tool = rt.tools.find((t) => t.name === "company_admin");
+  const res = await tool.execute({ action: "setChannels", args: { employeeId: "no-one", channels: [{ channel: "M", level: "M2" }] } }, {});
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "E_NOT_FOUND");
+  const res2 = await tool.execute({ action: "setChannels", args: { employeeId: "e1", channels: [] } }, {});
+  assert.equal(res2.ok, false);
+  assert.equal(res2.code, "E_LAST_CHANNEL");
+  await rt.shutdown();
+});
+
+test("company_admin promoteEmployee 支持 addChannel / removeChannel", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-promote-channels-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d1", name: "研发部" } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "e1", displayName: "李四", department: "d1", role: "staff", channels: [{ channel: "P", level: "P3" }] } });
+  const tool = rt.tools.find((t) => t.name === "company_admin");
+  const add = await tool.execute({ action: "promoteEmployee", args: { employeeId: "e1", addChannel: { channel: "M", level: "M1" } } }, {});
+  assert.equal(add.ok, true);
+  const v1 = rt.view().org.employees.find((e) => e.id === "e1");
+  assert.ok(v1.channels.some((c) => c.channel === "M"));
+  const rem = await tool.execute({ action: "promoteEmployee", args: { employeeId: "e1", removeChannel: "M" } }, {});
+  assert.equal(rem.ok, true);
+  const v2 = rt.view().org.employees.find((e) => e.id === "e1");
+  assert.ok(!v2.channels.some((c) => c.channel === "M"));
+  await rt.shutdown();
+});
+
+test("buildPromptFor 双通道身份行包含 M/P 双等级", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-prompt-channels-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d1", name: "研发部" } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "e1", displayName: "李四", department: "d1", role: "staff", channels: [{ channel: "M", level: "M2" }, { channel: "P", level: "P3" }] } });
+  const emp = rt.view().org.employees.find((e) => e.id === "e1");
+  const prompt = buildPromptFor(emp, null, { company: rt.view().org, config: { levels: rt.view().levels } });
+  assert.ok(prompt.includes("M2"));
+  assert.ok(prompt.includes("P3"));
+  assert.ok(prompt.includes("等级："));
+  await rt.shutdown();
+});
+
+test("legacy 单通道员工迁移后 view 仍可正常描述 channels", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-legacy-channels-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d1", name: "研发部" } });
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "e1", displayName: "李四", department: "d1", role: "staff", channel: "P", level: "P3" } });
+  const v = rt.view().org.employees.find((e) => e.id === "e1");
+  assert.equal(v.channels.length, 1);
+  assert.equal(v.channels[0].channel, "P");
+  assert.equal(v.channels[0].level, "P3");
+  assert.equal(v.channels[0].primary, true);
   await rt.shutdown();
 });

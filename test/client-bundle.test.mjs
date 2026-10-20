@@ -306,13 +306,13 @@ test("Panel：默认落在「总架构」页，页签顺序总架构→员工中
   assert.equal(findComponent(tree, EmployeeCenterPanel), null, "默认页不应渲染员工中心页");
 });
 
-test("Panel：「员工中心」页签渲染 EmployeeCenterPanel，且总架构页给「查看全部」回调", () => {
+test("Panel：「员工中心」页签渲染 EmployeeCenterPanel，且总架构页不再挂「查看全部」回调", () => {
   const { exports } = loadBundle(makeReact([sampleView(), null, false]));
   const tree = exports.__internals.Panel({ t: (k) => k });
 
   const companyNode = findComponent(tree, exports.__internals.CompanyOrgPanel);
   assert.ok(companyNode, "默认应渲染总架构页");
-  assert.equal(typeof companyNode.props.onOpenEmployees, "function", "总架构页应收到 onOpenEmployees 回调");
+  assert.equal(companyNode.props.onOpenEmployees, undefined, "v5 总架构页不再接收 onOpenEmployees（员工中心节点已移除）");
 
   const { exports: ex2 } = loadBundle(makeReact([sampleView(), null, false, "employees", null, null]));
   const tree2 = ex2.__internals.Panel({ t: (k) => k });

@@ -25,6 +25,11 @@ import {
   nextDepartmentCode,
   ensureCompanyCodes,
   promoteEmployee,
+  normalizeChannels,
+  primaryChannelOf,
+  resolveChannelLevel,
+  describeEmployeeChannels,
+  setEmployeeChannels,
 } from "../src/shared/company-org.mjs";
 
 const NOW = "2026-10-20T12:00:00.000Z";
@@ -281,9 +286,10 @@ test("normalizeCompany 历史员工补 channel/level/code（非法 level 回退�
   const e3 = company.employees.find((e) => e.id === "e3");
   assert.deepEqual([e1.channel, e1.level, e1.code], ["M", "M2", "E0001"]);
   assert.deepEqual([e2.channel, e2.level, e2.code], ["P", "P3", "E0002"]);
-  assert.deepEqual([e3.channel, e3.level, e3.code], ["P", "P1", "E0003"]); // channel 被归正；level 在新通道内合法则保留
-  assert.ok(warnings.some((w) => w.includes("e2") && w.includes("level")));
-  assert.ok(warnings.some((w) => w.includes("e3") && w.includes("channel")));
+  assert.deepEqual([e3.channel, e3.level, e3.code], ["M", "M2", "E0003"]); // v5：staff 可含 M 通道；P1 在 M 目录非法 → 回退 M2
+  assert.deepEqual(e3.channels, [{ channel: "M", level: "M2" }]);
+  assert.ok(warnings.some((w) => w.includes("e2") && w.includes("非法")));
+  assert.ok(warnings.some((w) => w.includes("e3") && w.includes("非法")));
 });
 
 test("ensureCompanyCodes 先部门后员工补号（{dept} 取部门新码），且幂等", () => {
@@ -318,4 +324,129 @@ test("ensureCompanyCodes 非法旧 code 自动补号 + warning（幂等后无二
   assert.equal(first.warnings.length, 2);
   const second = ensureCompanyCodes(first.company);
   assert.deepEqual(second.warnings, []);
+});
+/* --------------------------- v5：M/P 双通道并存 --------------------------- */
+
+test("normalizeChannels：缺省按岗位推导；M 在前；staff 可 M+P", () => {
+  assert.deepEqual(normalizeChannels({ id: "x", role: "staff" }).channels, [{ channel: "P", level: "P3" }]);
+  assert.deepEqual(normalizeChannels({ id: "x", role: "staff", channels: [{ channel: "P", level: "P4" }, { channel: "M", level: "M1" }] }).channels, [
+    { channel: "M", level: "M1" },
+    { channel: "P", level: "P4" },
+  ]);
+});
+
+test("normalizeChannels：manager 必含 M、window 禁 M（自动归正 + warning）", () => {
+  const mgr = normalizeChannels({ id: "m", role: "manager", channels: [{ channel: "P", level: "P2" }] });
+  assert.deepEqual(mgr.channels.map((c) => c.channel), ["M", "P"]);
+  assert.ok(mgr.warnings.some((w) => w.includes("manager")));
+
+  const win = normalizeChannels({ id: "w", role: "window", channels: [{ channel: "M", level: "M1" }, { channel: "P", level: "P5" }] });
+  assert.deepEqual(win.channels, [{ channel: "P", level: "P5" }]);
+  assert.ok(win.warnings.some((w) => w.includes("window")));
+});
+
+test("normalizeChannels：非法通道/等级丢弃或回退，永不抛", () => {
+  const r = normalizeChannels({ id: "x", role: "staff", channels: [{ channel: "X", level: "P1" }, { channel: "P", level: "B9" }] });
+  assert.deepEqual(r.channels, [{ channel: "P", level: "P3" }]);
+  assert.equal(r.warnings.length >= 2, true);
+});
+
+test("primaryChannelOf：含 M 即 M，否则 P", () => {
+  assert.equal(primaryChannelOf([{ channel: "M", level: "M1" }, { channel: "P", level: "P2" }]), "M");
+  assert.equal(primaryChannelOf([{ channel: "P", level: "P2" }]), "P");
+  assert.equal(primaryChannelOf(undefined), "P");
+});
+
+test("createEmployee：显式 channels 并存；channels 与 role 冲突抛 E_CHANNEL_CONFLICT", () => {
+  let c = bizCompany();
+  c = createEmployee(c, { id: "s1", role: "staff", kind: "permanent", department: "A", channels: [{ channel: "M", level: "M1" }, { channel: "P", level: "P4" }] });
+  const emp = c.employees.find((e) => e.id === "s1");
+  assert.deepEqual(emp.channels, [{ channel: "M", level: "M1" }, { channel: "P", level: "P4" }]);
+  assert.equal(emp.channel, "M");
+  assert.equal(emp.level, "M1");
+
+  assert.throws(
+    () => createEmployee(c, { id: "w1", role: "window", kind: "permanent", department: "A", channels: [{ channel: "M", level: "M1" }] }),
+    (e) => e instanceof OrgError && e.code === "E_CHANNEL_CONFLICT",
+  );
+  assert.throws(
+    () => createEmployee(c, { id: "w2", role: "staff", kind: "permanent", department: "A", channels: [] }),
+    (e) => e instanceof OrgError && e.code === "E_LAST_CHANNEL",
+  );
+});
+
+test("describeEmployeeChannels：返回各通道等级名并标记 primary", () => {
+  let c = bizCompany();
+  c = createEmployee(c, { id: "s1", role: "staff", kind: "permanent", department: "A", channels: [{ channel: "M", level: "M1" }, { channel: "P", level: "P4" }] });
+  const emp = c.employees.find((e) => e.id === "s1");
+  assert.deepEqual(describeEmployeeChannels(emp), [
+    { channel: "M", level: "M1", levelName: "主管", primary: true },
+    { channel: "P", level: "P4", levelName: "资深工程师", primary: false },
+  ]);
+  assert.deepEqual(resolveChannelLevel(emp, "P"), { channel: "P", level: "P4", name: "资深工程师" });
+  assert.equal(resolveChannelLevel(emp, "M").level, "M1");
+});
+
+test("setEmployeeChannels：设置/校验（E_LAST_CHANNEL/E_INVALID_CHANNEL/E_CHANNEL_CONFLICT/E_INVALID_LEVEL）", () => {
+  let c = bizCompany();
+  c = createEmployee(c, { id: "s1", role: "staff", kind: "permanent", department: "A" });
+  const r = setEmployeeChannels(c, "s1", [{ channel: "M", level: "M2" }, { channel: "P", level: "P3" }]);
+  assert.deepEqual(r.to.channels, [{ channel: "M", level: "M2" }, { channel: "P", level: "P3" }]);
+  assert.equal(r.company.employees[0].channel, "M");
+
+  assert.throws(() => setEmployeeChannels(c, "s1", []), (e) => e.code === "E_LAST_CHANNEL");
+  assert.throws(() => setEmployeeChannels(c, "s1", [{ channel: "X", level: "M1" }]), (e) => e.code === "E_INVALID_CHANNEL");
+  assert.throws(() => setEmployeeChannels(c, "s1", [{ channel: "M", level: "M1" }, { channel: "M", level: "M2" }]), (e) => e.code === "E_CHANNEL_CONFLICT");
+  assert.throws(() => setEmployeeChannels(c, "s1", [{ channel: "M", level: "P1" }]), (e) => e.code === "E_INVALID_LEVEL");
+
+  let mgr = createDepartment(emptyCompany(NOW), { id: "A", name: "工程部" });
+  mgr = createEmployee(mgr, { id: "m1", role: "manager", kind: "permanent", department: "A" });
+  assert.throws(() => setEmployeeChannels(mgr, "m1", [{ channel: "P", level: "P2" }]), (e) => e.code === "E_CHANNEL_CONFLICT");
+});
+
+test("promoteEmployee：addChannel 增加 P 通道并保留 M；removeChannel 删 P；manager 不可移除 M", () => {
+  let c = bizCompany();
+  c = createEmployee(c, { id: "m1", role: "manager", kind: "permanent", department: "A" });
+  const add = promoteEmployee(c, "m1", { addChannel: { channel: "P", level: "P2" } });
+  let emp = add.company.employees.find((e) => e.id === "m1");
+  assert.deepEqual(emp.channels, [{ channel: "M", level: "M2" }, { channel: "P", level: "P2" }]);
+  assert.deepEqual(add.to, { channel: "M", level: "M2" });
+
+  const rm = promoteEmployee(add.company, "m1", { removeChannel: "P" });
+  emp = rm.company.employees.find((e) => e.id === "m1");
+  assert.deepEqual(emp.channels, [{ channel: "M", level: "M2" }]);
+
+  assert.throws(() => promoteEmployee(rm.company, "m1", { removeChannel: "M" }), (e) => e.code === "E_CHANNEL_CONFLICT");
+});
+
+test("promoteEmployee：promote within channel 逐级（M2→M3），双通道时 channel 指定 P 则升 P", () => {
+  let c = bizCompany();
+  c = createEmployee(c, { id: "s1", role: "staff", kind: "permanent", department: "A", channels: [{ channel: "M", level: "M2" }, { channel: "P", level: "P3" }] });
+  const r = promoteEmployee(c, "s1", { channel: "P" });
+  const emp = r.company.employees.find((e) => e.id === "s1");
+  assert.deepEqual(emp.channels, [{ channel: "M", level: "M2" }, { channel: "P", level: "P4" }]);
+  assert.deepEqual(r.to, { channel: "M", level: "M2" });
+  assert.throws(() => promoteEmployee(c, "s1", { channel: "M", level: "M4" }), (e) => e.code === "E_LEVEL_STEP");
+});
+
+test("normalizeCompany：双通道员工序列化→再加载不丢副通道（回归 shared 丢 channels 缺陷）", () => {
+  let c = bizCompany();
+  c = createEmployee(c, { id: "dual", role: "staff", kind: "permanent", department: "A", channels: [{ channel: "M", level: "M2" }, { channel: "P", level: "P4" }] });
+  // 模拟落盘后再加载：同一份 JSON 连续两轮归一，副通道都必须保留。
+  const once = normalizeCompany(JSON.parse(JSON.stringify(c))).company;
+  const twice = normalizeCompany(JSON.parse(JSON.stringify(once))).company;
+  for (const company of [once, twice]) {
+    const emp = company.employees.find((e) => e.id === "dual");
+    assert.deepEqual(emp.channels, [{ channel: "M", level: "M2" }, { channel: "P", level: "P4" }]);
+    assert.equal(emp.channel, "M");
+    assert.equal(emp.level, "M2");
+  }
+});
+
+test("normalizeCompany：只有旧标量 channel/level 的历史数据迁移出单通道 channels", () => {
+  const raw = { version: 1, status: "idle", departments: [{ id: "A", name: "A 部" }], employees: [{ id: "old", displayName: "老员工", role: "staff", kind: "permanent", department: "A", channel: "P", level: "P2", code: "E0001" }] };
+  const emp = normalizeCompany(raw).company.employees[0];
+  assert.deepEqual(emp.channels, [{ channel: "P", level: "P2" }]);
+  assert.equal(emp.channel, "P");
+  assert.equal(emp.level, "P2");
 });

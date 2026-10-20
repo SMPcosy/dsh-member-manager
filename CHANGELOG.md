@@ -63,6 +63,14 @@
 - **员工中心独立页**：新增 `EmployeeCenterPanel`——全量员工列表（下拉筛选：全体员工 / 单部门 / 未启用成员，按部门与等级排序），筛选下拉位于工具栏、刷新按钮左侧，自带 5 秒轮询、手动刷新、空态与错误提示；总架构页的员工中心收紧为紧凑节点（标题 + 员工总数 +「查看全部」按钮，点击切到员工中心页签）。
 - **测试**：`test/company-panel.test.mjs` 44 用例（新增 4 页签顺序与旧页签移除、EmployeeCenterPanel 排序/筛选/空态/轮询、查看全部回调）；`test/client-bundle.test.mjs` 38 用例同步；全量 412/412；`node scripts/verify-company.mjs` 19/19。
 
+### 变更：M/P 通道可并存 + 总架构图「管理层」节点（v5）
+
+- **双通道并存**：员工改为携带 `channels: [{channel:"M"|"P", level}]`（至少 1 个、通道不重复、等级必须属于该通道目录，M 在前）；旧的单通道字段 `channel`/`level` 仍保留并始终由 `channels` 推导（含 M 则主通道为 M）。岗位规则放宽：`manager` 必含 M，`staff` 可只有 M、只有 P 或 M+P，`window` 禁止 M。
+- **shared 内核**：新增 `normalizeChannels` / `primaryChannelOf` / `resolveChannelLevel` / `describeEmployeeChannels` / `setEmployeeChannels`；`createEmployee` 支持 `channels`；`promoteEmployee` 支持 `patch.channel` / `addChannel` / `removeChannel`（最后一条通道不可移除、manager 不可移除 M、window 不可加 M，逐级 ±1 规则不变）；老数据由 `normalizeCompany` 迁移并归正（warning，不丢员工）。
+- **宿主视图与工具**：`/company/overview` / `company_status` 的 `org.employees[]` 增加 `channels`（含 `levelName` 与 `primary`），新增 `management`（M 通道员工只读聚合，部门编号 → 通道等级 → 工号排序）；`company_hire` 支持可选 `channels`；`company_admin` 新增 `action:"setChannels"`（审计 `employee_channels_set`），`promoteEmployee` 透传通道参数；员工提示词身份行支持「M2（经理，M）、P3（高级工程师，P）」双通道展示（主通道在前）。
+- **面板**：总架构图移除「员工中心」按钮节点（员工中心仍为独立页签），最高层改为「管理层」虚拟节点（M 通道人数徽章，点击打开只读弹层；**只用于展示，不改变员工部门归属与代码层级**），竖直连接线向下接各部门；员工行按通道各显示一枚等级徽章（M 琥珀 / P 蓝）；部门弹层成员详情新增通道编辑（M/P 复选框 + 等级下拉，至少保留一个，`window`/`manager` 的 M 受限），保存走 `POST /company/op {action:"setChannels"}`。
+- **测试**：shared 双通道与通道归一往返用例（`test/company-levels.test.mjs` 33 用例）、host 运行时（`test/company-runtime.test.mjs` 36 用例）、面板（`test/company-panel.test.mjs` 55 用例）、客户端集成（`test/client-bundle.test.mjs` 39 用例）；全量 **442/442**，`node scripts/verify-company.mjs` **19/19**。
+
 ### 修复（真实宿主端到端验证发现）
 
 - **派工 provider 名**：`company.provider` 默认值由错误的 `"default"` 改为宿主真实注册名 `"spawn"`（`"default"` 会让 `subagents.startActivation` 抛 `NO_PROVIDER`）；配置支持 `company.provider`，非法值回退默认并 warning。

@@ -252,19 +252,19 @@ test("apply() 注册 29 个工具（16 名册 + 13 公司化），且参数 sche
   }
 });
 
-test("M/P 双通道：company_hire 暴露 code/channel/level，company_admin 暴露新 action", () => {
+test("M/P 双通道：company_hire 暴露 code/channel/level/channels，company_admin 暴露新 action", () => {
   const { ctx, tools } = mockCtx();
   PLUGIN.apply(ctx);
 
   const hire = tools.get("company_hire");
-  for (const key of ["code", "channel", "level"]) {
+  for (const key of ["code", "channel", "level", "channels"]) {
     assert.ok(hire.parameters.properties[key], `company_hire.parameters 缺少 ${key}`);
   }
   assert.deepEqual(hire.parameters.properties.channel.enum, ["M", "P"], "channel 枚举应为 M/P");
 
   const admin = tools.get("company_admin");
   const actions = admin.parameters.properties.action.enum;
-  for (const action of ["createDepartment", "createEmployee", "setRoutingRules", "updateDepartment", "promoteEmployee", "setNumbering"]) {
+  for (const action of ["createDepartment", "createEmployee", "setRoutingRules", "updateDepartment", "promoteEmployee", "setNumbering", "setChannels"]) {
     assert.ok(actions.includes(action), `company_admin.action 缺少 ${action}`);
   }
 });
