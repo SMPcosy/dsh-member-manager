@@ -527,15 +527,16 @@ async function createOwnerAgent(runtime) {
           logger?.warn?.(`owner agent/error: ${message}`);
         });
       }
-      // 在 owner 上下文累加 usage
+      // 在 owner 上下文累加 usage（assistant/message 是会话事件，走 session/event）
       if (agentCtx && typeof agentCtx.on === "function") {
-        agentCtx.on("assistant/message", (payload) => {
-          const usage = payload?.usage || payload?.payload?.usage;
-          if (usage) {
-            const n = normalizeUsage(usage);
-            runtime.costs.tokens += n.totalTokens;
-            runtime.costs.requests += 1;
-          }
+        agentCtx.on("session/event", (session, event) => {
+          if (!event || event.type !== "assistant/message") return;
+          if (session && agent.session && session !== agent.session) return;
+          const usage = event.data?.usage;
+          if (!usage) return;
+          const n = normalizeUsage(usage);
+          runtime.costs.tokens += n.totalTokens;
+          runtime.costs.requests += 1;
         });
       }
     },

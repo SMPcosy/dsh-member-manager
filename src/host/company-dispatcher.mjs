@@ -193,6 +193,11 @@ export function createDispatcher({ runtime, store, employeeManager, logger }) {
       }
       await persist();
       await append("report_received", { orderId: meta.orderId, attemptId, status });
+      await append(status === "done" ? "order_done" : "order_failed", {
+        orderId: meta.orderId,
+        attemptId,
+        employeeId: meta.employeeId,
+      });
       return { ok: true, orderId: meta.orderId, unlocked };
     });
   }

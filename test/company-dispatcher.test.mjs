@@ -57,6 +57,17 @@ test("P2 闭环：下单 -> 路由 -> 建 attempt -> 唤醒 -> 回报 -> 验收 
 
   const order = runtime.ledger.orders.find((o) => o.id === orderId);
   assert.equal(order.state, "done");
+  // 回报后 attempt 自身也要落定，不能停在 running
+  const attempt = order.attempts.find((a) => a.id === attemptId);
+  assert.equal(attempt.state, "done");
+  assert.equal(attempt.status, "done");
+  // 审计流必须有 order_done（而不只是 report_received）
+  const audit = await import("node:fs").then((fs) =>
+    fs.readFileSync(`${dataDir}/company/audit.jsonl`, "utf8"),
+  );
+  const entries = audit.trim().split(String.fromCharCode(10)).filter(Boolean).map((l) => JSON.parse(l));
+  assert.ok(entries.some((e) => e.type === "order_done" && e.orderId === orderId), "审计应有 order_done");
+  assert.ok(entries.some((e) => e.type === "report_received" && e.attemptId === attemptId));
 });
 
 test("report 不带 attemptId 视为陈旧", async () => {

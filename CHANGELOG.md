@@ -18,7 +18,7 @@
 - 用工：共享员工借调（`company_borrow`）、员工升级（`company_escalate`）、求助（`company_ask_help`）均落账并转发经理/owner。
 - 稳态：token / 请求数成本按「员工 / 部门 / 工单」拆分统计（`/company/costs`）、单实例文件锁（`E_COMPANY_LOCKED`）、开机自举失败退避重试、shutdown 优雅停工七步（停派工 → 停工 followup → whenIdle 超时 → cancel → drainChildren → dispose owner → 审计）。
 - Web：`/api/dsh-member-manager/company/*` 只读接口（overview / org / board / costs / orders）。
-- 新增测试：共享内核纯函数（org / ledger / router / store / config）、host 运行时 fake 闭环（dispatcher / employees / runtime）、打包/元数据与切换回滚脚本用例（临时 profile），全量 318 用例。
+- 新增测试：共享内核纯函数（org / ledger / router / store / config）、host 运行时 fake 闭环（dispatcher / employees / runtime）、打包/元数据与切换回滚脚本用例（临时 profile），全量 320 用例。
 - 交付自检：`node scripts/verify-company.mjs`（17 项：元数据/文件/语法/导出契约/全量测试/测试不污染用户数据），切换/回滚脚本默认 dry-run。
 
 ### 修复（真实宿主端到端验证发现）
@@ -27,6 +27,8 @@
 - **验收标准归一**：`company_order` 的 `acceptance`/`deps` 传字符串时自动归一为数组，不再被账本层丢弃。
 - **真实宿主激活参数**：`subagents.startActivation` 补上必填的 `signal`（AbortController，会话结束时中止）；初始 prompt 改为消息块数组；`agents.create` 的 `agentOptions` 不再误把 subagent provider 名当 LLM provider（留空走宿主默认模型，子会话继承）。
 - **工具执行上下文形状**：`wrapExecute` 曾把宿主原始 executionContext 直接传给处理函数，而处理函数按 `{ exec }` 解构，真实宿主没有 `.exec` 这一层 → `exec.agent.session.id` 恒为空，员工 `company_report`/`company_ask_help` 一律返回 `E_STALE_ATTEMPT`。现由 `wrapExecute` 统一归一为 `fn(args, { exec })`，并把测试的第二参改为真实形状（裸 executionContext），新增回归保护。
+- **成本归因监听错事件**：`assistant/message` 是**会话事件**，只能通过 `agent.ctx.on("session/event", (session, event) => ...)` 观察；原先监听的 `agent.ctx.on("assistant/message")` 在真实宿主上永不触发，导致 `/company/costs` 恒为 0。员工与 owner 两条用量累加路径均改为 `session/event`，fake 也改为只提供该形状（不再提供捷径）。
+- **attempt 落定与完成审计**：员工 `company_report` 后 attempt 的 `state` 停在 `running`（只有 `status`/`payload` 更新），且审计流只有 `report_received`、没有 `order_done`。现 `reportAttempt` 同步把 `state` 落为 `done`/`failed`，dispatcher 追加 `order_done`/`order_failed` 审计事件；新增回归断言。
 - **派工失败回滚**：会话创建失败时订单回滚到 queued（不再留下 running 无 attempt 的僵单），并写 `assign_failed` 审计。
 - **owner/员工模型路由**：插件自建的根级 owner Agent 不经过 GUI 会话创建路径，拿不到会话默认模型；改为启动时读取宿主 `agent-default-model` 服务的默认 provider/model 写入 owner 的 `agentOptions`，子会话继承。此前会导致子会话首轮请求前抛 `agent "..." has no provider/model`，表现为「派工成功但员工毫无动静、costs 为 0」。
 - **员工静默失败可见化**：owner 与每个员工会话注册 `agent/error` 监听，把错误写进 boot.log（此前 agent loop 会吞掉首轮错误，看起来像卡住）。

@@ -145,6 +145,8 @@ export function buildFakeServices({ runtime } = {}) {
     const ctxTools = [];
     let guardFn = null;
     const listeners = new Set();
+    const sessionListeners = new Set();
+    let eventSeq = 0;
     const agent = {
       id,
       session: { id },
@@ -168,13 +170,23 @@ export function buildFakeServices({ runtime } = {}) {
           },
         },
         on(event, fn) {
-          if (event === "assistant/message") listeners.add(fn);
-          return () => listeners.delete(fn);
+          // 只承认真实宿主存在的 session/event 订阅；assistant/message 是会话事件，
+          // 不是 agent 级触发事件，fake 不再提供这条捷径。
+          if (event !== "session/event") return () => {};
+          sessionListeners.add(fn);
+          return () => sessionListeners.delete(fn);
         },
       },
       emitAssistantMessage(payload) {
-        for (const fn of listeners) {
-          try { fn(payload); } catch {}
+        // 真实宿主里 assistant/message 是会话事件：agent.ctx.on("session/event", (session, event) => ...)
+        const usage = payload?.usage ?? payload;
+        const event = {
+          type: "assistant/message",
+          seq: ++eventSeq,
+          data: { usage, message: payload?.message || { role: "assistant", content: [] } },
+        };
+        for (const fn of sessionListeners) {
+          try { fn(agent.session, event); } catch {}
         }
       },
       async followup(message) {

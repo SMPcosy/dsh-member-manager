@@ -163,6 +163,7 @@ export function reportAttempt(ledger, orderId, attemptId, status, payload, now =
     throw new LedgerError(`STALE stale attempt ${attemptId}`, "E_STALE_ATTEMPT");
   }
   attempt.status = status;
+  attempt.state = status === "done" ? "done" : "failed";
   attempt.payload = payload;
   attempt.endedAt = now;
   return { ledger: l, order, attempt };

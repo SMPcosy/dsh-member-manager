@@ -123,6 +123,7 @@ export function createEmployeeSessionManager({ runtime, logger }) {
     }
 
     if (agent?.ctx) setupAgentContext(agent, allowedLine(employee.role));
+    attachUsage(agent, employee, orderId);
 
     const session = {
       employeeId: employee.id,
@@ -133,6 +134,44 @@ export function createEmployeeSessionManager({ runtime, logger }) {
     sessions.set(employee.id, session);
     trackChildUsage(sessionId, employee, orderId);
     return session;
+  }
+
+  function attachUsage(agent, employee, orderId) {
+    if (!agent || !agent.ctx || typeof agent.ctx.on !== "function") return false;
+    if (trackedAgents.has(agent)) return true;
+    trackedAgents.add(agent);
+    if (!errorTracked.has(agent.session?.id)) {
+      errorTracked.add(agent.session?.id);
+      agent.ctx.on("agent/error", (payload) => {
+        const message = payload?.error?.message || String(payload?.error || "");
+        runtime.lastAgentError = message;
+        logger?.warn?.(`employee agent/error (${employee.id}): ${message}`);
+      });
+    }
+    // assistant/message 是「会话事件」，不是 agent 级触发事件；必须监听 session/event。
+    agent.ctx.on("session/event", (session, event) => {
+      if (!event || event.type !== "assistant/message") return;
+      if (session && agent.session && session !== agent.session) return;
+      const usage = event.data?.usage;
+      if (!usage) return;
+      const n = normalizeUsage(usage);
+      runtime.costs.tokens += n.totalTokens;
+      runtime.costs.requests += 1;
+      runtime.costs.byEmployee[employee.id] = runtime.costs.byEmployee[employee.id] || { tokens: 0, requests: 0 };
+      runtime.costs.byEmployee[employee.id].tokens += n.totalTokens;
+      runtime.costs.byEmployee[employee.id].requests += 1;
+      if (employee.department) {
+        runtime.costs.byDepartment[employee.department] = runtime.costs.byDepartment[employee.department] || { tokens: 0, requests: 0 };
+        runtime.costs.byDepartment[employee.department].tokens += n.totalTokens;
+        runtime.costs.byDepartment[employee.department].requests += 1;
+      }
+      if (orderId) {
+        runtime.costs.byOrder[orderId] = runtime.costs.byOrder[orderId] || { tokens: 0, requests: 0 };
+        runtime.costs.byOrder[orderId].tokens += n.totalTokens;
+        runtime.costs.byOrder[orderId].requests += 1;
+      }
+    });
+    return true;
   }
 
   function trackChildUsage(sessionId, employee, orderId) {
@@ -146,41 +185,14 @@ export function createEmployeeSessionManager({ runtime, logger }) {
       try {
         agent = agents.get(sessionId);
       } catch {}
-      if (agent && agent.ctx && typeof agent.ctx.on === "function") {
+      if (agent && attachUsage(agent, employee, orderId)) {
         clearInterval(timer);
-        if (trackedAgents.has(agent)) return;
-        trackedAgents.add(agent);
-        if (!errorTracked.has(sessionId)) {
-          errorTracked.add(sessionId);
-          agent.ctx.on("agent/error", (payload) => {
-            const message = payload?.error?.message || String(payload?.error || "");
-            runtime.lastAgentError = message;
-            logger?.warn?.(`employee agent/error (${employee.id}): ${message}`);
-          });
-        }
-        agent.ctx.on("assistant/message", (payload) => {
-          const usage = payload?.usage || payload?.payload?.usage;
-          if (!usage) return;
-          const n = normalizeUsage(usage);
-          runtime.costs.tokens += n.totalTokens;
-          runtime.costs.requests += 1;
-          runtime.costs.byEmployee[employee.id] = runtime.costs.byEmployee[employee.id] || { tokens: 0, requests: 0 };
-          runtime.costs.byEmployee[employee.id].tokens += n.totalTokens;
-          runtime.costs.byEmployee[employee.id].requests += 1;
-          if (employee.department) {
-            runtime.costs.byDepartment[employee.department] = runtime.costs.byDepartment[employee.department] || { tokens: 0, requests: 0 };
-            runtime.costs.byDepartment[employee.department].tokens += n.totalTokens;
-            runtime.costs.byDepartment[employee.department].requests += 1;
-          }
-          if (orderId) {
-            runtime.costs.byOrder[orderId] = runtime.costs.byOrder[orderId] || { tokens: 0, requests: 0 };
-            runtime.costs.byOrder[orderId].tokens += n.totalTokens;
-            runtime.costs.byOrder[orderId].requests += 1;
-          }
-        });
+        return;
       }
-      if (tries >= 20) clearInterval(timer);
+      // 子会话可能正在物化，最多等 5 秒
+      if (tries >= 50) clearInterval(timer);
     }, 100);
+    if (typeof timer.unref === "function") timer.unref();
   }
 
   function get(employeeId) {
