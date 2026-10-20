@@ -130,6 +130,8 @@ await check("总架构组织架构图字样", () => {
     "cpModalChart",
     "cpModalMembers",
     "cpNewDept",
+    "cpSyncRoster",
+    "cpDeleteDept",
     "byEmployee",
     "byDepartment",
     "byOrder",

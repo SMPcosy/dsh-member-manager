@@ -520,6 +520,106 @@ test("POST /company/op updateDepartment 成功并持久化", async () => {
   await rt.shutdown();
 });
 
+test("POST /company/op syncRoster 同步名册/幂等/dryRun/缺失", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-op-sync-${Date.now()}`;
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  await mkdir(`${dataDir}/company`, { recursive: true });
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+
+  const no = await op.handler({}, new URL("http://localhost/company/op"), { action: "syncRoster", args: {} });
+  assert.equal(no.ok, false);
+  assert.equal(no.code, "E_NO_REGISTRY");
+
+  await writeFile(
+    `${dataDir}/registry.json`,
+    JSON.stringify({
+      groups: [
+        {
+          id: "g1",
+          name: "插件组",
+          description: "核心插件团队",
+          members: [
+            { target: "plugin-arch", displayName: "架构师", status: "active", skills: ["arch"] },
+            { target: "plugin-smith", displayName: "实现者", status: "active" },
+          ],
+        },
+        {
+          id: "g2",
+          name: "数据组",
+          members: [{ target: "data-guy", displayName: "数据员", status: "active" }],
+        },
+      ],
+    }),
+    "utf8",
+  );
+
+  const oldDept = await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { name: "旧部门" } });
+  const existingManager = await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "plugin-arch", displayName: "旧名", department: oldDept.departmentId, role: "manager", kind: "permanent" } });
+  assert.equal(existingManager.ok, true);
+
+  const dry = await op.handler({}, new URL("http://localhost/company/op"), { action: "syncRoster", args: { dryRun: true } });
+  assert.equal(dry.ok, true);
+  assert.equal(dry.dryRun, true);
+  assert.equal(dry.wouldCreateDepartments.length, 2);
+  assert.equal(dry.wouldCreateEmployees.length, 2);
+  assert.equal(dry.wouldUpdateEmployees.length, 1);
+  assert.equal(rt.view().org.employees.length, 1);
+
+  const res = await op.handler({}, new URL("http://localhost/company/op"), { action: "syncRoster", args: {} });
+  assert.equal(res.ok, true);
+  assert.equal(res.dryRun, false);
+  assert.equal(res.createdDepartments.length, 2);
+  assert.equal(res.createdEmployees.length, 2);
+  assert.equal(res.updatedEmployees.length, 1);
+  assert.equal(res.updatedEmployees[0], "plugin-arch");
+
+  const org = rt.view().org;
+  assert.equal(org.departments.length, 3);
+  assert.equal(org.employees.length, 3);
+  const manager = org.employees.find((e) => e.id === "plugin-arch");
+  assert.equal(manager.role, "manager");
+  assert.equal(manager.displayName, "架构师");
+
+  const res2 = await op.handler({}, new URL("http://localhost/company/op"), { action: "syncRoster", args: {} });
+  assert.equal(res2.ok, true);
+  assert.equal(res2.createdDepartments.length, 0);
+  assert.equal(res2.createdEmployees.length, 0);
+  assert.equal(res2.updatedEmployees.length, 0);
+
+  await rt.shutdown();
+});
+
+test("POST /company/op deleteDepartment 非空拒绝且可删除仅含 fired 员工的部门", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-op-deldept-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  const dept = await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { name: "研发部" } });
+  const emp = await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "e1", displayName: "张三", department: dept.departmentId, role: "staff" } });
+
+  const busy = await op.handler({}, new URL("http://localhost/company/op"), { action: "deleteDepartment", args: { departmentId: dept.departmentId } });
+  assert.equal(busy.ok, false);
+  assert.equal(busy.code, "E_DEPT_NOT_EMPTY");
+
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "fireEmployee", args: { employeeId: emp.employeeId } });
+  const del = await op.handler({}, new URL("http://localhost/company/op"), { action: "deleteDepartment", args: { departmentId: dept.departmentId } });
+  assert.equal(del.ok, true);
+  assert.equal(del.departmentId, dept.departmentId);
+  assert.equal(del.code, dept.code);
+
+  const storeMod = await import("../src/shared/company-store.mjs");
+  const s = new storeMod.CompanyStore(dataDir);
+  const loaded = await s.load();
+  assert.equal(loaded.company.departments.find((d) => d.id === dept.departmentId), undefined);
+  const e = loaded.company.employees.find((x) => x.id === emp.employeeId);
+  assert.equal(e.department, "");
+  const audit = loaded.ledger.audit.find((a) => a.type === "department_deleted");
+  assert.ok(audit);
+  await rt.shutdown();
+});
+
 test("POST /company/op fireEmployee 对不存在员工返回 E_NOT_FOUND（审阅建议 R1）", async () => {
   const dataDir = `/tmp/test-dsh-member-manager-op-fire-missing-${Date.now()}`;
   const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });

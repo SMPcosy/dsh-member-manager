@@ -12,6 +12,7 @@ import { resolveCompanyConfig } from "../shared/company-config.mjs";
 import { emptyCompany, createDepartment, createEmployee, updateDepartment, updateEmployee, promoteEmployee, fireEmployee, ensureCompanyCodes, describeEmployeeLevel, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY, DEFAULT_LEVELS, DEFAULT_NUMBERING } from "../shared/company-org.mjs";
 import { emptyLedger, transitionOrder, ORDER_STATES } from "../shared/company-ledger.mjs";
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import crypto from "node:crypto";
 
 export const TOOL_NAMES = [
@@ -569,6 +570,106 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
             await store.saveCompany(runtime.company);
             await store.appendAudit({ type: "employee_moved", employeeId, department });
             return { ok: true, employeeId, department };
+          });
+        }
+        case "syncRoster": {
+          let registry;
+          try {
+            const raw = await readFile(path.join(dataDir, "registry.json"), "utf8");
+            registry = JSON.parse(raw);
+          } catch (err) {
+            if (err.name === "SyntaxError") {
+              return { ok: false, code: "E_NO_REGISTRY", message: "registry.json 解析失败" };
+            }
+            return { ok: false, code: "E_NO_REGISTRY", message: `registry.json 读取失败: ${err.message}` };
+          }
+          const dryRun = Boolean(args.dryRun);
+          return await store.withLock(async () => {
+            const loaded = await store.load();
+            runtime.company = loaded.company || runtime.company;
+            let workingCompany = runtime.company;
+            const wouldCreateDepartments = [];
+            const wouldCreateEmployees = [];
+            const wouldUpdateEmployees = [];
+            for (const group of registry.groups || []) {
+              let dept = workingCompany.departments.find((d) => d.name === group.name);
+              if (!dept) {
+                const deptId = makeOpId("dept");
+                const capacity = Math.max(4, (group.members || []).length);
+                workingCompany = createDepartment(workingCompany, { id: deptId, name: group.name, charter: group.description || "", capacity });
+                dept = workingCompany.departments.find((d) => d.id === deptId);
+                wouldCreateDepartments.push({ id: dept.id, code: dept.code, name: dept.name });
+              }
+              for (const member of group.members || []) {
+                if (member.status !== "active") continue;
+                const existing = workingCompany.employees.find((e) => e.id === member.target);
+                if (existing) {
+                  const needsUpdate = existing.displayName !== member.displayName || existing.department !== dept.id;
+                  if (needsUpdate) {
+                    workingCompany = {
+                      ...workingCompany,
+                      employees: workingCompany.employees.map((e) =>
+                        e.id === existing.id ? { ...e, displayName: member.displayName, department: dept.id } : e,
+                      ),
+                    };
+                    wouldUpdateEmployees.push({ id: existing.id, department: dept.id });
+                  }
+                } else {
+                  const id = member.target;
+                  workingCompany = createEmployee(workingCompany, {
+                    id,
+                    displayName: member.displayName,
+                    department: dept.id,
+                    role: "staff",
+                    kind: "permanent",
+                    skills: member.skills,
+                  });
+                  const emp = workingCompany.employees.find((e) => e.id === id);
+                  wouldCreateEmployees.push({ id: emp.id, code: emp.code, department: dept.id });
+                }
+              }
+            }
+            if (dryRun) {
+              return { ok: true, dryRun: true, wouldCreateDepartments, wouldCreateEmployees, wouldUpdateEmployees };
+            }
+            runtime.company = workingCompany;
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "roster.synced", counts: { departments: wouldCreateDepartments.length, employees: wouldCreateEmployees.length, updated: wouldUpdateEmployees.length } });
+            return {
+              ok: true,
+              dryRun: false,
+              createdDepartments: wouldCreateDepartments.map((d) => d.code),
+              createdEmployees: wouldCreateEmployees.map((e) => e.code),
+              updatedEmployees: wouldUpdateEmployees.map((e) => e.id),
+              departments: runtime.company.departments.length,
+              employees: runtime.company.employees.length,
+            };
+          });
+        }
+        case "deleteDepartment": {
+          const departmentId = args.departmentId;
+          if (!departmentId) {
+            return { ok: false, code: "E_INVALID_INPUT", message: "departmentId 必填" };
+          }
+          return await withCompanyRefresh(async () => {
+            const dept = runtime.company.departments.find((d) => d.id === departmentId);
+            if (!dept) {
+              return { ok: false, code: "E_NOT_FOUND", message: `部门 ${departmentId} 不存在` };
+            }
+            const active = runtime.company.employees.filter((e) => e.department === departmentId && e.state !== EMPLOYEE_STATE.FIRED);
+            if (active.length > 0) {
+              return { ok: false, code: "E_DEPT_NOT_EMPTY", message: "部门仍有在职员工，请先停用或调岗" };
+            }
+            runtime.company = {
+              ...runtime.company,
+              employees: runtime.company.employees.map((e) =>
+                e.department === departmentId && e.state === EMPLOYEE_STATE.FIRED ? { ...e, department: "" } : e,
+              ),
+              departments: runtime.company.departments.filter((d) => d.id !== departmentId),
+            };
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "department_deleted", departmentId, code: dept.code });
+            return { ok: true, departmentId, code: dept.code };
           });
         }
         default:

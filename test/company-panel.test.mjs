@@ -106,8 +106,8 @@ function loadBundle(react, globals = {}) {
     },
     fetch: globals.fetch,
     confirm: globals.confirm,
-    setTimeout,
-    clearTimeout,
+    setTimeout: globals.setTimeout || setTimeout,
+    clearTimeout: globals.clearTimeout || clearTimeout,
     setInterval:
       globals.setInterval ||
       ((fn, ms) => {
@@ -361,7 +361,8 @@ function overviewFetch(calls = [], data = overviewFixture()) {
 
 /** CompanyOrgPanel 的 useState 顺序：
  *  0 overview / 1 error / 2 busy / 3 updatedAt / 4 ecFilter / 5 deptModal / 6 modalTab /
- *  7 newDeptOpen / 8 newDeptDraft / 9 opError / 10 newDeptError / 11 editor */
+ *  7 newDeptOpen / 8 newDeptDraft / 9 opError / 10 newDeptError / 11 editor /
+ *  12 syncResult / 13 syncError */
 function cpSeed(options = {}) {
   return [
     options.overview === undefined ? overviewFixture() : options.overview,
@@ -376,6 +377,8 @@ function cpSeed(options = {}) {
     options.opError || null,
     options.newDeptError || null,
     options.editor || null,
+    options.syncResult === undefined ? null : options.syncResult,
+    options.syncError === undefined ? null : options.syncError,
   ];
 }
 
@@ -515,6 +518,14 @@ test("字典：v4 文案 zh/en 严格对称，中文与 docs/16 §5 一致", () 
   assert.ok(zh.cpFireConfirm.includes("{name}"));
   assert.equal(zh.cpOpFailed, "操作失败");
   assert.equal(zh.cpClose, "关闭");
+
+  // v4.1 从名册同步 / 删除部门
+  assert.equal(zh.cpSyncRoster, "从名册同步");
+  assert.equal(en.cpSyncRoster, "Sync from roster");
+  assert.ok(zh.cpSyncDone.includes("{depts}") && zh.cpSyncDone.includes("{employees}") && zh.cpSyncDone.includes("{updated}"));
+  assert.equal(zh.cpDeleteDept, "删除部门");
+  assert.equal(en.cpDeleteDept, "Delete department");
+  assert.ok(zh.cpDeleteDeptConfirm.includes("{name}") && zh.cpDeleteDeptConfirm.includes("{code}"));
 
   // 新建部门
   assert.equal(zh.cpNewDept, "新建部门");
@@ -1241,4 +1252,176 @@ test("轮询：打开拉一次 + 5 秒 setInterval，卸载后 clearInterval 且
   await timers[0].fn();
   await tick();
   assert.equal(calls.filter((c) => c.url.endsWith("/company/overview")).length, 2, "清理后定时器再触发也不请求");
+});
+
+/* ==================== ⑦ 从名册同步 / 删除部门（docs/16 §4.4 v4.1） ==================== */
+
+/** 点「从名册同步」按钮并等 promise 落定 */
+async function clickSync(tree, t) {
+  const buttons = buttonByLabel(tree, t("cpSyncRoster"));
+  assert.equal(buttons.length, 1, "工具栏应有「从名册同步」按钮");
+  await buttons[0].onClick();
+  await tick();
+}
+
+test("从名册同步：按钮 POST action=syncRoster，成功提示计数并刷新 overview，busy 时禁用", async () => {
+  const calls = [];
+  const { t, seed, tree, react, internals } = renderCompany({
+    fetch: companyFetch(calls, {
+      opResult: { createdDepartments: ["D03", "D04"], createdEmployees: ["E0006", "E0007", "E0008", "E0009", "E0010"], updatedEmployees: ["emp-dev", "emp-doc", "emp-free"] },
+    }),
+  });
+  await clickSync(tree, t);
+
+  const op = calls.find((c) => c.url.endsWith("/company/op"));
+  assert.ok(op, "应发 /company/op 请求");
+  assert.equal(op.method, "POST");
+  assert.deepEqual(op.body, { action: "syncRoster", args: {} });
+  assert.ok(calls.some((c) => c.url.endsWith("/company/overview")), "同步成功后应刷新 overview");
+
+  // 成功提示行（含新增部门/员工、更新数）
+  assert.equal(seed[12], t("cpSyncDone", { depts: 2, employees: 5, updated: 3 }));
+  react.reset();
+  const after = internals.CompanyOrgPanel({ t });
+  assert.match(treeText(after), /已同步：新增 2 个部门、5 名员工，更新 3 名/);
+
+  // busy 期间按钮禁用
+  const busyRender = renderCompany({ busy: true });
+  const busyButton = buttonByLabel(busyRender.tree, busyRender.t("cpSyncRoster"))[0];
+  assert.equal(busyButton.disabled, true, "busy 时「从名册同步」应禁用");
+});
+
+test("从名册同步：失败显示红字 cpOpFailed + code/message，不覆盖 overview", async () => {
+  const { t, seed, react, tree, internals } = renderCompany({
+    fetch: companyFetch([], { opResult: { ok: false, code: "E_NO_REGISTRY", message: "未找到名册文件" } }),
+  });
+  await clickSync(tree, t);
+
+  assert.equal(seed[12], null, "失败时不应显示成功提示");
+  assert.match(String(seed[13]), /E_NO_REGISTRY/);
+  assert.match(String(seed[13]), /未找到名册文件/);
+  react.reset();
+  const after = internals.CompanyOrgPanel({ t });
+  const text = treeText(after);
+  assert.match(text, new RegExp(t("cpOpFailed")));
+  assert.match(text, /E_NO_REGISTRY/);
+});
+
+test("cpSyncSummary：按 createdDepartments/createdEmployees/updatedEmployees 计数并格式化，缺字段兜底 0", () => {
+  const { exports } = loadBundle(makeReact());
+  const summary = exports.__internals.cpSyncSummary;
+  const t = translator("zh");
+
+  assert.equal(
+    summary(t, { createdDepartments: ["D01", "D02"], createdEmployees: ["E1", "E2", "E3", "E4", "E5"], updatedEmployees: ["e1", "e2", "e3"] }),
+    "已同步：新增 2 个部门、5 名员工，更新 3 名",
+  );
+  // 单参形态（无 t）也能给出中文文案
+  assert.equal(summary({ createdDepartments: [] }), "已同步：新增 0 个部门、0 名员工，更新 0 名");
+  assert.equal(summary(t, null), t("cpSyncDone", { depts: 0, employees: 0, updated: 0 }));
+  // 数字形态兜底
+  assert.equal(summary(t, { createdDepartments: 2, createdEmployees: 5, updatedEmployees: 3 }), "已同步：新增 2 个部门、5 名员工，更新 3 名");
+});
+
+test("从名册同步：结果行 5 秒后自动清除（保留 state，定时器 5000ms）", () => {
+  const timers = [];
+  const fakeSetTimeout = (fn, ms) => {
+    timers.push({ fn, ms });
+    return timers.length;
+  };
+  const react = makeReactLive(cpSeed({ syncResult: "已同步：新增 1 个部门、0 名员工，更新 0 名" }));
+  const { exports } = loadBundle(react, { fetch: companyFetch([]), setTimeout: fakeSetTimeout, clearTimeout: () => {} });
+  const t = translator("zh");
+
+  exports.__internals.CompanyOrgPanel({ t });
+  react.flushEffects();
+  const clearTimer = timers.find((timer) => timer.ms === 5000);
+  assert.ok(clearTimer, "结果行应注册 5s 清除定时器");
+
+  clearTimer.fn();
+  react.reset();
+  const after = exports.__internals.CompanyOrgPanel({ t });
+  assert.equal(treeText(after).includes("已同步"), false, "5s 后结果行应从界面消失");
+});
+
+test("从名册同步：手动刷新会立即清除结果行", async () => {
+  const calls = [];
+  const { t, seed, tree } = renderCompany({
+    syncResult: "已同步：新增 1 个部门、2 名员工，更新 0 名",
+    fetch: companyFetch(calls, { opResult: { createdDepartments: ["D03"], createdEmployees: ["E0006", "E0007"], updatedEmployees: [] } }),
+  });
+  // 有种子结果行时先能看到
+  assert.match(treeText(tree), /已同步：新增 1 个部门、2 名员工，更新 0 名/);
+  await buttonByLabel(tree, t("cpRefresh"))[0].onClick();
+  await tick();
+  assert.equal(seed[12], null, "刷新应清除结果行");
+  assert.equal(seed[13], null, "刷新应清除错误行");
+  assert.ok(calls.some((c) => c.url.endsWith("/company/overview")));
+});
+
+test("删除部门：confirm 取消不发请求，弹层保持打开", async () => {
+  const calls = [];
+  const asked = [];
+  let allow = false;
+  const { t, seed, react, internals } = renderCompany({
+    deptModal: "dept-plugin",
+    fetch: companyFetch(calls),
+    confirm: (message) => (asked.push(message), allow),
+  });
+  react.reset();
+  const modalTree = internals.CompanyOrgPanel({ t });
+  const del = buttonByLabel(modalTree, t("cpDeleteDept"));
+  assert.equal(del.length, 1, "部门弹层底部应有「删除部门」按钮");
+  await del[0].onClick();
+  await tick();
+
+  assert.equal(asked.length, 1, "删除前应 window.confirm");
+  assert.match(asked[0], /插件组/, "确认文案含部门名称");
+  assert.match(asked[0], /D01/, "确认文案含部门编号");
+  assert.equal(calls.filter((c) => c.url.endsWith("/company/op")).length, 0, "取消后不发请求");
+  assert.equal(seed[5], "dept-plugin", "取消后弹层保持打开");
+});
+
+test("删除部门：确认后 POST deleteDepartment，成功关闭弹层并刷新 overview", async () => {
+  const calls = [];
+  const asked = [];
+  const { t, seed, react, internals } = renderCompany({
+    deptModal: "dept-plugin",
+    fetch: companyFetch(calls, { opResult: { ok: true, departmentId: "dept-plugin", code: "D01" } }),
+    confirm: (message) => (asked.push(message), true),
+  });
+  react.reset();
+  const modalTree = internals.CompanyOrgPanel({ t });
+  await buttonByLabel(modalTree, t("cpDeleteDept"))[0].onClick();
+  await tick();
+
+  assert.equal(asked.length, 1);
+  const op = calls.find((c) => c.url.endsWith("/company/op"));
+  assert.ok(op, "确认后应发 /company/op");
+  assert.equal(op.method, "POST");
+  assert.deepEqual(op.body, { action: "deleteDepartment", args: { departmentId: "dept-plugin" } });
+  assert.equal(seed[5], null, "删除成功后应关闭弹层");
+  assert.ok(calls.some((c) => c.url.endsWith("/company/overview")), "删除成功后应刷新 overview");
+});
+
+test("删除部门：失败（E_DEPT_NOT_EMPTY）在弹层内红字，弹层保持打开", async () => {
+  const { t, seed, react, internals } = renderCompany({
+    deptModal: "dept-plugin",
+    fetch: companyFetch([], { opResult: { ok: false, code: "E_DEPT_NOT_EMPTY", message: "部门内仍有员工，不能删除" } }),
+    confirm: () => true,
+  });
+  react.reset();
+  const modalTree = internals.CompanyOrgPanel({ t });
+  await buttonByLabel(modalTree, t("cpDeleteDept"))[0].onClick();
+  await tick();
+
+  assert.match(String(seed[9]), /E_DEPT_NOT_EMPTY/);
+  assert.match(String(seed[9]), /部门内仍有员工/);
+  assert.equal(seed[5], "dept-plugin", "失败时弹层保持打开");
+
+  react.reset();
+  const after = internals.CompanyOrgPanel({ t });
+  const text = treeText(after);
+  assert.match(text, new RegExp(t("cpOpFailed")));
+  assert.match(text, /E_DEPT_NOT_EMPTY/);
 });

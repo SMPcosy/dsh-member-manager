@@ -51,6 +51,12 @@
 - **视图归一**：`buildCompanyOrgView` 增加 `card.leader` / `card.channelCounts` / 员工 `departmentCode`；新增纯函数 `buildEmployeeCenter(view, filter)` 与 `cpParseBrief(text)`。
 - **测试**：`test/company-runtime.test.mjs` 25 用例（op 六个 action）、`test/company-panel.test.mjs` 31 用例（v4 面板）、`test/host-plugin.test.mjs` 71 用例（路由 16 + POST op body 解析）、`test/client-bundle.test.mjs` 38 用例；全量 397/397；`node scripts/verify-company.mjs` 19/19。
 
+### 新增：名册同步与部门删除（v4.1）
+
+- **从名册同步**：`POST /company/op {action:"syncRoster"}` 与面板工具栏「从名册同步」按钮——读取团队成员名册 `registry.json`，按其分组/成员同步为公司化部门与员工：分组名对应部门（按名复用或新建，编制随成员数），分组内 `active` 成员对应员工（`id=member.target`，新建为 `staff`/`permanent` 并带技能，已存在只更新显示名与部门，**不改 role/level/code**，因此部门负责人不会被降级）；同一把文件锁内完成，幂等（重复同步不新增），`dryRun:true` 只计算不落盘，名册缺失/解析失败返回 `E_NO_REGISTRY`；审计 `roster.synced`。
+- **删除部门**：`POST /company/op {action:"deleteDepartment"}` 与部门弹层底部「删除部门」按钮（二次确认含名称与编号）——仅允许删除不含在职员工的部门（否则 `E_DEPT_NOT_EMPTY`）；删除时把该部门已停用员工的部门清空（保留员工档案），审计 `department_deleted`。
+- **测试**：`test/company-runtime.test.mjs` 28 用例（新增 syncRoster 幂等/dryRun/缺失与 deleteDepartment 非空拒绝/清空部门）、`test/company-panel.test.mjs` 39 用例（新增同步按钮载荷与文案/失败红字/5 秒清除/刷新清除/删除确认取消/删除成功关弹层/删除失败红字）；全量 407/407；`node scripts/verify-company.mjs` 19/19。
+
 ### 修复（真实宿主端到端验证发现）
 
 - **派工 provider 名**：`company.provider` 默认值由错误的 `"default"` 改为宿主真实注册名 `"spawn"`（`"default"` 会让 `subagents.startActivation` 抛 `NO_PROVIDER`）；配置支持 `company.provider`，非法值回退默认并 warning。
