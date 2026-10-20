@@ -389,9 +389,18 @@ function renderCompany(options = {}) {
   const react = makeReact(seed, { mutable: true });
   const fetchFn = options.fetch || overviewFetch();
   const { exports } = loadBundle(react, { fetch: fetchFn, confirm: options.confirm });
-  const render = () => exports.__internals.CompanyOrgPanel({ t });
+  const registryMembers = options.registryMembers || [];
+  const registryGroups = options.registryGroups || [];
+  const panelProps = {
+    t,
+    registryMembers,
+    registryGroups,
+    onRegistryRefresh: options.onRegistryRefresh,
+  };
+  const render = () => exports.__internals.CompanyOrgPanel(panelProps);
   return {
     t,
+    panelProps,
     seed,
     react,
     internals: exports.__internals,
@@ -461,10 +470,16 @@ function findMgmtModal(tree) {
 
 /** 按工号定位员工行（cpRenderEmployeeRow 的第一格是工号） */
 function employeeRowByCode(tree, code) {
+  // 员工行动行的第一个子节点是工号 span；领导节点/人事详情头部虽然也含工号，但首个子节点不是工号
   return collectElements(
     tree,
-    (n) => n.type === "div" && (n.children || []).some((c) => c && c.type === "span" && textOf(c) === code),
-  ).find((row) => (row.children || []).some((c) => c && c.type === "span" && textOf(c) === code));
+    (n) =>
+      n.type === "div" &&
+      n.children &&
+      n.children[0] &&
+      n.children[0].type === "span" &&
+      textOf(n.children[0]) === code,
+  ).pop();
 }
 
 function channelButtonFor(tree, t, code) {
@@ -482,6 +497,37 @@ function channelButtonFor(tree, t, code) {
 
 function checkboxInputs(tree) {
   return collectElements(tree, (n) => n.type === "input" && n.props.type === "checkbox");
+}
+
+/** 打开某员工的人事管理详情（行下方向下展开） */
+function openHr(made, code) {
+  made.react.reset();
+  const tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const row = employeeRowByCode(tree, code);
+  assert.ok(row, "找不到员工行：" + code);
+  const button = collectButtons(row).find((b) => b.label === made.t("cpHr"));
+  assert.ok(button, "员工行应有人事管理按钮：" + code);
+  button.onClick();
+  return tree;
+}
+
+/** 先展开人事详情，再点其中一个操作按钮（通道/晋升/停用/调岗） */
+function openHrAction(made, code, label) {
+  openHr(made, code);
+  assert.equal(String(made.seed[10].kind), "hr", "应先展开人事管理详情");
+  made.react.reset();
+  const tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const button = buttonByLabel(tree, label)[0];
+  assert.ok(button, "人事详情缺少操作按钮：" + label);
+  button.onClick();
+}
+
+/** 按 placeholder 找输入框/多行文本框（名册资料表单） */
+function inputByPlaceholder(tree, placeholder) {
+  return collectElements(
+    tree,
+    (n) => (n.type === "input" || n.type === "textarea") && n.props.placeholder === placeholder,
+  )[0];
 }
 
 /** 双通道员工 fixture：emp-dev 同时持有 M1 + P4（主通道 M） */
@@ -600,6 +646,29 @@ test("源码：v5 总架构结构——默认 company、管理层节点、/compa
   assert.match(src, /management: cpNormalizeManagement\(data\.management, departments, employees, levels\)/);
   assert.match(src, /submitOp\("setChannels", \{ employeeId: emp\.id, channels: channels \}/);
 
+  // v5.4（docs/21 §4）：四操作合并为「人事管理」详情页（名册资料编辑 + 四操作内嵌）
+  assert.match(src, /cpHr: "人事管理"/);
+  assert.match(src, /cpHr: "HR management"/);
+  assert.match(src, /cpHrRoster: "名册资料"/);
+  assert.match(src, /cpHrNoRoster: "未关联名册成员/);
+  assert.match(src, /cpHrSave: "保存名册资料"/);
+  assert.match(src, /cpHrActions: "人事操作"/);
+  assert.match(src, /cpHrPolicy: "会话策略"/);
+  assert.match(src, /cpMainChannel: "通道说明"/);
+  assert.match(src, /function cpRegistryMembers\(state\)/);
+  assert.match(src, /cpRegistryMembers: cpRegistryMembers/);
+  assert.match(src, /function hrDetail\(emp\)/);
+  assert.match(src, /function hrRosterBlock\(emp, roster\)/);
+  assert.match(src, /function closeEditor\(\)/);
+  assert.match(src, /registryMembers: cpRegistryMembers\(state\)/);
+  assert.match(src, /onRegistryRefresh: load/);
+  assert.match(src, /setEditor\(hrEmployeeId != null \? \{ kind: "hr", employeeId: hrEmployeeId \} : null\)/);
+  assert.match(src, /post\("renameMember"/);
+  assert.match(src, /post\("setRole"/);
+  assert.match(src, /post\("setSkills"/);
+  assert.match(src, /post\("setModel"/);
+  assert.match(src, /post\("assignGroup"/);
+
   // 轮询与写接口
   assert.match(src, /api\("\/company\/overview"\)/);
 
@@ -658,6 +727,31 @@ test("字典：v5 文案 zh/en 严格对称，中文与 docs/21 §4.3 一致", (
   assert.equal(en.cpSave, "Save");
   assert.equal(zh.cpSaved, "已保存");
   assert.equal(en.cpSaved, "Saved");
+
+  // v5.4：人事管理详情页
+  assert.equal(zh.cpHr, "人事管理");
+  assert.equal(en.cpHr, "HR management");
+  assert.equal(zh.cpHrRoster, "名册资料");
+  assert.equal(en.cpHrRoster, "Roster record");
+  assert.ok(zh.cpHrNoRoster.length > 0 && en.cpHrNoRoster.length > 0, "未关联名册提示中英文都应存在");
+  assert.equal(zh.cpHrActions, "人事操作");
+  assert.equal(en.cpHrActions, "HR actions");
+  assert.equal(zh.cpHrPolicy, "会话策略");
+  assert.equal(en.cpHrPolicy, "Session policy");
+  assert.equal(zh.cpHrAliases, "别名（逗号分隔）");
+  assert.equal(zh.cpHrGroup, "名册部门");
+  assert.equal(en.cpHrGroup, "Roster group");
+  assert.equal(zh.cpHrModel, "模型覆盖");
+  assert.equal(en.cpHrModel, "Model override");
+  assert.equal(zh.cpHrStatus, "状态");
+  assert.equal(en.cpHrStatus, "Status");
+  assert.equal(zh.cpMainChannel, "通道说明");
+  assert.equal(en.cpMainChannel, "Channels");
+  assert.equal(zh.cpHrSave, "保存名册资料");
+  assert.equal(en.cpHrSave, "Save roster record");
+  assert.equal(zh.cpHrTarget, "名册 target");
+  assert.equal(zh.cpKindPermanent, "常驻成员 · 独立会话");
+  assert.ok(zh.cpKindTemp.length > 0 && zh.cpKindShared.length > 0);
   assert.ok(zh.cpECFilterHint.length > 0 && en.cpECFilterHint.length > 0, "筛选提示中英文都应存在");
   assert.equal(zh.cpNoLeader, "未设负责人");
   assert.equal(zh.cpLeaderTag, "负责人");
@@ -831,7 +925,7 @@ test("CompanyOrgPanel：管理层节点点击打开只读弹层（cpMgmtHint 标
   assert.equal(made.seed[13], true, "点管理层节点应打开只读弹层");
 
   made.react.reset();
-  const tree = made.internals.CompanyOrgPanel({ t: made.t });
+  const tree = made.internals.CompanyOrgPanel(made.panelProps);
   const modal = findMgmtModal(tree);
   assert.ok(modal.card, "应渲染管理层只读弹层");
   const text = treeText(modal.card);
@@ -1164,7 +1258,7 @@ test("部门弹层：部门架构图页签按 M/P 两栏渲染并按等级降序
   assert.equal(buttonByLabel(modalTree, t("cpModalMembers")).length, 1);
 });
 
-test("部门弹层：成员详情页签列出员工与 晋升/停用/调岗/招聘 操作按钮", () => {
+test("部门弹层：成员详情页签每个员工只有「人事管理」按钮，四操作收进详情页", () => {
   const { t, tree, react, internals } = renderCompany({ deptModal: "dept-plugin", modalTab: "members" });
   assert.ok(tree);
   react.reset();
@@ -1174,10 +1268,11 @@ test("部门弹层：成员详情页签列出员工与 晋升/停用/调岗/招�
   assert.match(text, /E0002/);
   assert.match(text, /E0005/);
   assert.equal(buttonByLabel(modalTree, t("cpHire")).length, 1, "应有招聘入口");
-  assert.equal(buttonByLabel(modalTree, t("cpPromote")).length, 3, "每个员工一行晋升");
-  assert.equal(buttonByLabel(modalTree, t("cpFire")).length, 3);
-  assert.equal(buttonByLabel(modalTree, t("cpMove")).length, 3);
-  assert.equal(buttonByLabel(modalTree, t("cpChannels")).length, 3, "每个员工一行通道编辑");
+  assert.equal(buttonByLabel(modalTree, t("cpHr")).length, 3, "每个员工一行人事管理");
+  assert.equal(buttonByLabel(modalTree, t("cpChannels")).length, 0, "通道不再直接暴露在行上");
+  assert.equal(buttonByLabel(modalTree, t("cpPromote")).length, 0, "晋升不再直接暴露在行上");
+  assert.equal(buttonByLabel(modalTree, t("cpFire")).length, 0, "停用不再直接暴露在行上");
+  assert.equal(buttonByLabel(modalTree, t("cpMove")).length, 0, "调岗不再直接暴露在行上");
 });
 
 test("部门弹层：关闭按钮 / 点遮罩 / ESC 关闭，卡片内点击与子元素点击不关闭", () => {
@@ -1248,83 +1343,70 @@ test("部门弹层：部门在 overview 中失效后自动关闭", () => {
   assert.equal(react._states[4], null, "部门已不存在时应自动关闭弹层");
 });
 
-test("写操作：晋升 → POST promoteEmployee（默认下一等级）并刷新 overview，弹层保持打开", async () => {
+test("写操作：晋升 → 人事详情内展开表单，POST promoteEmployee 后回落到详情并刷新 overview", async () => {
   const calls = [];
-  const { t, seed, react, tree, internals } = renderCompany({
-    deptModal: "dept-plugin",
-    modalTab: "members",
-    fetch: companyFetch(calls),
-  });
-  assert.ok(tree);
-  react.reset();
-  let modalTree = internals.CompanyOrgPanel({ t });
-  buttonByLabel(modalTree, t("cpPromote"))[0].onClick();
-  assert.equal(seed[10].kind, "promote");
-  assert.equal(seed[10].employeeId, "emp-lead");
+  const made = renderCompany({ deptModal: "dept-plugin", modalTab: "members", fetch: companyFetch(calls) });
+  openHrAction(made, "E0001", made.t("cpPromote"));
+  assert.equal(made.seed[10].kind, "promote");
+  assert.equal(made.seed[10].employeeId, "emp-lead");
+  assert.equal(made.seed[10].fromHr, true, "人事详情里打开的表单要标记 fromHr");
 
-  react.reset();
-  modalTree = internals.CompanyOrgPanel({ t });
-  const submit = primaryButton(modalTree, t("cpPromote"));
-  assert.ok(submit, "内联表单应有晋升提交按钮");
+  made.react.reset();
+  const tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const submit = primaryButton(tree, made.t("cpPromote"));
+  assert.ok(submit, "详情页下方应展开晋升表单");
   await submit.onClick();
   await tick();
 
   const op = calls.find((c) => c.url.endsWith("/company/op"));
   assert.ok(op, "应发 /company/op");
   assert.deepEqual(op.body, { action: "promoteEmployee", args: { employeeId: "emp-lead", channel: "M", level: "M3" } });
-  assert.equal(seed[4], "dept-plugin", "写操作成功后弹层保持打开");
-  assert.equal(seed[10], null, "成功后收起内联表单");
+  assert.equal(made.seed[4], "dept-plugin", "写操作成功后部门弹层保持打开");
+  assert.equal(String(made.seed[10].kind), "hr", "保存后回落到人事详情（不是直接收起）");
+  assert.equal(String(made.seed[10].employeeId), "emp-lead");
   assert.ok(calls.some((c) => c.url.endsWith("/company/overview")), "写操作后应刷新 overview");
 });
 
-test("写操作：停用需 confirm；取消不发请求，确认后 POST fireEmployee", async () => {
+test("写操作：人事详情里停用需 confirm；取消不发请求，确认后 POST fireEmployee 并回落到详情", async () => {
   const calls = [];
   const asked = [];
   let allow = false;
-  const { t, seed, react, tree, internals } = renderCompany({
+  const made = renderCompany({
     deptModal: "dept-plugin",
     modalTab: "members",
     fetch: companyFetch(calls),
     confirm: (message) => (asked.push(message), allow),
   });
-  assert.ok(tree);
-  react.reset();
-  let modalTree = internals.CompanyOrgPanel({ t });
-  buttonByLabel(modalTree, t("cpFire"))[0].onClick();
+  openHr(made, "E0001");
+  made.react.reset();
+  let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  buttonByLabel(tree, made.t("cpFire"))[0].onClick();
   assert.equal(asked.length, 1, "停用前应弹确认");
   assert.match(asked[0], /插件组负责人/);
   await tick();
   assert.equal(calls.filter((c) => c.url.endsWith("/company/op")).length, 0, "取消后不发请求");
 
   allow = true;
-  react.reset();
-  modalTree = internals.CompanyOrgPanel({ t });
-  await buttonByLabel(modalTree, t("cpFire"))[0].onClick();
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  buttonByLabel(tree, made.t("cpFire"))[0].onClick();
   await tick();
   const op = calls.find((c) => c.url.endsWith("/company/op"));
   assert.ok(op);
   assert.deepEqual(op.body, { action: "fireEmployee", args: { employeeId: "emp-lead" } });
-  assert.equal(seed[4], "dept-plugin");
+  assert.equal(String(made.seed[10].kind), "hr", "停用成功后回落到人事详情");
 });
 
-test("写操作：调岗选择目标部门后 POST moveEmployee", async () => {
+test("写操作：人事详情里调岗选择目标部门后 POST moveEmployee", async () => {
   const calls = [];
-  const { t, seed, react, tree, internals } = renderCompany({
-    deptModal: "dept-plugin",
-    modalTab: "members",
-    fetch: companyFetch(calls),
-  });
-  assert.ok(tree);
-  react.reset();
-  let modalTree = internals.CompanyOrgPanel({ t });
-  // 第二个员工 emp-dev 的「调岗」
-  buttonByLabel(modalTree, t("cpMove"))[1].onClick();
-  assert.equal(seed[10].employeeId, "emp-dev");
-  assert.equal(seed[10].department, "dept-doc", "默认目标 = 除当前部门外的第一个部门");
+  const made = renderCompany({ deptModal: "dept-plugin", modalTab: "members", fetch: companyFetch(calls) });
+  openHrAction(made, "E0002", made.t("cpMove"));
+  assert.equal(made.seed[10].employeeId, "emp-dev");
+  assert.equal(made.seed[10].department, "dept-doc", "默认目标 = 除当前部门外的第一个部门");
 
-  react.reset();
-  modalTree = internals.CompanyOrgPanel({ t });
-  const submit = primaryButton(modalTree, t("cpMove"));
+  made.react.reset();
+  const tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const submit = primaryButton(tree, made.t("cpMove"));
   assert.ok(submit, "内联表单应有调岗提交按钮");
   await submit.onClick();
   await tick();
@@ -1376,30 +1458,28 @@ test("写操作：招聘 createEmployee 需姓名，成功后弹层保持打开"
   assert.equal(seed[10], null);
 });
 
-test("写操作失败：/company/op 返回 ok:false → 弹层内红字 cpOpFailed + code，弹层保持", async () => {
-  const { t, seed, react, tree, internals } = renderCompany({
+test("写操作失败：/company/op 返回 ok:false → 详情页红字 cpOpFailed + code，弹层与表单保持", async () => {
+  const made = renderCompany({
     deptModal: "dept-plugin",
     modalTab: "members",
     fetch: companyFetch([], { opResult: { ok: false, code: "E_INVALID_LEVEL", message: "等级不存在" } }),
   });
-  assert.ok(tree);
-  react.reset();
-  let modalTree = internals.CompanyOrgPanel({ t });
-  buttonByLabel(modalTree, t("cpPromote"))[0].onClick();
-  react.reset();
-  modalTree = internals.CompanyOrgPanel({ t });
-  const submit = primaryButton(modalTree, t("cpPromote"));
+  openHrAction(made, "E0001", made.t("cpPromote"));
+  made.react.reset();
+  const tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const submit = primaryButton(tree, made.t("cpPromote"));
   assert.ok(submit);
   await submit.onClick();
   await tick();
 
-  assert.match(String(seed[8]), /E_INVALID_LEVEL/);
-  assert.match(String(seed[8]), /等级不存在/);
-  assert.equal(seed[4], "dept-plugin", "失败时弹层保持打开");
+  assert.match(String(made.seed[8]), /E_INVALID_LEVEL/);
+  assert.match(String(made.seed[8]), /等级不存在/);
+  assert.equal(made.seed[4], "dept-plugin", "失败时部门弹层保持打开");
+  assert.equal(String(made.seed[10].kind), "promote", "失败时表单保持展开");
 
-  react.reset();
-  const after = internals.CompanyOrgPanel({ t });
-  assert.match(treeText(after), new RegExp(t("cpOpFailed")));
+  made.react.reset();
+  const after = made.internals.CompanyOrgPanel(made.panelProps);
+  assert.match(treeText(after), new RegExp(made.t("cpOpFailed")));
 });
 
 /* ==================== ⑤ 纯函数与兜底 ==================== */
@@ -1758,7 +1838,7 @@ test("删除部门：失败（E_DEPT_NOT_EMPTY）在弹层内红字，弹层保�
 test("双通道徽章：员工行每通道一个徽章，M 在前 P 在后且带等级名", () => {
   const made = renderCompany({ overview: dualOverview(), deptModal: "dept-plugin", modalTab: "members" });
   made.react.reset();
-  const modalTree = made.internals.CompanyOrgPanel({ t: made.t });
+  const modalTree = made.internals.CompanyOrgPanel(made.panelProps);
   const row = employeeRowByCode(modalTree, "E0002");
   assert.ok(row, "应渲染 E0002 员工行");
 
@@ -1842,52 +1922,43 @@ test("管理层只读弹层：关闭按钮 / 点遮罩 / ESC 关闭，卡片内�
 test("通道编辑：manager 的 M 强制勾选且禁用，window 的 M 禁用且不可勾选", () => {
   const made = renderCompany({ overview: roleFixture(), deptModal: "dept-plugin", modalTab: "members" });
 
-  made.react.reset();
-  let modalTree = made.internals.CompanyOrgPanel({ t: made.t });
-  channelButtonFor(modalTree, made.t, "E0001").onClick();
+  openHrAction(made, "E0001", made.t("cpChannels"));
   assert.equal(made.seed[10].kind, "channels");
-
   made.react.reset();
-  modalTree = made.internals.CompanyOrgPanel({ t: made.t });
-  let boxes = checkboxInputs(modalTree);
+  let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  let boxes = checkboxInputs(tree);
   assert.equal(boxes.length, 2, "通道编辑应有 M/P 两个复选框");
   assert.equal(boxes[0].props.checked, true, "manager 的 M 强制勾选");
   assert.equal(boxes[0].props.disabled, true, "manager 的 M 不可取消");
   assert.equal(boxes[0].props.title, made.t("cpChannelLocked"));
 
-  made.seed[10] = null;
+  openHrAction(made, "E0006", made.t("cpChannels"));
   made.react.reset();
-  modalTree = made.internals.CompanyOrgPanel({ t: made.t });
-  channelButtonFor(modalTree, made.t, "E0006").onClick();
-  made.react.reset();
-  modalTree = made.internals.CompanyOrgPanel({ t: made.t });
-  boxes = checkboxInputs(modalTree);
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  boxes = checkboxInputs(tree);
   assert.equal(boxes.length, 2);
   assert.equal(boxes[0].props.checked, false, "window 不允许 M 通道");
   assert.equal(boxes[0].props.disabled, true, "window 的 M 禁用");
   assert.equal(boxes[1].props.checked, true, "window 的 P 通道保留");
 });
 
-test("写操作：通道编辑保存 POST setChannels（载荷含双通道），成功后刷新、弹层保持并显示已保存", async () => {
+test("写操作：通道编辑保存 POST setChannels（载荷含双通道），成功后回落到详情并显示已保存", async () => {
   const calls = [];
   const made = renderCompany({ deptModal: "dept-plugin", modalTab: "members", fetch: companyFetch(calls) });
 
-  made.react.reset();
-  let modalTree = made.internals.CompanyOrgPanel({ t: made.t });
-  channelButtonFor(modalTree, made.t, "E0002").onClick();
-  assert.equal(made.seed[10].kind, "channels");
+  openHrAction(made, "E0002", made.t("cpChannels"));
   assert.equal(made.seed[10].employeeId, "emp-dev");
   assert.equal(made.seed[10].mChecked, false, "staff 默认不勾 M");
   assert.equal(made.seed[10].pChecked, true);
 
   made.react.reset();
-  modalTree = made.internals.CompanyOrgPanel({ t: made.t });
-  checkboxInputs(modalTree)[0].props.onChange({ target: { checked: true } });
+  let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  checkboxInputs(tree)[0].props.onChange({ target: { checked: true } });
   assert.equal(made.seed[10].mChecked, true);
 
   made.react.reset();
-  modalTree = made.internals.CompanyOrgPanel({ t: made.t });
-  const submit = primaryButton(modalTree, made.t("cpSave"));
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const submit = primaryButton(tree, made.t("cpSave"));
   assert.ok(submit, "通道编辑应有保存按钮");
   assert.equal(submit.disabled, false);
   await submit.onClick();
@@ -1903,73 +1974,61 @@ test("写操作：通道编辑保存 POST setChannels（载荷含双通道），
     },
   });
   assert.ok(calls.some((c) => c.url.endsWith("/company/overview")), "保存成功后刷新 overview");
-  assert.equal(made.seed[4], "dept-plugin", "弹层保持打开");
-  assert.equal(made.seed[10], null, "成功后收起内联表单");
+  assert.equal(made.seed[4], "dept-plugin", "部门弹层保持打开");
+  assert.equal(String(made.seed[10].kind), "hr", "成功后回落到人事详情");
   assert.equal(made.seed[14], made.t("cpSaved"), "成功提示已保存");
-
-  made.react.reset();
-  const after = made.internals.CompanyOrgPanel({ t: made.t });
-  assert.match(treeText(after), new RegExp(made.t("cpSaved")));
 });
 
 test("通道编辑：至少保留一个通道——全部取消时保存禁用并显示 cpChannelRequired", () => {
   const made = renderCompany({ deptModal: "dept-plugin", modalTab: "members" });
-  made.react.reset();
-  let modalTree = made.internals.CompanyOrgPanel({ t: made.t });
-  channelButtonFor(modalTree, made.t, "E0002").onClick();
+  openHrAction(made, "E0002", made.t("cpChannels"));
 
   made.react.reset();
-  modalTree = made.internals.CompanyOrgPanel({ t: made.t });
-  checkboxInputs(modalTree)[1].props.onChange({ target: { checked: false } });
+  let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  checkboxInputs(tree)[1].props.onChange({ target: { checked: false } });
   assert.equal(made.seed[10].pChecked, false);
 
   made.react.reset();
-  modalTree = made.internals.CompanyOrgPanel({ t: made.t });
-  assert.match(treeText(modalTree), new RegExp(made.t("cpChannelRequired")));
-  const save = buttonByLabel(modalTree, made.t("cpSave"))[0];
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  assert.match(treeText(tree), new RegExp(made.t("cpChannelRequired")));
+  const save = buttonByLabel(tree, made.t("cpSave"))[0];
   assert.ok(save);
   assert.equal(save.disabled, true, "至少一选未满足时保存禁用");
 });
 
-test("通道编辑保存失败：ok:false → 弹层内红字 cpOpFailed + code，弹层保持打开", async () => {
+test("通道编辑保存失败：ok:false → 弹层内红字 cpOpFailed + code，详情与表单保持打开", async () => {
   const made = renderCompany({
     deptModal: "dept-plugin",
     modalTab: "members",
     fetch: companyFetch([], { opResult: { ok: false, code: "E_LAST_CHANNEL", message: "至少保留一个通道" } }),
   });
-  made.react.reset();
-  let modalTree = made.internals.CompanyOrgPanel({ t: made.t });
-  channelButtonFor(modalTree, made.t, "E0002").onClick();
+  openHrAction(made, "E0002", made.t("cpChannels"));
 
   made.react.reset();
-  modalTree = made.internals.CompanyOrgPanel({ t: made.t });
-  const submit = primaryButton(modalTree, made.t("cpSave"));
+  const tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const submit = primaryButton(tree, made.t("cpSave"));
   assert.ok(submit);
   await submit.onClick();
   await tick();
 
   assert.equal(made.seed[4], "dept-plugin", "失败时弹层保持打开");
   assert.match(String(made.seed[8]), /E_LAST_CHANNEL/);
+  assert.equal(String(made.seed[10].kind), "channels", "失败时表单保持展开");
   made.react.reset();
-  const after = made.internals.CompanyOrgPanel({ t: made.t });
+  const after = made.internals.CompanyOrgPanel(made.panelProps);
   const text = treeText(after);
   assert.match(text, new RegExp(made.t("cpOpFailed")));
   assert.match(text, /E_LAST_CHANNEL/);
 });
 
-test("晋升：通道选择默认主通道——双通道员工默认 M，单 P 员工默认 P", () => {
+test("晋升：人事详情里通道选择默认主通道——双通道员工默认 M，单 P 员工默认 P", () => {
   const dual = renderCompany({ overview: dualOverview(), deptModal: "dept-plugin", modalTab: "members" });
-  dual.react.reset();
-  let modalTree = dual.internals.CompanyOrgPanel({ t: dual.t });
-  // 员工行顺序：M 栏 emp-lead、emp-dev（双通道归 M 栏），再 P 栏 emp-gone
-  buttonByLabel(modalTree, dual.t("cpPromote"))[1].onClick();
+  openHrAction(dual, "E0002", dual.t("cpPromote"));
   assert.equal(dual.seed[10].employeeId, "emp-dev");
   assert.equal(dual.seed[10].channel, "M", "双通道员工默认 M 主通道");
 
   const single = renderCompany({ deptModal: "dept-plugin", modalTab: "members" });
-  single.react.reset();
-  modalTree = single.internals.CompanyOrgPanel({ t: single.t });
-  buttonByLabel(modalTree, single.t("cpPromote"))[1].onClick();
+  openHrAction(single, "E0002", single.t("cpPromote"));
   assert.equal(single.seed[10].employeeId, "emp-dev");
   assert.equal(single.seed[10].channel, "P", "单 P 员工默认 P 通道");
 });
@@ -1978,18 +2037,18 @@ test("招聘：通道选择可选——勾选 M 后 createEmployee channels 含 
   const calls = [];
   const made = renderCompany({ deptModal: "dept-plugin", modalTab: "members", fetch: companyFetch(calls) });
   made.react.reset();
-  let modalTree = made.internals.CompanyOrgPanel({ t: made.t });
+  let modalTree = made.internals.CompanyOrgPanel(made.panelProps);
   buttonByLabel(modalTree, made.t("cpHire"))[0].onClick();
   assert.equal(made.seed[10].kind, "hire");
 
   made.react.reset();
-  modalTree = made.internals.CompanyOrgPanel({ t: made.t });
+  modalTree = made.internals.CompanyOrgPanel(made.panelProps);
   const nameInput = collectElements(modalTree, (node) => node.type === "input" && node.props.placeholder === made.t("cpNewDeptName"))[0];
   assert.ok(nameInput, "招聘表单应有姓名输入框");
   nameInput.props.onChange({ target: { value: "双通道新人" } });
 
   made.react.reset();
-  modalTree = made.internals.CompanyOrgPanel({ t: made.t });
+  modalTree = made.internals.CompanyOrgPanel(made.panelProps);
   const boxes = checkboxInputs(modalTree);
   assert.equal(boxes.length, 2, "招聘表单应有 M/P 两个复选框");
   assert.equal(boxes[0].props.checked, false, "默认不勾 M");
@@ -1997,7 +2056,7 @@ test("招聘：通道选择可选——勾选 M 后 createEmployee channels 含 
   boxes[0].props.onChange({ target: { checked: true } });
 
   made.react.reset();
-  modalTree = made.internals.CompanyOrgPanel({ t: made.t });
+  modalTree = made.internals.CompanyOrgPanel(made.panelProps);
   const submit = primaryButton(modalTree, made.t("cpHire"));
   assert.ok(submit);
   await submit.onClick();
@@ -2006,4 +2065,186 @@ test("招聘：通道选择可选——勾选 M 后 createEmployee channels 含 
   const op = calls.find((c) => c.url.endsWith("/company/op"));
   assert.ok(op);
   assert.deepEqual(op.body.args.channels, [{ channel: "M", level: "M2" }, { channel: "P", level: "P3" }]);
+});
+
+/* ==================== ⑨ v5.4：人事管理详情页 ==================== */
+
+test("人事管理详情：头部 + 基本信息（部门/类型/角色/状态/会话策略/通道）+ 名册提示 + 四操作", () => {
+  const made = renderCompany({ deptModal: "dept-plugin", modalTab: "members" });
+  openHr(made, "E0001");
+  assert.equal(made.seed[10].kind, "hr");
+  assert.equal(made.seed[10].employeeId, "emp-lead");
+
+  made.react.reset();
+  const tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const text = treeText(tree);
+  assert.match(text, /人事管理/);
+  assert.match(text, /E0001/);
+  assert.match(text, /插件组负责人/);
+  assert.match(text, /部门 \[D01\] 插件组/);
+  assert.match(text, /类型 permanent/);
+  assert.match(text, /角色 管理岗/);
+  assert.match(text, /状态 工作中/);
+  assert.match(text, /会话策略 常驻成员 · 独立会话/);
+  assert.match(text, /通道说明 M M2 经理/);
+  assert.match(text, /名册资料/);
+  assert.match(text, /未关联名册成员/);
+  assert.match(text, /人事操作/);
+  assert.ok(buttonByLabel(tree, made.t("cpClose")).length >= 1, "详情头部有关闭按钮");
+  for (const action of ["cpChannels", "cpPromote", "cpFire", "cpMove"]) {
+    assert.equal(buttonByLabel(tree, made.t(action)).length, 1, "详情页应有：" + action);
+  }
+});
+
+test("人事详情：四操作都在详情页内，点击向下展开原表单（fromHr）；取消回落到详情", () => {
+  const made = renderCompany({ deptModal: "dept-plugin", modalTab: "members" });
+
+  openHrAction(made, "E0001", made.t("cpChannels"));
+  assert.equal(made.seed[10].kind, "channels");
+  assert.equal(made.seed[10].fromHr, true);
+  made.react.reset();
+  let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  assert.ok(primaryButton(tree, made.t("cpSave")), "详情页下方应展开通道表单");
+  buttonByLabel(tree, made.t("cancel"))[0].onClick();
+  assert.equal(String(made.seed[10].kind), "hr", "取消后回到人事详情");
+
+  openHrAction(made, "E0001", made.t("cpPromote"));
+  assert.equal(made.seed[10].kind, "promote");
+  assert.equal(made.seed[10].fromHr, true);
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  assert.ok(primaryButton(tree, made.t("cpPromote")), "详情页下方应展开晋升表单");
+
+  openHrAction(made, "E0002", made.t("cpMove"));
+  assert.equal(made.seed[10].kind, "move");
+  assert.equal(made.seed[10].fromHr, true);
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  assert.ok(primaryButton(tree, made.t("cpMove")), "详情页下方应展开调岗表单");
+});
+
+test("名册资料：展示可编辑字段，保存依次 POST renameMember/setRole/setSkills/setModel/assignGroup 并刷新", async () => {
+  const calls = [];
+  let refreshed = 0;
+  const made = renderCompany({
+    deptModal: "dept-plugin",
+    modalTab: "members",
+    fetch: companyFetch(calls),
+    registryMembers: [
+      {
+        target: "emp-lead",
+        displayName: "负责人",
+        title: "组长",
+        duties: ["带队"],
+        skills: ["react"],
+        model: "m-1",
+        provider: "p-1",
+        aliases: ["老负"],
+        groupId: "g-1",
+        status: "active",
+        isRetired: false,
+      },
+    ],
+    registryGroups: [
+      { id: "g-1", name: "数据组" },
+      { id: "g-2", name: "文档组" },
+    ],
+    onRegistryRefresh: async () => {
+      refreshed += 1;
+    },
+  });
+
+  openHr(made, "E0001");
+  made.react.reset();
+  let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  assert.match(treeText(tree), /名册资料/);
+  assert.match(treeText(tree), /名册 target：emp-lead/, "应显示名册 target");
+  assert.equal(inputByPlaceholder(tree, made.t("displayName")).props.value, "负责人");
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  inputByPlaceholder(tree, made.t("displayName")).props.onChange({ target: { value: "新负责人" } });
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  inputByPlaceholder(tree, made.t("cpHrAliases")).props.onChange({ target: { value: "老负, 副手" } });
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  inputByPlaceholder(tree, made.t("role")).props.onChange({ target: { value: "负责人" } });
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  inputByPlaceholder(tree, made.t("dutiesHint")).props.onChange({ target: { value: "带队\n汇报" } });
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  inputByPlaceholder(tree, made.t("skillsHint")).props.onChange({ target: { value: "react, node" } });
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  inputByPlaceholder(tree, made.t("modelPh")).props.onChange({ target: { value: "m-2" } });
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  inputByPlaceholder(tree, made.t("providerPh")).props.onChange({ target: { value: "p-2" } });
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const groupSelect = collectElements(tree, (n) => n.type === "select" && n.props.value === "g-1")[0];
+  assert.ok(groupSelect, "应有名册部门下拉");
+  groupSelect.props.onChange({ target: { value: "g-2" } });
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const save = buttonByLabel(tree, made.t("cpHrSave"))[0];
+  assert.ok(save, "应有保存名册资料按钮");
+  assert.equal(save.disabled, false);
+  await save.onClick();
+  await tick();
+
+  const ops = calls.filter((c) => c.url.endsWith("/op")).map((c) => c.body);
+  assert.deepEqual(
+    ops.map((op) => op.op),
+    ["renameMember", "setRole", "setSkills", "setModel", "assignGroup"],
+    "保存名册资料应依次发 5 个 op",
+  );
+  assert.deepEqual(ops[0].args, { target: "emp-lead", patch: { displayName: "新负责人", aliases: ["老负", "副手"] } });
+  assert.deepEqual(ops[1].args, { target: "emp-lead", patch: { title: "负责人", duties: ["带队", "汇报"] } });
+  assert.deepEqual(ops[2].args, { target: "emp-lead", patch: { skills: ["react", "node"] } });
+  assert.deepEqual(ops[3].args, { target: "emp-lead", model: "m-2", provider: "p-2" });
+  assert.deepEqual(ops[4].args, { target: "emp-lead", groupId: "g-2" });
+  assert.equal(refreshed, 1, "保存后应刷新名册");
+  assert.ok(calls.some((c) => c.url.endsWith("/company/overview")), "保存后应刷新 overview");
+  assert.equal(String(made.seed[10].kind), "hr", "保存后详情保持打开");
+  assert.equal(made.seed[14], made.t("cpHrSave"), "保存成功提示");
+});
+
+test("Panel：向 CompanyOrgPanel 传 registryMembers（扁平化 + 分组名）/registryGroups/onRegistryRefresh", () => {
+  const { tree, internals } = renderPanel();
+  const company = collectElements(tree, (node) => node.type === internals.CompanyOrgPanel)[0];
+  assert.ok(company, "默认应渲染 CompanyOrgPanel");
+  assert.equal(company.props.registryMembers.length, 1);
+  assert.equal(company.props.registryMembers[0].target, "data-organizer");
+  assert.equal(company.props.registryMembers[0].rosterGroupId, "g-1");
+  assert.equal(company.props.registryMembers[0].rosterGroupName, "数据组");
+  assert.equal(company.props.registryGroups.length, 1);
+  assert.equal(company.props.registryGroups[0].name, "数据组");
+  assert.equal(typeof company.props.onRegistryRefresh, "function");
+});
+
+test("cpRegistryMembers：扁平化 groups + ungrouped，并附 rosterGroupName", () => {
+  const { exports } = loadBundle(makeReact());
+  const members = exports.__internals.cpRegistryMembers(sampleView());
+  assert.equal(members.length, 1);
+  assert.equal(members[0].target, "data-organizer");
+  assert.equal(members[0].rosterGroupId, "g-1");
+  assert.equal(members[0].rosterGroupName, "数据组");
+
+  const view = sampleView();
+  view.ungrouped = [{ target: "solo", displayName: "散人" }];
+  const all = exports.__internals.cpRegistryMembers(view);
+  assert.equal(all.length, 2);
+  assert.equal(all[1].rosterGroupName, "");
+  assert.equal(exports.__internals.cpRegistryMembers(null).length, 0);
 });
