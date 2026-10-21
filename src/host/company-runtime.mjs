@@ -12,7 +12,7 @@ import { resolveCompanyConfig } from "../shared/company-config.mjs";
 import { emptyCompany, createDepartment, createEmployee, updateDepartment, updateEmployee, promoteEmployee, fireEmployee, ensureCompanyCodes, describeEmployeeLevel, describeEmployeeChannels, setEmployeeChannels, primaryChannelOf, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY, DEFAULT_LEVELS, DEFAULT_NUMBERING, normalizeManagementName, normalizeLevelsOverride, validateLevelsDirectory, MANAGEMENT_NAME_DEFAULT, normalizeCompanyName, COMPANY_NAME_DEFAULT } from "../shared/company-org.mjs";
 import { emptyLedger, transitionOrder, ORDER_STATES } from "../shared/company-ledger.mjs";
 import path from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, rm } from "node:fs/promises";
 import crypto from "node:crypto";
 
 export const TOOL_NAMES = [
@@ -24,6 +24,7 @@ export const TOOL_NAMES = [
 
 export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, logger = console }) {
   const warnings = [];
+  const PENDING_MIGRATION_FILE = "pending-migration.json";
   const fake = isFakeMode({ fake: rawConfig.fake });
   const { config } = resolveCompanyConfig(rawConfig);
   const workspaceDir = path.resolve(dataDir || process.env.DSH_DATA_DIR || ".", "workspace");
@@ -1009,6 +1010,80 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     ];
   }
 
+  // v5.25：旧包升级迁移标记。scripts/migrate-old-plugin.mjs 切换插件后会写入
+  // <dataDir>/pending-migration.json；新插件首次 boot 自动执行一次名册迁移：
+  //   syncRoster（小组→部门、active 成员→员工）+ importRosterProfiles（岗位/职责/技能/模型补空）。
+  // 成功或确认无可迁移数据后删除标记；失败保留标记并累计 attempts，3 次后改名为 .failed。
+  async function runPendingMigration() {
+    const markerPath = path.join(dataDir, PENDING_MIGRATION_FILE);
+    let marker = null;
+    try {
+      marker = JSON.parse(await readFile(markerPath, "utf8"));
+    } catch {
+      return null;
+    }
+    if (!marker || typeof marker !== "object" || marker.version !== 1) {
+      bootWarnings.push("pending-migration.json 版本不支持，已忽略");
+      return null;
+    }
+    const source = typeof marker.source === "string" ? marker.source : "migrate-old-plugin";
+    const attempts = Number(marker.attempts) || 0;
+    const steps = [];
+    const summarize = (r) => {
+      const out = { ok: r?.ok === true, code: r?.code };
+      if (r?.dryRun !== undefined) out.dryRun = Boolean(r.dryRun);
+      if (r?.counts) out.counts = r.counts;
+      for (const key of ["createdDepartments", "createdEmployees", "updatedEmployees", "wouldCreateDepartments", "wouldCreateEmployees", "wouldUpdateEmployees"]) {
+        if (Array.isArray(r?.[key])) out[key] = r[key].length;
+      }
+      return out;
+    };
+    const run = async (action, args) => {
+      const res = await handleCompanyOp(null, null, { action, args });
+      steps.push({ action, dryRun: Boolean(args?.dryRun), result: summarize(res) });
+      return res;
+    };
+    try {
+      await store.appendAudit({ type: "company.migration_started", source });
+      const syncDry = await run("syncRoster", { dryRun: true });
+      if (!syncDry.ok && syncDry.code === "E_NO_REGISTRY") {
+        await store.appendAudit({ type: "company.migration_skipped", source, reason: "registry.json 不存在" });
+        await rm(markerPath, { force: true });
+        return { ok: true, skipped: true, steps };
+      }
+      if (!syncDry.ok) {
+        throw new Error(`syncRoster(dryRun) 失败: ${syncDry.code || "E_INTERNAL"}`);
+      }
+      const syncReal = await run("syncRoster", {});
+      if (!syncReal.ok) throw new Error(`syncRoster 失败: ${syncReal.code || "E_INTERNAL"}`);
+      const profilesDry = await run("importRosterProfiles", { dryRun: true });
+      if (profilesDry.ok) {
+        const profilesReal = await run("importRosterProfiles", {});
+        if (!profilesReal.ok) throw new Error(`importRosterProfiles 失败: ${profilesReal.code || "E_INTERNAL"}`);
+      }
+      await store.appendAudit({ type: "company.migration_completed", source, steps });
+      await rm(markerPath, { force: true });
+      return { ok: true, steps };
+    } catch (err) {
+      const message = err && err.message ? err.message : String(err);
+      bootWarnings.push(`名册迁移失败: ${message}`);
+      const nextAttempts = attempts + 1;
+      try {
+        if (nextAttempts >= 3) {
+          await writeFile(markerPath + ".failed", JSON.stringify({ ...marker, attempts: nextAttempts, error: message, failedAt: new Date().toISOString() }, null, 2), "utf8");
+          await rm(markerPath, { force: true });
+          await store.appendAudit({ type: "company.migration_failed", source, attempts: nextAttempts, message, gaveUp: true });
+        } else {
+          await writeFile(markerPath, JSON.stringify({ ...marker, attempts: nextAttempts, lastError: message, lastTriedAt: new Date().toISOString() }, null, 2), "utf8");
+          await store.appendAudit({ type: "company.migration_failed", source, attempts: nextAttempts, message });
+        }
+      } catch (writeErr) {
+        bootWarnings.push(`迁移标记更新失败: ${writeErr.message}`);
+      }
+      return { ok: false, steps };
+    }
+  }
+
   async function boot() {
     if (booted) return { ok: true, warnings: bootWarnings };
     bootWarnings = [];
@@ -1093,6 +1168,9 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
       }
     }
 
+    // v5.25：消费旧插件升级迁移标记（成功后会删除标记，故只生效一次）
+    const migration = await runPendingMigration();
+
     runtime.shuttingDown = false;
 
     // 冷启动：创建新 owner，旧 owner 会话作废
@@ -1113,7 +1191,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
 
     scheduler.start();
     booted = true;
-    return { ok: true, warnings: bootWarnings };
+    return { ok: true, warnings: bootWarnings, migration };
   }
 
   function scheduleBootRetry() {

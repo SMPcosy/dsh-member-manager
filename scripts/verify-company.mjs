@@ -101,16 +101,16 @@ await check("设计/审阅/交付文档", () => {
   return `${docs.length} 篇`;
 });
 await check("安装/切换/回滚脚本", () => {
-  for (const f of ["verify-company.mjs", "switch-to-dsh-member-manager.mjs", "rollback-to-dsh-plugin-member-manager.mjs"]) {
+  for (const f of ["verify-company.mjs", "switch-to-dsh-member-manager.mjs", "rollback-to-dsh-plugin-member-manager.mjs", "migrate-old-plugin.mjs"]) {
     must(existsSync(path.join(REPO, "scripts", f)), `缺少 scripts/${f}`);
   }
-  return "3 个";
+  return "4 个";
 });
-await check("M/P 等级与面板测试文件", () => {
-  for (const f of ["company-levels.test.mjs", "company-panel.test.mjs"]) {
+await check("关键测试文件", () => {
+  for (const f of ["company-levels.test.mjs", "company-panel.test.mjs", "migrate-plugin.test.mjs"]) {
     must(existsSync(path.join(REPO, "test", f)), `缺少 test/${f}`);
   }
-  return "2 个";
+  return "3 个";
 });
 await check("总架构组织架构图字样", () => {
   const client = readFileSync(path.join(REPO, "lib", "client.js"), "utf8");

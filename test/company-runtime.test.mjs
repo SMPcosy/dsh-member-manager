@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { createCompanyRuntime, TOOL_NAMES } from "../src/host/company-runtime.mjs";
 import { resolveDefaultLlmOptions } from "../src/host/company-compat.mjs";
 import { buildPromptFor } from "../src/host/company-employees.mjs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 function makeCtx(opts = {}) {
   return {
@@ -1185,5 +1187,109 @@ test("POST /company/op updateDepartment 持久化 borrowPolicy", async () => {
   assert.equal(dept.code, "D09");
   assert.equal(dept.capacity, 5);
   assert.deepEqual(dept.borrowPolicy, { mode: "borrow-only" });
+  await rt.shutdown();
+});
+
+
+function readAudit(dataDir) {
+  const file = path.join(dataDir, "company", "audit.jsonl");
+  if (!existsSync(file)) return [];
+  const NL = String.fromCharCode(10);
+  return readFileSync(file, "utf8")
+    .split(NL)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+test("boot 消费 pending-migration.json：小组→部门、active 成员→员工、档案补空、删除标记", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-migrate-${Date.now()}`;
+  mkdirSync(path.join(dataDir, "company"), { recursive: true });
+  writeFileSync(
+    path.join(dataDir, "registry.json"),
+    JSON.stringify({
+      version: 1,
+      groups: [
+        {
+          id: "g1",
+          name: "插件部",
+          description: "插件开发与维护",
+          members: [
+            {
+              target: "u1",
+              status: "active",
+              displayName: "张三",
+              title: "工程师",
+              duties: ["编码", "评审"],
+              skills: ["code-review"],
+              model: "m1",
+              provider: "p1",
+            },
+            { target: "u2", status: "retired", displayName: "李四" },
+          ],
+        },
+      ],
+      // importRosterProfiles 读顶层 members（扁平）；syncRoster 读 groups[].members。
+      members: [
+        {
+          target: "u1",
+          status: "active",
+          displayName: "张三",
+          title: "工程师",
+          duties: ["编码", "评审"],
+          skills: ["code-review"],
+          model: "m1",
+          provider: "p1",
+        },
+        { target: "u2", status: "retired", displayName: "李四" },
+      ],
+    }),
+    "utf8",
+  );
+  writeFileSync(path.join(dataDir, "pending-migration.json"), JSON.stringify({ version: 1, source: "migrate-old-plugin" }), "utf8");
+
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  const res = await rt.boot();
+  assert.equal(res.ok, true);
+  assert.ok(res.migration && res.migration.ok, "boot 应返回迁移结果");
+
+  const v = rt.view();
+  const dept = v.org.departments.find((d) => d.name === "插件部");
+  assert.ok(dept, "小组应迁成部门");
+  const emp = v.org.employees.find((e) => e.id === "u1");
+  assert.ok(emp, "active 成员应迁成员工");
+  assert.equal(emp.department, dept.id);
+  assert.equal(emp.title, "工程师");
+  assert.deepEqual(emp.duties, ["编码", "评审"]);
+  assert.equal(emp.skills.includes("code-review"), true);
+  assert.equal(v.org.employees.some((e) => e.id === "u2"), false, "非 active 成员不应迁入");
+  assert.equal(existsSync(path.join(dataDir, "pending-migration.json")), false, "迁移标记应被删除");
+
+  const audit = readAudit(dataDir);
+  assert.ok(audit.some((a) => a.type === "roster.synced"));
+  assert.ok(audit.some((a) => a.type === "roster.profiles_imported"));
+  assert.ok(audit.some((a) => a.type === "company.migration_completed"));
+  await rt.shutdown();
+});
+
+test("boot 无 pending-migration 标记时不触发迁移审计（幂等）", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-nomigrate-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  const res = await rt.boot();
+  assert.equal(res.ok, true);
+  assert.equal(res.migration, null);
+  const audit = readAudit(dataDir);
+  assert.equal(audit.some((a) => String(a.type).startsWith("company.migration")), false);
+  await rt.shutdown();
+});
+
+test("pending-migration.json 损坏时不阻塞 boot（warnings 记录）", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-badmarker-${Date.now()}`;
+  mkdirSync(path.join(dataDir, "company"), { recursive: true });
+  writeFileSync(path.join(dataDir, "pending-migration.json"), "{not json", "utf8");
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  const res = await rt.boot();
+  assert.equal(res.ok, true);
+  assert.equal(res.migration, null);
   await rt.shutdown();
 });

@@ -4,6 +4,13 @@
 
 本版本把插件从「名册管理覆盖层」升级为「单包公司化运行时」：不再依赖 DSH 原生团队层（`ctx.agentTeams`），只用 `ctx.agents` / `ctx.subagents` 承载两级组织（部门经理 → 员工）的派工闭环。
 
+### 新增：旧包一键迁移与首次启动自动数据迁移（v5.25）
+
+- 新增 `scripts/migrate-old-plugin.mjs`：一键把 profile 从旧包 `dsh-plugin-member-manager` 升级到 `dsh-member-manager`——默认 dry-run，`--apply` 时先备份 profile，再改写 `dependencies` / `bundles` / `cordis.yml` 三处、删除旧包目录，并写入数据迁移标记 `<dataDir>/pending-migration.json`；支持 `--mode npm|link`、`--target`、`--data-only`（只写标记）、`--no-marker`、`--no-uninstall`。
+- 新插件首次启动自动消费该标记：依次执行 `syncRoster`（名册小组→部门、active 成员→员工）与 `importRosterProfiles`（只补空档案字段），成功后删除标记并写审计 `company.migration_started` / `company.migration_completed`；`registry.json` 缺失时跳过并写 `company.migration_skipped`；失败保留标记并累加 `attempts`，满 3 次改名 `pending-migration.json.failed` 停止重试。
+- 名册数据与数据目录格式不变：旧包用户的成员、小组、备份、技能/模型覆盖在升级后原样可用；公司化组织由迁移生成，幂等（重复 dryRun 全空）。
+- 新增 `test/migrate-plugin.test.mjs`（5 用例）与 `test/company-runtime.test.mjs` 的 3 个标记消费用例；全量 **496/496**、`node scripts/verify-company.mjs` **19/19**。
+
 ### 修复：员工会话保留宿主标准工具（v5.24）
 
 - **现象**：给「内容部」派发宣传图工单后，员工（staff 线）调用 `ops_bash` 被 `E_TOOL_LINE` 拒绝，无法运行 Python/Pillow、无法写文件，只能回报 blocked（单元测试全绿但真实任务做不了）。
