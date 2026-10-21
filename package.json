@@ -29,8 +29,6 @@
     "locale",
     "cordis.patch.yml",
     "docs",
-    "demo",
-    "test",
     "icon.png",
     "scripts"
   ],

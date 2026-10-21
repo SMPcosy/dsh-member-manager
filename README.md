@@ -63,13 +63,13 @@ Click a heading below to view **English** or **中文** .
 
 ## 安装
 
-**方式 A：npm（发布后可用）** —— 目前尚未发布；发布后执行：
+**方式 A：npm（已发布 `dsh-member-manager@0.3.0`）**
 
 ```bash
 dsh plugin --profile desktop add dsh-member-manager
 ```
 
-**方式 B：本地源码（当前推荐）**
+**方式 B：本地源码**
 
 ```bash
 dsh plugin --profile desktop add link:"<本仓库绝对路径>"
@@ -247,13 +247,13 @@ MIT（见 [LICENSE](./LICENSE)）；第三方许可见 [THIRD-PARTY-NOTICES.md](
 
 ## Installation
 
-**Option A — npm (after release)**: not published yet; once published run:
+**Option A — npm (published as `dsh-member-manager@0.3.0`)**
 
 ```bash
 dsh plugin --profile desktop add dsh-member-manager
 ```
 
-**Option B — local source (recommended today)**
+**Option B — local source**
 
 ```bash
 dsh plugin --profile desktop add link:"<repo path>"

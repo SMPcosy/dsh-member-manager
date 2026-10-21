@@ -4,6 +4,13 @@
 
 本版本把插件从「名册管理覆盖层」升级为「单包公司化运行时」：不再依赖 DSH 原生团队层（`ctx.agentTeams`），只用 `ctx.agents` / `ctx.subagents` 承载两级组织（部门经理 → 员工）的派工闭环。
 
+### 发布：npm 正式发布 `dsh-member-manager@0.3.0`（v5.30）
+
+- 主包已发布到 npm 公共 registry：`dsh-member-manager@0.3.0`（`latest`），tarball 457.2 kB / 59 文件（打包前从 `files` 移除 `test`、`demo`）；安装命令 `dsh plugin --profile desktop add dsh-member-manager`。
+- 旧包名转发包已发布：`dsh-plugin-member-manager@0.3.1`（`latest`），依赖 `dsh-member-manager@^0.3.0`，`export *` 转发 host/client 入口，cordis 仍插入旧名。
+- 发布不需要 GitHub 仓库：主包 `package.json` 未声明 `repository`；npm 上首次发布会异步生成 `0.0.0-stage` 占位版本，处理完成后 `latest` 指向 0.3.0。
+- 发布流程记录在 `docs/14-验证与安装.md` §方式 D（npm 登录 → pack → publish 主包 → publish 转发包 → 对旧版本 `npm deprecate`）。
+
 ### 文档：README 增加与旧插件的关系章节（v5.29）
 
 - 新增「与旧插件 dsh-plugin-member-manager 的关系」（中英各一节）：同源 fork、数据目录/registry.json/16 个名册工具名不变、公司化数据为新增、面板差异与维护状态对照表。
