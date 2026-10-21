@@ -9,7 +9,7 @@ import { createDispatcher } from "./company-dispatcher.mjs";
 import { createScheduler } from "./company-scheduler.mjs";
 import { CompanyStore } from "../shared/company-store.mjs";
 import { resolveCompanyConfig } from "../shared/company-config.mjs";
-import { emptyCompany, createDepartment, createEmployee, updateDepartment, updateEmployee, promoteEmployee, fireEmployee, ensureCompanyCodes, describeEmployeeLevel, describeEmployeeChannels, setEmployeeChannels, primaryChannelOf, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY, DEFAULT_LEVELS, DEFAULT_NUMBERING, normalizeManagementName, normalizeLevelsOverride, validateLevelsDirectory, MANAGEMENT_NAME_DEFAULT } from "../shared/company-org.mjs";
+import { emptyCompany, createDepartment, createEmployee, updateDepartment, updateEmployee, promoteEmployee, fireEmployee, ensureCompanyCodes, describeEmployeeLevel, describeEmployeeChannels, setEmployeeChannels, primaryChannelOf, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY, DEFAULT_LEVELS, DEFAULT_NUMBERING, normalizeManagementName, normalizeLevelsOverride, validateLevelsDirectory, MANAGEMENT_NAME_DEFAULT, normalizeCompanyName, COMPANY_NAME_DEFAULT } from "../shared/company-org.mjs";
 import { emptyLedger, transitionOrder, ORDER_STATES } from "../shared/company-ledger.mjs";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
@@ -184,7 +184,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         properties: {
           action: {
             type: "string",
-            enum: ["createDepartment", "createEmployee", "setRoutingRules", "updateDepartment", "promoteEmployee", "setNumbering", "setManagementName", "setLevels", "setChannels", "updateEmployeeProfile", "importRosterProfiles"],
+            enum: ["createDepartment", "createEmployee", "setRoutingRules", "updateDepartment", "promoteEmployee", "setNumbering", "setManagementName", "setCompanyName", "setLevels", "setChannels", "updateEmployeeProfile", "importRosterProfiles"],
             description: "管理动作",
           },
           args: { type: "object" },
@@ -454,6 +454,14 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
             await store.saveCompany(runtime.company);
             await store.appendAudit({ type: "company.management_renamed", name });
             return { ok: true, name };
+          }
+          case "setCompanyName": {
+            const name = normalizeCompanyName(args.args && args.args.name);
+            if (!name) return { ok: false, code: "E_INVALID_COMPANY_NAME", message: "公司名称必填（1-40 字符）" };
+            runtime.company = { ...runtime.company, companyName: name };
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "company.renamed", name });
+            return { ok: true, companyName: name };
           }
           case "setLevels": {
             const result = applyLevelsOverride(args.args || {}, runtime.config.levels);
@@ -801,6 +809,14 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
           await store.saveCompany(runtime.company);
           await store.appendAudit({ type: "company.management_renamed", name });
           return { ok: true, name };
+        }
+        case "setCompanyName": {
+          const name = normalizeCompanyName(args.name);
+          if (!name) return { ok: false, code: "E_INVALID_COMPANY_NAME", message: "公司名称必填（1-40 字符）" };
+          runtime.company = { ...runtime.company, companyName: name };
+          await store.saveCompany(runtime.company);
+          await store.appendAudit({ type: "company.renamed", name });
+          return { ok: true, companyName: name };
         }
         case "setLevels": {
           const result = applyLevelsOverride(args, runtime.config.levels);
@@ -1238,6 +1254,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
       status: booted ? "running" : "stopped",
       warnings: bootWarnings,
       org: { departments, employees },
+      companyName: runtime.company.companyName || COMPANY_NAME_DEFAULT,
       management: {
         channel: "M",
         name: runtime.company.managementName || MANAGEMENT_NAME_DEFAULT,

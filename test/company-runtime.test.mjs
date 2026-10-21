@@ -971,6 +971,36 @@ test("company_hire 含 provider+model 时 startActivation 传 agentOptions", asy
 
 /* ==================== v5.11 管理层重命名 / 编号规则 / 等级通道 / 部门编辑 ==================== */
 
+test("POST /company/op setCompanyName 持久化并审计；空名拒绝", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-company-name-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+
+  assert.equal(rt.view().companyName, "我的公司", "缺省公司名应为「我的公司」");
+
+  const res = await op.handler({}, new URL("http://localhost/company/op"), {
+    action: "setCompanyName",
+    args: { name: "  ACME 科技  " },
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.companyName, "ACME 科技");
+  assert.equal(rt.view().companyName, "ACME 科技");
+
+  const empty = await op.handler({}, new URL("http://localhost/company/op"), {
+    action: "setCompanyName",
+    args: { name: "   " },
+  });
+  assert.equal(empty.ok, false);
+  assert.equal(empty.code, "E_INVALID_COMPANY_NAME");
+  await rt.shutdown();
+
+  const rt2 = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt2.boot();
+  assert.equal(rt2.view().companyName, "ACME 科技", "重启后公司名仍在");
+  await rt2.shutdown();
+});
+
 test("POST /company/op setManagementName 持久化并审计；空名拒绝", async () => {
   const dataDir = `/tmp/test-dsh-member-manager-mgmt-name-${Date.now()}`;
   const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });

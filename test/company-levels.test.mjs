@@ -34,6 +34,8 @@ import {
   resolveChannelLevel,
   describeEmployeeChannels,
   setEmployeeChannels,
+  normalizeCompanyName,
+  COMPANY_NAME_DEFAULT,
 } from "../src/shared/company-org.mjs";
 
 const NOW = "2026-10-20T12:00:00.000Z";
@@ -577,4 +579,26 @@ test("normalizeCompany：非法 levels 回退默认并产生 warning", () => {
   const { company: out, warnings } = normalizeCompany(raw);
   assert.equal(out.levels, undefined, "非法 levels 应被丢弃");
   assert.ok(warnings.some((w) => String(w).includes("levels")), "应有 levels 回退 warning");
+});
+
+/* --------------------------- v5.14 公司名称 --------------------------- */
+
+test("normalizeCompanyName：trim/截断 40 字，非字符串回落空串", () => {
+  assert.equal(normalizeCompanyName("  ACME 科技  "), "ACME 科技");
+  assert.equal(normalizeCompanyName("x".repeat(60)).length, 40);
+  assert.equal(normalizeCompanyName(undefined), "");
+  assert.equal(normalizeCompanyName(42), "");
+});
+
+test("normalizeCompany：companyName 缺省补「我的公司」，自定义值持久化", () => {
+  const raw = { version: 1, status: "idle", departments: [], employees: [] };
+  const fresh = normalizeCompany(JSON.parse(JSON.stringify(raw))).company;
+  assert.equal(fresh.companyName, COMPANY_NAME_DEFAULT);
+  assert.equal(COMPANY_NAME_DEFAULT, "我的公司");
+
+  raw.companyName = "  ACME 科技  ";
+  const custom = normalizeCompany(JSON.parse(JSON.stringify(raw))).company;
+  assert.equal(custom.companyName, "ACME 科技");
+  const again = normalizeCompany(JSON.parse(JSON.stringify(custom))).company;
+  assert.equal(again.companyName, "ACME 科技");
 });

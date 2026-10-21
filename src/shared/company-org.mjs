@@ -6,6 +6,14 @@
  */
 
 export const COMPANY_VERSION = 1;
+export const COMPANY_NAME_DEFAULT = "我的公司";
+export const COMPANY_NAME_MAX = 40;
+
+/** 公司名：trim + 截断到 40 字符；非字符串 → ""。 */
+export function normalizeCompanyName(value) {
+  if (typeof value !== "string") return "";
+  return value.trim().slice(0, COMPANY_NAME_MAX);
+}
 
 export const EMPLOYEE_KIND = Object.freeze({
   PERMANENT: "permanent",
@@ -191,6 +199,7 @@ export function emptyCompany(now = new Date().toISOString()) {
     limits: {},
     numbering: clone(DEFAULT_NUMBERING),
     managementName: MANAGEMENT_NAME_DEFAULT,
+    companyName: COMPANY_NAME_DEFAULT,
   };
 }
 
@@ -268,6 +277,7 @@ export function normalizeCompany(raw, now = new Date().toISOString()) {
 
   // v5.11：管理层显示名与等级通道显示名的持久化覆盖（只影响展示，不动账本结构）。
   company.managementName = normalizeManagementName(company.managementName) || MANAGEMENT_NAME_DEFAULT;
+  company.companyName = normalizeCompanyName(company.companyName) || COMPANY_NAME_DEFAULT;
   if (raw && raw.levels !== undefined) {
     if (raw.levels && typeof raw.levels === "object") {
       company.levels = normalizeLevelsOverride(raw.levels);

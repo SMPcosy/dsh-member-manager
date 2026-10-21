@@ -280,6 +280,17 @@ test("Panel：点击「同步核心成员」发出 registerLive 请求", async (
   assert.equal(op.body.op, "registerLive");
 });
 
+test("Panel：标题栏「成员管理」后有公司名输入框，值来自 state.company.companyName", () => {
+  const view = sampleView();
+  view.company = { companyName: "测试公司" };
+  const { exports } = loadBundle(makeReact([view, null, false]));
+  const tree = exports.__internals.Panel({ t: (k) => k });
+  const inputs = collectInputs(tree);
+  const input = inputs.find((i) => i.props && i.props.placeholder === "cpCompanyNamePh");
+  assert.ok(input, "应渲染公司名输入框（placeholder=cpCompanyNamePh）");
+  assert.equal(input.props.value, "测试公司", "输入框值应来自 state.company.companyName");
+});
+
 test("Panel：默认落在「总架构」页，页签顺序总架构→员工中心→工作流→备份与更新", () => {
   // seed 只给前三个 hook，第四个 tab 走组件内 useState("company") 的默认值
   const { exports } = loadBundle(makeReact([sampleView(), null, false]));
@@ -1100,6 +1111,7 @@ test("组织架构图：无窗口框、无位置按钮的层级视图（并联�
 const COMPANY_ORGMAP_FIXTURE = {
   version: 3,
   source: "company",
+  companyName: "测试公司",
   worknet: { departments: 2, employees: 3 },
   generatedAt: "2026-10-21T08:40:00.000Z",
   tasks: [],
@@ -1206,6 +1218,7 @@ test("工作网：公司化数据渲染管理层→部门→员工，卡片带�
   assert.ok(joined.includes("M2"), "员工卡片应显示等级：" + joined);
   assert.ok(joined.includes("ocStaff 3"), "页脚应显示员工数：" + joined);
   assert.ok(joined.includes("ocDept 2"), "页脚应显示部门数：" + joined);
+  assert.ok(joined.includes("测试公司"), "无任务时任务栏应显示公司名：" + joined);
 
   const stage = overlay.root.children[2].children[0];
   const groupsRow = stage.children[2];

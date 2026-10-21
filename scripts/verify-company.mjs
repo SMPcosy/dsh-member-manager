@@ -149,7 +149,7 @@ await check("总架构组织架构图字样", () => {
     "pickModel",
     "rosterPicker",
     "cpProfile",
-    "cpSaveProfile",
+    "cpCompanyName",
     "cpCustomize",
     "cpAddLevel",
     "cpRemoveLevel",

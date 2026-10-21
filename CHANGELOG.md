@@ -121,6 +121,14 @@
 - **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
 - **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
 
+### 新增：公司名称自定义 + 工作网竖向布局（v5.14）
+
+- 插件面板页头「成员管理」右侧新增**公司名称输入框**（1–40 字符，失焦/回车保存，写入 `company.json` 并审计 `company.renamed`），`GET /state` 与 `GET /orgmap` 均返回 `companyName`。
+- 工作网改为**竖向布置**：管理层在上，部门自上而下逐行堆叠，每行左侧部门色块、右侧员工卡片；连线改为竖向总线 + 部门到员工的小括号连接。
+- 工作网任务栏在无任务时显示**自定义公司名**（此前显示空文案）。
+- `POST /company/op` 新增 `setCompanyName`（`E_INVALID_COMPANY_NAME`）；新增 shared 导出 `COMPANY_NAME_DEFAULT`/`COMPANY_NAME_MAX`/`normalizeCompanyName`。
+- **测试**：company-levels 44、company-runtime 51、client-bundle 40；全量 **482/482**；`node scripts/verify-company.mjs` 19/19。
+
 ### 变更：右侧栏「组织架构」改为公司化「工作网」（v5.13）
 
 - 右侧边栏 tab 更名为「工作网」，数据源从名册/任务参与者改为公司化组织：管理层（M 通道聚合）→ 部门（编号 + 负责人）→ 员工（工号 + 等级徽章 + 模型 + 任务 + 用量）。
