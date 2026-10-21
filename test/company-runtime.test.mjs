@@ -866,7 +866,7 @@ test("POST /company/op importRosterProfiles 只补空字段且不覆盖", async 
   await fs.mkdir(dataDir, { recursive: true });
   const registry = {
     members: [
-      { target: "e1", status: "active", displayName: "Registry 名", duties: { title: "高级", duties: ["a", "b"] }, model: "m1", provider: "p1" },
+      { target: "e1", status: "active", displayName: "Registry 名", title: "高级", duties: ["a", "b"], model: "m1", provider: "p1" },
       { target: "e2", status: "active", displayName: "已有" },
     ],
   };

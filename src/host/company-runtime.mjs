@@ -653,11 +653,14 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
                 patch.displayName = cleanProfileText(member.displayName);
                 fields.push("displayName");
               }
-              if (!emp.title && member.duties?.title) {
-                patch.title = cleanProfileText(member.duties.title);
+              // registry 成员形状：{ title: string, duties: string[] }（title/duties 是同级字段）。
+              // 早期实现误读 member.duties.title / member.duties.duties，导致真实名册的岗位与
+              // 职责永远导不进来（单测夹具也照抄了错误形状）。
+              if (!emp.title && member.title) {
+                patch.title = cleanProfileText(member.title);
                 fields.push("title");
               }
-              const incomingDuties = Array.isArray(member.duties?.duties) ? member.duties.duties.filter(Boolean) : [];
+              const incomingDuties = Array.isArray(member.duties) ? member.duties.filter(Boolean) : [];
               if ((!emp.duties || emp.duties.length === 0) && incomingDuties.length > 0) {
                 patch.duties = incomingDuties;
                 fields.push("duties");
