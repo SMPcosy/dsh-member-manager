@@ -4,7 +4,7 @@
  */
 
 import { EMPLOYEE_ROLE, EMPLOYEE_STATE, SESSION_POLICY, describeEmployeeLevel, describeEmployeeChannels, LEVEL_CHANNEL } from "../shared/company-org.mjs";
-import { restrictTools, guardTools, LINE_TOOLS, TOOL_LINES, SOURCE_KIND, normalizeUsage } from "./company-compat.mjs";
+import { guardTools, LINE_TOOLS, TOOL_LINES, SOURCE_KIND, normalizeUsage } from "./company-compat.mjs";
 
 export function createEmployeeSessionManager({ runtime, logger }) {
   const sessions = new Map();
@@ -28,20 +28,17 @@ export function createEmployeeSessionManager({ runtime, logger }) {
   function setupAgentContext(agent, line) {
     if (!agent || !agent.ctx) return;
     const allowed = LINE_TOOLS[line] || [];
-    try {
-      restrictTools(agent.ctx, allowed);
-    } catch (err) {
-      logger?.warn?.(`restrict 失败: ${err.message}`);
-    }
+    // 行隔离只约束公司化工具（company_*）：员工仍保有宿主标准工具（读写文件 / bash 等）才能完成真实工作。
     try {
       guardTools(agent.ctx, (exec) => {
+        const name = exec?.tool?.name || exec?.name;
+        if (!name || !String(name).startsWith("company_")) return undefined;
         const sid = exec?.agent?.session?.id;
         const tools = runtime.sessionTools;
         if (!sid || !tools) return "无法识别会话身份";
         const set = tools.get(sid);
         if (!set) return "会话未登记";
-        const name = exec?.tool?.name || exec?.name;
-        if (!name || !set.has(name)) return "E_TOOL_LINE: 该工具不在当前岗位白名单中";
+        if (!set.has(name)) return "E_TOOL_LINE: 该工具不在当前岗位白名单中";
         return undefined;
       });
     } catch (err) {
