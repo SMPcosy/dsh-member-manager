@@ -1096,6 +1096,10 @@ test("组织架构图：无窗口框、无位置按钮的层级视图（并联�
   const stage = canvas.children[0];
   assert.equal(stage.className, "mmo-stage");
   const leadRow = stage.children[1];
+  const leadCard = leadRow.children[0];
+  assert.equal(leadCard.className, "mmo-card mmo-lead-card", "管理层应为窄高专用卡片");
+  assert.equal(leadCard.children[0].className, "mmo-dot", "管理层卡片首行为状态点");
+  assert.ok(leadCard.children.length >= 3, "管理层卡片内容竖排（状态点/名称/成员数/用量）");
   const groupsRow = stage.children[2];
   assert.equal(leadRow.className, "mmo-lead-row");
   assert.equal(leadRow.children.length, 1, "第 1 层只有大总管一张卡");

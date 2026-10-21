@@ -121,6 +121,12 @@
 - **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
 - **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
 
+### 视觉调整：管理层窄高卡片 + 工作网圆角总线连线（v5.16）
+
+- 管理层节点改为**窄高竖排卡片**：宽度 230px → 118px、最小高度 100px，状态点/名称/成员数/token 用量居中竖排，相对部门列自动上下居中。
+- 工作网连线由直线扇形改为**圆角总线扇形**：父节点右缘先横出到竖向总线（首尾圆角）再从总线接入每个子节点左缘；部门→员工按部门色区分，落点绘制小圆点，更接近组织架构图。
+- `test/client-bundle.test.mjs` 增加管理层窄高卡片结构断言。
+
 ### 变更：工作网改为横向层级视图 + 空闲员工折叠（v5.15）
 
 - 工作网（右栏）改为**从左至右展开**：管理层在最左，部门色块按序竖向堆叠在第二列，各部门员工卡片在第三列竖向排列；连线改为**直线扇形**（管理层→每个部门；部门→本部门每张员工卡与空闲折叠按钮）。
