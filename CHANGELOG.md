@@ -121,6 +121,14 @@
 - **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
 - **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
 
+### 新增：新建部门预览按编制预生成员工并一并创建（v5.19）
+
+- 点「创建预览」时按编制人数 N（上限 50）自动**预生成 N 名员工行**：默认姓名「新员工 1..N」、通道 P、等级取该通道目录首级；预览内可改姓名、切换 M/P 通道与等级、删除行。
+- 点「创建」时先建部门，再按预览行逐个 `POST /company/op createEmployee`（role=staff、kind=permanent、department=新部门）；全部成功后关闭并刷新 overview。
+- 部分员工失败时对话框保持打开并提示 `cpPreviewEmpFailed`；已成功员工标记 ✓，预览记住已创建的部门 id，重试时只补建未成功的员工（不会重复建部门）。
+- 命中已存在部门的预览仍只读展示该部门员工。
+- 新增文案键 `cpPlannedHint`/`cpEmployeeName`/`cpPreviewEmpFailed`（zh/en 对称）；`test/company-panel.test.mjs` 增加预生成与「建部门 + 逐个建员工」「部分失败重试」用例（69 用例）。
+
 ### 新增：预览/部门编辑列出「本部门员工」详情（v5.18）
 
 - 新建部门的「创建预览」弹窗在字段区下方新增只读「本部门员工（N）」区块；新建部门尚无员工时显示空态文案「暂无员工，创建后可招聘或调岗」，若预览的 ID/名称命中已存在部门则列出该部门员工详情。

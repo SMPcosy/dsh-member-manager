@@ -1173,8 +1173,96 @@ test("新建部门：点「创建预览」自动解析一句话并打开预览�
   const values = collectElements(preview, (node) => node.type === "input").map((node) => String(node.props.value));
   assert.ok(values.includes("市场"), "预览里名称应为解析结果：" + values.join("|"));
   assert.ok(values.includes("5"), "预览里编制应为解析结果：" + values.join("|"));
-  assert.ok(text.includes(t("cpDeptEmployees") + "（0）"), "预览应显示「本部门员工」区块：新建部门为空");
-  assert.ok(text.includes(t("cpPreviewNoEmployees")), "新建部门预览应显示「暂无员工」空态提示");
+  assert.ok(text.includes(t("cpDeptEmployees") + "（5）"), "预览应按编制预生成 5 名员工：" + text.slice(0, 240));
+  assert.ok(!text.includes(t("cpPreviewNoEmployees")), "预生成员工后不应再显示空态");
+  const planned = seed[22].employees;
+  assert.equal(planned.length, 5, "预览应预生成 5 名员工");
+  assert.equal(planned[0].displayName, "新员工 1");
+  assert.equal(planned[0].channel, "P");
+  assert.equal(planned[0].level, "P1");
+  assert.ok(planned.every((row) => row.created === false), "预生成员工初始未创建");
+  const names = collectElements(preview, (node) => node.type === "input")
+    .map((node) => String(node.props.value))
+    .filter((value) => /^新员工 [0-9]+$/.test(value));
+  assert.deepEqual(names, ["新员工 1", "新员工 2", "新员工 3", "新员工 4", "新员工 5"], "预览应列出预生成员工姓名");
+});
+
+test("新建部门：点「创建」先建部门，再按预览逐个创建预生成员工，成功关闭并刷新", async () => {
+  const calls = [];
+  const { t, seed, tree } = renderCompany({
+    newDeptOpen: true,
+    newDeptPreview: {
+      id: "",
+      name: "市场部",
+      charter: "负责市场",
+      capacity: "2",
+      createdId: null,
+      employees: [
+        { key: "k1", displayName: "市场专员甲", channel: "P", level: "P4", created: false },
+        { key: "k2", displayName: "市场经理乙", channel: "M", level: "M1", created: false },
+      ],
+    },
+    fetch: companyFetch(calls, { opResult: { ok: true, departmentId: "dept-market", code: "D03" } }),
+  });
+  await buttonByLabel(tree, t("cpCreateDept"))[0].onClick();
+  await tick();
+
+  const ops = calls.filter((c) => c.url.endsWith("/company/op")).map((c) => c.body);
+  assert.equal(ops.length, 3, "应发 1 次建部门 + 2 次建员工：" + JSON.stringify(ops));
+  assert.equal(ops[0].action, "createDepartment");
+  assert.equal(ops[1].action, "createEmployee");
+  assert.deepEqual(
+    { displayName: ops[1].args.displayName, department: ops[1].args.department, role: ops[1].args.role, kind: ops[1].args.kind, channel: ops[1].args.channel, level: ops[1].args.level },
+    { displayName: "市场专员甲", department: "dept-market", role: "staff", kind: "permanent", channel: "P", level: "P4" },
+  );
+  assert.equal(ops[2].args.displayName, "市场经理乙");
+  assert.equal(ops[2].args.channel, "M");
+  assert.equal(ops[2].args.level, "M1");
+  assert.equal(seed[6], false, "成功后应关闭对话框");
+  assert.equal(seed[22], null, "成功后应清空预览状态");
+});
+
+test("新建部门：部分员工创建失败时保留预览并提示，已建员工标记 created", async () => {
+  const calls = [];
+  let opCount = 0;
+  const fetch = async (url, init) => {
+    const u = String(url);
+    calls.push({ url: u, method: (init && init.method) || "GET", body: init && init.body ? JSON.parse(init.body) : null });
+    if (u.endsWith("/company/op")) {
+      opCount += 1;
+      const body = init && init.body ? JSON.parse(init.body) : {};
+      if (body.action === "createDepartment") return { ok: true, status: 200, json: async () => ({ ok: true, data: { ok: true, departmentId: "dept-new", code: "D09" } }) };
+      if (body.action === "createEmployee" && body.args.level === "M1") {
+        return { ok: true, status: 200, json: async () => ({ ok: false, code: "E_BOOM", message: "员工爆炸了" }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ ok: true, data: { ok: true } }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true, data: overviewFixture() }) };
+  };
+  const { t, seed, tree } = renderCompany({
+    newDeptOpen: true,
+    newDeptPreview: {
+      id: "",
+      name: "市场部",
+      charter: "",
+      capacity: "2",
+      createdId: null,
+      employees: [
+        { key: "k1", displayName: "市场专员甲", channel: "P", level: "P4", created: false },
+        { key: "k2", displayName: "市场经理乙", channel: "M", level: "M1", created: false },
+      ],
+    },
+    fetch,
+  });
+  await buttonByLabel(tree, t("cpCreateDept"))[0].onClick();
+  await tick();
+
+  assert.ok(opCount >= 3, "应尝试建部门与两名员工");
+  assert.ok(seed[22], "预览应保持打开（部门已创建）");
+  assert.equal(seed[22].createdId, "dept-new", "预览应记住已创建的部门");
+  assert.equal(seed[22].employees[0].created, true, "成功员工应标记 created");
+  assert.equal(seed[22].employees[1].created, false, "失败员工不应标记 created");
+  assert.ok(seed[9] && /员工爆炸了|E_BOOM/.test(seed[9]), "应显示员工创建失败错误：" + String(seed[9]));
 });
 
 test("新建部门：预览确认后创建 POST createDepartment，成功后关闭并刷新 overview", async () => {
