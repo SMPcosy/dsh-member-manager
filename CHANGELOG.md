@@ -121,9 +121,10 @@
 - **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
 - **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
 
-### 调整：工作网「管理层」节点右对齐（v5.14.2）
+### 调整：工作网「管理层」节点左对齐（v5.14.2/v5.14.3）
 
-- 右栏工作网竖向布局中，管理层节点从顶部居中改为**顶部行最右侧**（与员工卡片同侧），部门行仍自左向右排布，连线自动改为跨越式折线。
+- 右栏工作网竖向布局中，管理层节点固定为**顶部行最左侧**，部门行仍自左向右排布，连线自动改为跨越式折线。
+- 公司化运行时会话（id 以 `company-owner-` 开头）在任务下拉中的标题显示为**自定义公司名**，不再回落为 `company-1` 之类的会话名；host 侧 `/orgmap` 与 client 侧选择器双重兜底。
 
 ### 新增：公司名称自定义 + 工作网竖向布局（v5.14）
 
@@ -131,7 +132,7 @@
 - 工作网改为**竖向布置**：管理层在上，部门自上而下逐行堆叠，每行左侧部门色块、右侧员工卡片；连线改为竖向总线 + 部门到员工的小括号连接。
 - 工作网任务栏在无任务时显示**自定义公司名**（此前显示空文案）。
 - `POST /company/op` 新增 `setCompanyName`（`E_INVALID_COMPANY_NAME`）；新增 shared 导出 `COMPANY_NAME_DEFAULT`/`COMPANY_NAME_MAX`/`normalizeCompanyName`。
-- **测试**：company-levels 44、company-runtime 51、client-bundle 40；全量 **482/482**；`node scripts/verify-company.mjs` 19/19。
+- **测试**：company-levels 44、company-runtime 51、client-bundle 41；全量 **483/483**；`node scripts/verify-company.mjs` 19/19。
 
 ### 变更：右侧栏「组织架构」改为公司化「工作网」（v5.13）
 

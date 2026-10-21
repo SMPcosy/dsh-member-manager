@@ -1240,6 +1240,38 @@ test("工作网：公司化数据渲染管理层→部门→员工，卡片带�
   overlay.destroy();
 });
 
+test("工作网：公司化任务标题跟随公司名（company-owner 会话不再显示 company-1）", async () => {
+  const { doc, win } = makeFakeDom();
+  const fixture = {
+    ...COMPANY_ORGMAP_FIXTURE,
+    tasks: [
+      { id: "company-owner-abc", title: "company-1", updatedAt: 3, running: false, memberCount: 1, members: ["lead"] },
+      { id: "s-other", title: "其他任务", updatedAt: 2, running: false, memberCount: 1, members: ["lead"] },
+    ],
+    task: { id: "company-owner-abc", title: "company-1", updatedAt: 3, running: false, memberCount: 1 },
+  };
+  const { exports } = loadBundle(makeReact(), {
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, data: fixture }) }),
+    setInterval,
+    clearInterval,
+  });
+  const overlay = exports.__internals.OrgChartOverlay({
+    document: doc,
+    window: win,
+    apiBase: "/api/x",
+    t: (k) => k,
+    pollMs: 60000,
+    reportError: () => {},
+  });
+  for (let i = 0; i < 40 && !overlay.getData(); i++) await new Promise((r) => setTimeout(r, 10));
+  const picker = overlay.root.children[0].children[1];
+  const labels = [...picker.children].map((o) => String(o.textContent || ""));
+  assert.ok(labels.some((l) => l.startsWith("测试公司")), "company-owner 任务应显示公司名：" + labels.join("|"));
+  assert.ok(!labels.join("|").includes("company-1"), "不应显示 company-1：" + labels.join("|"));
+  assert.ok(labels.some((l) => l.startsWith("其他任务")), "其他任务标题保持：" + labels.join("|"));
+  overlay.destroy();
+});
+
 test("组织架构图：任务下拉切换任务，只显示该任务的参与者（?task=）", async () => {
   const calls = [];
   const { doc, win } = makeFakeDom();
