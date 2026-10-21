@@ -1226,8 +1226,9 @@ test("工作网：公司化数据渲染管理层→部门→员工，卡片带�
   const joined = texts.join(" | ");
   assert.ok(joined.includes("管理层"), "首层应显示管理层节点：" + joined);
   assert.ok(joined.includes("D02 插件部"), "应显示部门编号+名称：" + joined);
-  assert.ok(joined.includes("E0002"), "员工卡片应显示工号：" + joined);
-  assert.ok(joined.includes("M2"), "员工卡片应显示等级：" + joined);
+  assert.ok(joined.includes("E0003"), "运行中员工卡片应显示工号：" + joined);
+  assert.ok(joined.includes("P3"), "运行中员工卡片应显示等级：" + joined);
+  assert.ok(!joined.includes("E0002"), "空闲员工默认折叠，不应出现工号：" + joined);
   assert.ok(joined.includes("ocStaff 3"), "页脚应显示员工数：" + joined);
   assert.ok(joined.includes("ocDept 2"), "页脚应显示部门数：" + joined);
   assert.ok(joined.includes("测试公司"), "无任务时任务栏应显示公司名：" + joined);
@@ -1237,6 +1238,22 @@ test("工作网：公司化数据渲染管理层→部门→员工，卡片带�
   assert.equal(groupsRow.children.length, 2, "两个部门两簇");
   const chip = groupsRow.children[0].children[0];
   assert.equal(chip.getAttribute("title"), "负责人：插件架构", "部门色块 tooltip 应带负责人");
+
+  const membersBox = groupsRow.children[0].children[1];
+  assert.equal(membersBox.children[0].getAttribute("data-target"), "plugin-builder", "运行中员工排在最前");
+  const fold = membersBox.children[membersBox.children.length - 1];
+  assert.equal(fold.tagName, "BUTTON", "空闲折叠应渲染折叠按钮");
+  assert.equal(fold.textContent, "+1 ocFoldIdle", "折叠按钮应显示隐藏数量");
+  fold.dispatchEvent({ type: "click" });
+  const texts2 = [];
+  (function walk(n) {
+    if (!n) return;
+    if (typeof n.textContent === "string" && n.textContent && !n.children.length) texts2.push(n.textContent);
+    for (const c of n.children || []) walk(c);
+  })(overlay.root);
+  const joined2 = texts2.join(" | ");
+  assert.ok(joined2.includes("E0002"), "展开后应显示空闲员工工号：" + joined2);
+  assert.ok(joined2.includes("M2"), "展开后应显示空闲员工等级：" + joined2);
   overlay.destroy();
 });
 

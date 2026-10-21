@@ -127,6 +127,8 @@ await check("总架构组织架构图字样", () => {
     "company/op",
     "cpTab",
     "cpEmployeeCenter",
+    "ocFoldIdle",
+    "ocFoldHide",
     "cpModalChart",
     "cpModalMembers",
     "cpNewDept",

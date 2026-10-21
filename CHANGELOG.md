@@ -121,6 +121,12 @@
 - **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
 - **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
 
+### 变更：工作网改为横向层级视图 + 空闲员工折叠（v5.15）
+
+- 工作网（右栏）改为**从左至右展开**：管理层在最左，部门色块按序竖向堆叠在第二列，各部门员工卡片在第三列竖向排列；连线改为管理层右侧竖向主干 + 部门色块右侧竖向总线。
+- **空闲员工默认折叠**：仅渲染运行中或有进行中工作的员工，其余折叠为「+N 展开空闲成员」按钮，点击展开/收起（视图内临时状态，不落盘）。
+- 测试：client-bundle 41/41（工作网用例覆盖折叠与展开），全量 **483/483**，`node scripts/verify-company.mjs` 19/19。
+
 ### 调整：工作网「管理层」节点左对齐（v5.14.2/v5.14.3）
 
 - 右栏工作网竖向布局中，管理层节点固定为**顶部行最左侧**，部门行仍自左向右排布，连线自动改为跨越式折线。
