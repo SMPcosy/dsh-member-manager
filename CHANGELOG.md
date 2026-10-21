@@ -4,6 +4,13 @@
 
 本版本把插件从「名册管理覆盖层」升级为「单包公司化运行时」：不再依赖 DSH 原生团队层（`ctx.agentTeams`），只用 `ctx.agents` / `ctx.subagents` 承载两级组织（部门经理 → 员工）的派工闭环。
 
+### 文档：README 历史清理与截图更新（v5.27）
+
+- 删除 README 中 v0.2.4 及更早版本的「更新要点」历史段落（中英各一份），统一改为「历史版本更新要点见 CHANGELOG.md」。
+- 旧截图是 v0.2.x 界面（同步核心成员 / 新建小组 / 组织架构·已停用·未登记 页签），与 0.3.0 面板（总架构 / 员工中心 / 工作流 / 备份与更新）不符：替换为 4 张 0.3.0 产品图（由本插件公司化运行时的员工 Agent 实跑生成），并新增 `demo/screenshots/`（含安装图示的本地副本）。
+- README 图片改为 jsDelivr 绝对地址（`https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/...`）——npm 页面不解析仓库相对路径；同时去掉对 GitHub user-attachments 外链的依赖。
+- 同步修正 README 与实现不一致的历史描述（29 个宿主端工具、`company_admin` 12 个 action、安装/卸载命令、面板入口）。
+
 ### 新增：旧包名兼容转发包（v5.26）
 
 - 新增 `compat/dsh-plugin-member-manager/`：旧包名 `dsh-plugin-member-manager` 的转发包（0.3.1），`dependencies` 指向 `dsh-member-manager@^0.3.0`，`lib/index.js` / `lib/client.js` 用 `export *` 转发新包 host/client 入口，`cordis.patch.yml` 仍插入旧名条目。发布后老用户的旧包名安装命令继续可用（npm 不支持包名重定向，这是唯一可靠做法）。

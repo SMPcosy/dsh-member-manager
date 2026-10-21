@@ -87,58 +87,20 @@ Click a heading below to view **English** or **中文** .
 
 **面板**：设置页 →「成员管理」→ 共 4 个页签：总架构（默认）/ 员工中心 / 工作流 / 备份与更新。「总架构」是组织架构图：最高层「管理层」虚拟节点（M 通道人数，点击看只读 M 通道员工列表）+ 各部门领导 + 部门图框；「员工中心」页签是全量员工列表（下拉筛选：全体员工 / 单部门 / 未启用成员，按部门与等级排序）；点部门图框打开弹层，第一个页签看部门架构图，第二个页签「成员详情」里招聘；每个成员行点「人事管理」在下方展开详情页，可编辑**公司化资料**（3 列布局：显示名/岗位名称、技能（从 `/skills` 多选）/模型（从 `/models` 选或「使用默认」），第 3 列整列岗位职责条目≤8，保存写回公司化员工）并做通道 / 晋升 / 停用 / 调岗（员工行带 M/P 双通道徽章）；工具栏「新建部门」输入一句话即可自动解析部门名称与编制（原「一句话建组」已并入）；部门弹层底部可删除空部门；管理层节点可重命名，图表下方的编号规则与等级通道点「自定义」即可编辑（占位符有说明，等级可增删且删除后自动顺位），部门弹层页签行有「部门编辑」（名称/编号/编制/描述/接单范围/借调策略）。面板写操作走 `POST /company/op`，也可以继续用 `company_hire` / `company_admin`。
 
-## v0.2.4 更新要点
-
-- 🪟 **去掉图表自带的窗口框**：删掉标题栏、折叠、⇤/⇥、刷新按钮与外框，组织架构图直接铺在右侧边栏 tab 里，宽度随右栏变化，内部横向滚动。
-- 🧱 **并联—横向 / 串联—纵向**：同一层级的兄弟横向并排（并联），父子层级之间用纵向正交总线连接（串联）。三层结构为「大总管 → 分组色块（横向并排）→ 组内成员（横向并排）」。
-- 🎯 首次渲染自动把视口横向居中到大总管；任务分发 / 依赖的动态引导线改走目标卡片外侧过渡带，不再压住分组色块和卡片。
-- 🧪 测试保持 **228** 全绿。
-
-## v0.2.3 更新要点
-
-- 🧭 **组织架构图改为右侧边栏常驻 tab**：不再用浮在页面上的 fixed 覆盖层，而是注册为 DSH 右侧边栏（`sidebar.right`）的一个 tab，随右栏开合 / 分屏 / 全屏；关掉后可从会话头部的「组织架构」按钮重新打开。
-- 🌳 层级树与工作区卡片、动态引导线保持不变；窄面板里动态线改走左侧沟槽的括号式折线，避免贴边糊成一条竖线。
-- 🧹 移除拖拽、磁吸、浮动位置记忆等浮层遗留交互，只保留折叠。
-- 🧪 测试 225 → **228**（client-bundle 新增 tab 注册 / 降级 / 内嵌三条）。
-
-## v0.2.2 更新要点
-
-- 组织架构图默认常驻**右侧边栏**，改为「大总管 → 分组色块 → 组内成员」的**层级树**布局，正交连接线；工作区卡片与动态引导线保留。
-- 拖动不再自由漂浮，松手按落点吸附左右两侧；⇤/⇥ 可手动切换。
-
-## v0.2.1 更新要点
-
-- 🛡️ **名册自动备份**：每次写入名册后防抖 1.5s 自动快照，启动时再补一份；按「最近 N 份 + 最近 M 天每天一份」轮转，升级/回滚/误操作都能一键恢复（恢复前先自动备份当前状态）。
-- ⬆️ **分阶段自动更新**：`check → stage → apply → rollback` 四段式。下载解到 `{dataDir}/updates/<version>/` 并记 `pending`；**面板不会在线应用**，退出 DSH 后运行 `node scripts/apply-pending.mjs ... --yes` 才替换；遇到 lnk/junction 安装、包名不符、staged 内容非法等 5 道闸门直接拒绝并给出可操作提示，失败自动回滚。
-- 💬 **一句话建组**：面板「一句话建组」或工具 `member_group_from_text`，用自然语言描述小组与成员（示例已内置），先给**预览**（不落盘），确认后才创建小组并登记成员。
-- 🗺 **组织架构图悬浮层**：把名册层级固化成常驻浮层，独立显示在 DSH 主界面（不占插槽、不进页面路由）。每个成员一张工作区卡片（名字、模型、任务简介、token 用量、用时）；任务活动时按「Lead 分发 / 任务依赖」画动态流动引导线；浮层可拖动，拖到窗口左右边缘 48px 内自动磁吸，也可点 ⇤ / ⇥ 手动吸附，折叠/展开与位置写入 localStorage。
-- 📊 **可视化工作流面板**：新增「工作流」页签，显示每个成员的状态、当前工作包、token 消耗（入/出/缓存命中共）、用时、请求数，以及任务板进度；数据全部旁路采集，不阻塞会话。
-- 🔧 工具从 12 个增至 **16 个**，HTTP 路由 6 → **10** 条（新增 `GET /orgmap`），测试 134 → **225**。
-
----
-
-## v0.2.0 更新要点
-
-- 备份/分阶段更新/一句话建组/工作流面板首次落地；安全红线：不在 DSH 运行中替换自身（`applyMode=offline-script`）。
-
-## v0.1.2 更新要点
-
-- 🖥️ **编辑弹窗重排**：一屏放下（技能 / 模型并排两列、职责框收紧），「选择技能 / 选择模型」改为紧贴标题的高亮按钮。
-- 🧠 **模型改为弹层选择**：可搜索、按 provider 分组、显示上下文窗口、单选 + 「使用默认（清除覆盖）」，与技能弹层同一套交互。
-- 🛡️ **宿主更健壮**：HTTP 路由统一兜底（写盘失败返回 500 + `INTERNAL_ERROR`，不再伪装成 400），`/health` 校验 method。
-- ⌨️ **交互修复**：弹层开着时 Esc 只关弹层；保存中不响应遮罩关闭；显示名为空时禁用保存；保存部分失败会自动回读真实状态。
-- 🧹 清理未使用的文案与样式键；测试从 130 增至 **134**，并新增静态交叉审计脚本。
+> 历史版本更新要点见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ---
 
 ## 截图
 
+> 以下为 v0.3.0 产品图（由本插件公司化运行时的员工 Agent 生成），不是旧版界面截图。
 
-<img width="2196" height="1640" alt="DSH Member Manager01" src="https://github.com/user-attachments/assets/12b22bc4-97dc-41a7-a04c-3e6d1af3c5e6" />
-
-<img width="2196" height="1640" alt="DSH Member Manager07" src="https://github.com/user-attachments/assets/d9858133-c497-4640-9919-0aa9696ff2c7" />
-
-<img width="2196" height="1640" alt="DSH Member Manager02" src="https://github.com/user-attachments/assets/7ac1a139-412d-4922-b599-a2e59c583bf9" />
+<p align="center">
+  <a href="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/01-overview.png"><img src="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/01-overview.png" width="24%" alt="总览" /></a>
+  <a href="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/02-org-channels.png"><img src="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/02-org-channels.png" width="24%" alt="组织与双通道" /></a>
+  <a href="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/03-panel-brief.png"><img src="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/03-panel-brief.png" width="24%" alt="面板与一句话建部门" /></a>
+  <a href="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/04-dispatch-data.png"><img src="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/04-dispatch-data.png" width="24%" alt="派工与数据" /></a>
+</p>
 
 ---
 ## 功能特性
@@ -151,18 +113,14 @@ Click a heading below to view **English** or **中文** .
 
 - 🔄 **停用 / 恢复**：软删除，保留历史记录，随时恢复。
 
-<img width="2196" height="1640" alt="DSH Member Manager03" src="https://github.com/user-attachments/assets/c6a603a8-b4fa-4495-a785-0fb65a66ae90" />
 
 - ⭐ **技能赋予**：从本机技能目录选择（可搜索多选），也支持自定义标签。
 
-<img width="2196" height="1640" alt="DSH Member Manager05" src="https://github.com/user-attachments/assets/d544aa19-6aae-4186-9560-fd9e56193696" />
 
-<img width="2196" height="1640" alt="DSH Member Manager06" src="https://github.com/user-attachments/assets/78bd87d1-8922-4dd2-8fde-d6457ac73dc6" />
 
 
 - 🧠 **按成员模型覆盖**：每个成员可单独指定 `provider/model`，下一次请求即生效；清空即恢复默认。这是通过官方 `agent/request` 水位接缝实现，**真生效**。
 
-<img width="2196" height="1640" alt="DSH Member Manager04" src="https://github.com/user-attachments/assets/b40fe472-cf54-4a8e-b27c-f17cae4c41b6" />
 
 
 - 📊 **Web 面板**：总架构组织架构图、员工中心、部门人事管理（公司化资料 + 通道/晋升/停用/调岗）、工作流与备份/更新。
@@ -181,7 +139,7 @@ dsh plugin --profile desktop add dsh-member-manager
 
 安装后**必须重启 DSH**。也可以在 DSH 插件市场搜索 `dsh-member-manager` 安装。
 
-<img width="2558" height="1640" alt="member-manager​安装图示" src="https://github.com/user-attachments/assets/b0b211a3-898f-4dc2-9a17-d13a4671581a" />
+<img width="2558" height="1640" alt="member-manager 安装图示" src="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/05-install-guide.png" />
 
 
 ### 方式 B：本地源码加载（开发/自用）
@@ -407,57 +365,20 @@ Precedence: persisted `numbering` in `company.json` (e.g. via `company_admin.set
 
 **Panel**: Settings → "Member Manager" → 4 tabs: Overall architecture (default) / Employee center / Workflow / Backups & updates. The "Overall architecture" tab is the org chart: a top-level virtual "Management" node (M-channel count; click to see a read-only list of M-channel employees), department leader nodes and department boxes; the "Employee center" tab is the full employee list (dropdown filter: all / one department / disabled, sorted by department and level); click a box to open the department modal — the first tab shows the department chart, the second lists members; each member row has a single "Personnel" button that expands an inline detail page where the **company profile** is editable in a 3-column layout (display name/title | skills picker/model override picker | duties up to 8 entries filling the third column), saved to the company employee, and the four actions (channels / promote / disable / transfer) live; the "New department" button parses a one-line description into a name and headcount (the old one-line group builder is merged in), and the department modal can delete an empty department; the Management node can be renamed, numbering rules and level channels are editable below the chart, and the department modal has a department-edit form. Panel writes go through `POST /company/op`; `company_hire` / `company_admin` remain available.
 
-## v0.2.4 highlights
-
-- 🪟 **No more chart chrome**: the panel no longer renders its own window frame, title bar, collapse, ⇤/⇥ or refresh buttons — the chart fills the right-sidebar tab, follows the rail width and scrolls horizontally inside.
-- 🧱 **Parallel across, serial down**: siblings of one level line up horizontally while parent→child relations run vertically through orthogonal buses. Three levels — lead → group chips (side by side) → members (side by side).
-- 🎯 The viewport is centered on the lead on first paint; task dispatch / dependency edges route through the gap beside the target card so they no longer cross group chips or cards.
-- 🧪 Tests stay at **228**, all green.
-
-## v0.2.3 highlights
-
-- 🧭 **The org chart now lives in the right sidebar as a persistent tab** instead of a fixed overlay on `document.body`. It follows the sidebar's open/split/fullscreen states; after closing, reopen it from the "Org chart" button in the conversation header.
-- 🌳 The hierarchical tree, member cards and animated guide lines are unchanged; in the narrow panel the dynamic links now use bracket-style polylines in the left gutter so they no longer collapse into an edge line.
-- 🧹 Floating-layer leftovers (drag, snap-to-side, placement memory) are gone; only collapse remains.
-- 🧪 Tests 225 → **228** (client-bundle: tab registration / graceful degradation / embedded mount).
-
-## v0.2.2 highlights
-
-- The org chart now docks to the **right sidebar** by default and renders a **hierarchical tree** (lead → colored group nodes → members) with orthogonal connectors; member cards and animated guide lines are kept.
-- Dragging no longer floats freely: on release it snaps to the nearest side; use ⇤/⇥ to switch manually.
-
-## v0.2.1 highlights
-
-- 🛡️ **Automatic roster backups**: a debounced snapshot ~1.5s after every registry write, plus one at boot; rotated by "latest N copies + one per day for the latest M days". Restore any snapshot in one click (the current state is backed up first).
-- ⬆️ **Staged self-update**: `check → stage → apply → rollback`. The tarball is unpacked into `{dataDir}/updates/<version>/` and recorded as *pending*; the panel **never** applies in-process — quit DSH and run `node scripts/apply-pending.mjs ... --yes`. Five safety gates (junction/link install, package-name mismatch, invalid staged payload, ...) refuse with actionable messages, and a failed apply rolls back automatically.
-- 💬 **One-sentence group creation**: describe the group and its members in natural language (built-in example); you get a **preview** first, and nothing is written until you confirm.
-- 🗺 **Org-chart overlay**: the roster hierarchy becomes a always-on floating layer rendered straight onto the page (no slot, no route). Each member gets a workspace card (name, model, current task, token usage, elapsed time); active work draws animated flow lines for Lead dispatch and task dependencies; drag it anywhere, snap to either side within 48px, collapse, and the placement persists in `localStorage`.
-- 📊 **Visual workflow panel**: a new "Workflow" tab shows each member's status, current work package, token usage (input/output/cache hit), elapsed time, request count, and the task board; everything is collected off the hot path and never blocks a session.
-- 🔧 Tools 12 → **16**, HTTP routes 6 → **10** (`GET /orgmap`), tests 134 → **225**.
-
----
-
-## v0.2.0 highlights
-
-- Backups, staged updates, one-sentence group creation and the workflow panel landed; hard rule: never replace the plugin while DSH is running (`applyMode=offline-script`).
-
-## v0.1.2 highlights
-
-- 🖥️ **Edit modal reworked** to fit one screen (skills / model side by side, shorter duties box); "Pick skills / Pick model" are highlighted buttons right next to their section titles.
-- 🧠 **Model picking is now a modal**: searchable, grouped by provider, shows context window, single-select radio + "Use default (clear override)" — same interaction as the skills picker.
-- 🛡️ **More robust host**: all HTTP routes are guarded (disk failures now return 500 + `INTERNAL_ERROR` instead of a misleading 400); `/health` validates the method.
-- ⌨️ **Interaction fixes**: Esc closes the sub-picker first; overlay click is ignored while saving; Save is disabled until a display name is entered; a partially failed save re-reads the real state.
-- 🧹 Dead i18n/style keys removed; tests grew from 130 to **134**, plus a new static cross-audit script.
+> See [CHANGELOG.md](./CHANGELOG.md) for historical release highlights.
 
 ---
 
 ## Screenshots
 
-<img width="2196" height="1640" alt="DSH Member Manager01" src="https://github.com/user-attachments/assets/12b22bc4-97dc-41a7-a04c-3e6d1af3c5e6" />
+> v0.3.0 product visuals (generated by this plugin's own company-runtime employee agents), replacing the old v0.2 screenshots.
 
-<img width="2196" height="1640" alt="DSH Member Manager07" src="https://github.com/user-attachments/assets/d9858133-c497-4640-9919-0aa9696ff2c7" />
-
-<img width="2196" height="1640" alt="DSH Member Manager02" src="https://github.com/user-attachments/assets/7ac1a139-412d-4922-b599-a2e59c583bf9" />
+<p align="center">
+  <a href="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/01-overview.png"><img src="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/01-overview.png" width="24%" alt="Overview" /></a>
+  <a href="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/02-org-channels.png"><img src="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/02-org-channels.png" width="24%" alt="Org & dual channels" /></a>
+  <a href="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/03-panel-brief.png"><img src="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/03-panel-brief.png" width="24%" alt="Panel & one-line department" /></a>
+  <a href="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/04-dispatch-data.png"><img src="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/04-dispatch-data.png" width="24%" alt="Dispatch & data" /></a>
+</p>
 
 ---
 ## Features
@@ -471,17 +392,13 @@ Precedence: persisted `numbering` in `company.json` (e.g. via `company_admin.set
 
 - 🔄 **Retire / restore**: soft deletes keep history; restore anytime.
 
-<img width="2196" height="1640" alt="DSH Member Manager03" src="https://github.com/user-attachments/assets/c6a603a8-b4fa-4495-a785-0fb65a66ae90" />
 
 - ⭐ **Skills**: pick from the local skill catalog (searchable multi‑select), or type custom tags.
 
-<img width="2196" height="1640" alt="DSH Member Manager05" src="https://github.com/user-attachments/assets/d544aa19-6aae-4186-9560-fd9e56193696" />
 
-<img width="2196" height="1640" alt="DSH Member Manager06" src="https://github.com/user-attachments/assets/78bd87d1-8922-4dd2-8fde-d6457ac73dc6" />
 
 - 🧠 **Per‑member model override**: set a `provider/model` for each member that takes effect on the next request; clearing reverts to default. Implemented through the official `agent/request` waterfall seam — it **really works**.
 
-<img width="2196" height="1640" alt="DSH Member Manager04" src="https://github.com/user-attachments/assets/b40fe472-cf54-4a8e-b27c-f17cae4c41b6" />
 
 
 - 📊 **Web panel**: overall-architecture chart, employee center, per-employee HR details (company profile + channels/promote/fire/move), workflow and maintenance tabs.
@@ -500,7 +417,7 @@ dsh plugin --profile desktop add dsh-member-manager
 
 Restart DSH afterwards. You can also search for `dsh-member-manager` in the DSH plugin market.
 
-<img width="2558" height="1640" alt="member-manager​安装图示" src="https://github.com/user-attachments/assets/b0b211a3-898f-4dc2-9a17-d13a4671581a" />
+<img width="2558" height="1640" alt="member-manager 安装图示" src="https://cdn.jsdelivr.net/npm/dsh-member-manager@0.3.0/demo/screenshots/05-install-guide.png" />
 
 
 ### Option B: load from local source (dev / self‑hosted)
