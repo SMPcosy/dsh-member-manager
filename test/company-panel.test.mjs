@@ -1151,14 +1151,15 @@ test("CompanyOrgPanel：打开新建部门对话框（描述栏示例占位、�
   assert.equal(buttonByLabel(tree, t("cpCreateDept")).length, 0, "创建按钮只在预览弹窗出现");
 });
 
-test("新建部门：点「创建预览」自动解析一句话并打开预览弹窗（纯客户端，不发请求）", () => {
+test("新建部门：点「创建预览」自动解析一句话并打开预览弹窗（纯客户端，不发写请求）", async () => {
   const calls = [];
   const { t, seed, tree } = renderCompany({
     newDeptOpen: true,
     newDeptDraft: { id: "", name: "", charter: "", capacity: "", brief: "新建市场部，编制 5 人" },
     fetch: overviewFetch(calls),
   });
-  buttonByLabel(tree, t("cpPreviewDept"))[0].onClick();
+  await buttonByLabel(tree, t("cpPreviewDept"))[0].onClick();
+  await tick();
   assert.equal(calls.filter((c) => c.url.endsWith("/company/op")).length, 0, "解析是纯客户端逻辑");
   assert.equal(seed[22].name, "市场");
   assert.equal(seed[22].capacity, "5");
@@ -1187,8 +1188,9 @@ test("新建部门：点「创建预览」自动解析一句话并打开预览�
   assert.deepEqual(names, ["新员工 1", "新员工 2", "新员工 3", "新员工 4", "新员工 5"], "预览应列出预生成员工姓名");
 });
 
-test("新建部门：预览员工只是预设，点「创建」只 POST createDepartment，不写员工", async () => {
+test("新建部门：点「创建」先建部门再逐个创建员工（岗位/技能/模型一并写入）", async () => {
   const calls = [];
+  const catalog = ["codebase-design", "code-review", "tdd", "implement", "office-xlsx"];
   const { t, seed, tree } = renderCompany({
     newDeptOpen: true,
     newDeptPreview: {
@@ -1197,18 +1199,32 @@ test("新建部门：预览员工只是预设，点「创建」只 POST createDe
       charter: "负责市场",
       capacity: "2",
       employees: [
-        { key: "k1", displayName: "市场专员甲", title: "工程师", skills: ["编码实现"], model: "", channel: "P", level: "P4" },
-        { key: "k2", displayName: "市场经理乙", title: "架构师", skills: ["系统设计"], model: "", channel: "M", level: "M1" },
+        { key: "k1", displayName: "市场专员甲", title: "架构师", duties: ["机制"], skills: ["codebase-design", "code-review"], model: "deepseek-v4-pro-0813", channel: "P", level: "P4" },
+        { key: "k2", displayName: "市场经理乙", title: "工程师", duties: [], skills: ["implement"], model: "", channel: "M", level: "M1" },
       ],
     },
-    fetch: companyFetch(calls, { opResult: { ok: true, departmentId: "dept-market", code: "D03" } }),
+    fetch: companyFetch(calls, { opResult: { ok: true, departmentId: "dept-market", code: "D03" }, skills: catalog.map((name) => ({ name, description: "", source: "local" })) }),
   });
   await buttonByLabel(tree, t("cpCreateDept"))[0].onClick();
   await tick();
 
   const ops = calls.filter((c) => c.url.endsWith("/company/op")).map((c) => c.body);
-  assert.deepEqual(ops.map((row) => row.action), ["createDepartment"], "预设员工不写入后台：" + JSON.stringify(ops));
-  assert.equal(ops[0].args.capacity, 2);
+  assert.equal(ops.length, 3, "应发 1 次建部门 + 2 次建员工：" + JSON.stringify(ops));
+  assert.equal(ops[0].action, "createDepartment");
+  assert.equal(ops[1].action, "createEmployee");
+  assert.equal(ops[1].args.displayName, "市场专员甲");
+  assert.equal(ops[1].args.department, "dept-market");
+  assert.equal(ops[1].args.role, "staff");
+  assert.equal(ops[1].args.kind, "permanent");
+  assert.equal(ops[1].args.channel, "P");
+  assert.equal(ops[1].args.level, "P4");
+  assert.equal(ops[1].args.title, "架构师");
+  assert.equal(JSON.stringify(ops[1].args.duties), JSON.stringify(["机制"]));
+  assert.equal(JSON.stringify(ops[1].args.skills), JSON.stringify(["codebase-design", "code-review"]));
+  assert.equal(ops[1].args.model, "deepseek-v4-pro-0813");
+  assert.equal(ops[2].args.displayName, "市场经理乙");
+  assert.equal(ops[2].args.channel, "M");
+  assert.equal(ops[2].args.level, "M1");
   assert.equal(seed[6], false, "成功后应关闭对话框");
   assert.equal(seed[22], null, "成功后应清空预览状态");
   assert.ok(calls.filter((c) => c.url.endsWith("/company/overview")).length >= 1, "成功后应刷新 overview");
@@ -1730,6 +1746,20 @@ test("cpBriefRolePreset：覆盖常见电脑办公岗位，并模拟岗位技能
   assert.equal(none.title, "");
   assert.equal(none.model, "");
   assert.equal(JSON.stringify(none.skills), "[]");
+});
+
+test("cpMapCatalogSkills：预设技能从已安装技能目录中拉取", () => {
+  const { exports } = loadBundle(makeReact());
+  const map = exports.__internals.cpMapCatalogSkills;
+  const catalog = ["codebase-design", "domain-modeling", "code-review", "implement", "tdd", "office-xlsx"];
+  assert.equal(
+    JSON.stringify(map(["系统设计", "代码审阅", "接口设计"], catalog)),
+    JSON.stringify(["codebase-design", "domain-modeling", "code-review", "implement"]),
+    "应按角色技能匹配目录中的真实技能",
+  );
+  assert.equal(JSON.stringify(map(["插画绘制"], catalog)), "[]", "目录里没有匹配技能时不硬造");
+  assert.equal(JSON.stringify(map(["系统设计"], [])), JSON.stringify(["系统设计"]), "目录不可用时回退预设标签");
+  assert.equal(map(["系统设计", "代码审阅", "接口设计", "缺陷跟踪"], catalog).length, 4, "最多 4 条，去重");
 });
 
 test("cpParseBrief：解析一句话建部门的名称/编制/说明；解析失败时名称取首句", () => {

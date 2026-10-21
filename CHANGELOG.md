@@ -121,6 +121,14 @@
 - **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
 - **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
 
+### 变更：预设技能改从已安装技能列表拉取；点「创建」真正创建部门与员工（v5.23）
+
+- **技能取自本机技能目录**：打开「创建预览」时先 `GET /skills`（模块级缓存一次），把角色技能标签经 `CP_SKILL_LABEL_CATALOG` 映射为真实技能名——如系统设计→`codebase-design`、代码审阅→`code-review`、接口设计→`implement`、单元测试→`tdd`、数据分析→`office-xlsx`、文案撰写→`writing-shape`、培训→`teach`、团队管理→`chief-of-staff` 等；每行最多 4 条、去重；技能服务不可用时回退预设标签，不阻断流程。
+- **创建即落库**：点「创建」先建部门，再逐个 `createEmployee`，把**姓名/岗位/职责/技能/模型/通道/等级**一并写入（role=staff、kind=permanent）；不再是「只预设不写入」。
+- **部分失败可续建**：部门创建成功但个别员工失败时，预览保持打开并提示 `cpPreviewEmpFailed`（失败数/总数 + 首个错误），已建员工标 ✓、`createdId` 记录部门，重试只补建失败者；全部成功才关闭并刷新；部门已建后「返回修改」与行编辑禁用。
+- **提示文案**：`cpPlannedHint` 改为「技能来自本机已安装技能列表…点创建会连同员工一并写入」。
+- **测试**：company-panel 72（新增「点创建先建部门再逐个创建员工（岗位/技能/模型写入）」「cpMapCatalogSkills 从目录拉取」）；全量 488/488、verify 19/19。
+
 ### 改进：补充创意/平面设计/文案等岗位预设（v5.22）
 
 - **新增 10 个创意与内容岗位**：平面设计师（海报设计/版式排版/印刷规范）、品牌设计师（品牌规范/VI 设计/视觉统一）、插画师、创意策划（创意提案/概念提炼/方案撰写）、编剧（脚本创作/分镜设计/台词打磨）、3D 设计师（三维建模/材质渲染/灯光渲染）、动画师、摄影师、文案编辑、内容策划；模型档位与既有规则一致（创意/设计类 pro，文案/摄影/内容类 flash）。
