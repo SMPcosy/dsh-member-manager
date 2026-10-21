@@ -1709,6 +1709,16 @@ test("cpBriefRolePreset：覆盖常见电脑办公岗位，并模拟岗位技能
     ["采购专员", "供应链专员", "deepseek-v4.1-flash-1017"],
     ["审计", "审计师", "deepseek-v4-pro-0813"],
     ["研究员", "研究员", "deepseek-v4-pro-0813"],
+    ["平面设计", "平面设计师", "deepseek-v4-pro-0813"],
+    ["创意负责提案", "创意策划", "deepseek-v4-pro-0813"],
+    ["文案编写", "文案编辑", "deepseek-v4.1-flash-1017"],
+    ["插画师", "插画师", "deepseek-v4-pro-0813"],
+    ["3D 建模", "3D 设计师", "deepseek-v4-pro-0813"],
+    ["品牌视觉", "品牌设计师", "deepseek-v4-pro-0813"],
+    ["编剧负责脚本", "编剧", "deepseek-v4-pro-0813"],
+    ["摄影", "摄影师", "deepseek-v4.1-flash-1017"],
+    ["动画动效", "动画师", "deepseek-v4-pro-0813"],
+    ["内容策划负责选题", "内容策划", "deepseek-v4.1-flash-1017"],
   ];
   for (const [text, title, model] of cases) {
     const got = preset(text);
