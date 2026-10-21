@@ -114,7 +114,7 @@
 
 ### 变更：移除导入名册按钮 + 人事详情资料区 3 列布局（v5.10）
 
-- **面板**：总架构工具栏删除「导入名册资料」按钮（`cpImportProfiles`/`cpImportDone` 文案、`importRosterProfiles()` 调用、`syncResult`/`syncError` 状态一并删除；host 侧 action 保留）；「人事管理」详情页的「公司化资料」改为 3 列栅格——第 1 行「中文显示名 / 岗位名称」，第 2 行「技能选择 / 模型选择」，第 3 列（跨两行）整列留给「岗位职责」条目编辑。
+- **面板**：总架构工具栏删除「导入名册资料」按钮（`cpImportProfiles`/`cpImportDone` 文案、`importRosterProfiles()` 调用、`syncResult`/`syncError` 状态一并删除；host 侧 action 保留）；「人事管理」详情页的「公司化资料」改为 3 列栅格——第 1 行「中文显示名 / 岗位名称」，第 2 行「技能选择 / 模型选择」，第 3 列（跨两行）整列留给「岗位职责」条目编辑；前两列压缩为 `minmax(120px,190px)`，剩余宽度全部给岗位职责列。
 - **测试**：`test/company-panel.test.mjs` 同步（移除导入按钮断言与 sync 状态位，新增 3 列布局源码断言）；全量 **459/459**，`node scripts/verify-company.mjs` **19/19**。
 
 ### 调整：名册部门并入调岗、岗位职责条目化（v5.7）

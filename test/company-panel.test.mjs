@@ -667,7 +667,7 @@ test("源码：v5 总架构结构——默认 company、管理层节点、/compa
   assert.match(src, /setEditor\(hrEmployeeId != null \? \{ kind: "hr", employeeId: hrEmployeeId \} : null\)/);
   assert.match(src, /opPost\("updateEmployeeProfile"/);
   // v5.10：公司化资料 3 列布局——显示名/岗位名称第一行，技能/模型第二行，岗位职责占第 3 列两行
-  assert.match(src, /hrGrid: { display: "grid", gridTemplateColumns: "repeat\(3, minmax\(0, 1fr\)\)"/);
+  assert.match(src, /hrGrid: { display: "grid", gridTemplateColumns: "minmax\(120px, 190px\) minmax\(120px, 190px\) minmax\(0, 1fr\)"/);
   assert.match(src, /gridColumn: "3", gridRow: "1 \/ span 2"/);
   assert.equal(src.includes('t("cpImportProfiles")'), false, "导入名册资料按钮应移除");
 
