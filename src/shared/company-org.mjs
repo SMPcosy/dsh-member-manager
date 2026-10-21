@@ -81,41 +81,83 @@ export function normalizeManagementName(value) {
   return value.trim().slice(0, MANAGEMENT_NAME_MAX);
 }
 
-/**
- * v5.11：等级通道目录的「显示名覆盖」——只允许改 label/description 与各级 name，
- * 等级代号(code)以 base 为准（不可增删），保证既有员工的 level 引用始终有效。
- * 返回与 DEFAULT_LEVELS 同形的完整对象；非法值回退 base。
- */
-export function normalizeLevelsOverride(raw, base = DEFAULT_LEVELS) {
-  const src = raw && typeof raw === "object" ? raw : {};
+const LEVEL_CODE_RE = /^([MP])([1-9]\d*)$/;
+
+function cloneLevels(base = DEFAULT_LEVELS) {
   const out = {};
-  for (const channel of [LEVEL_CHANNEL.MANAGEMENT, LEVEL_CHANNEL.PROFESSIONAL]) {
-    const baseCh = (base && base[channel]) || DEFAULT_LEVELS[channel];
-    const found = src[channel] && typeof src[channel] === "object" ? src[channel] : {};
-    const label =
-      typeof found.label === "string" && found.label.trim()
-        ? found.label.trim().slice(0, 20)
-        : baseCh.label;
-    const description =
-      typeof found.description === "string" && found.description.trim()
-        ? found.description.trim().slice(0, 160)
-        : baseCh.description || "";
-    const nameByCode = new Map();
-    for (const lv of Array.isArray(found.levels) ? found.levels : []) {
-      if (!lv || typeof lv !== "object" || typeof lv.code !== "string") continue;
-      const name = typeof lv.name === "string" ? lv.name.trim().slice(0, 24) : "";
-      if (name) nameByCode.set(lv.code, name);
-    }
+  for (const channel of ["M", "P"]) {
+    const ch = (base && base[channel]) || DEFAULT_LEVELS[channel];
     out[channel] = {
-      label,
-      description,
-      levels: (Array.isArray(baseCh.levels) ? baseCh.levels : []).map((lv) => ({
-        code: lv.code,
-        name: nameByCode.get(lv.code) || lv.name,
-      })),
+      label: ch.label,
+      description: ch.description || "",
+      levels: (Array.isArray(ch.levels) ? ch.levels : []).map((lv) => ({ code: lv.code, name: lv.name })),
     };
   }
   return out;
+}
+
+/**
+ * v5.12：等级通道目录校验——等级可增删（代号必须是「通道字母 + 序号」，如 M1、P12），
+ * 每个通道至少保留 1 级；返回 {ok:true, levels} 或 {ok:false, code, message, errors}。
+ */
+export function validateLevelsDirectory(raw, base = DEFAULT_LEVELS) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const errors = [];
+  const out = {};
+  for (const channel of ["M", "P"]) {
+    const baseCh = (base && base[channel]) || DEFAULT_LEVELS[channel];
+    const found = src[channel] && typeof src[channel] === "object" ? src[channel] : null;
+    const label =
+      found && typeof found.label === "string" && found.label.trim()
+        ? found.label.trim().slice(0, 20)
+        : baseCh.label;
+    const description =
+      found && typeof found.description === "string" && found.description.trim()
+        ? found.description.trim().slice(0, 160)
+        : baseCh.description || "";
+    const rawLevels = found && Array.isArray(found.levels) ? found.levels : null;
+    if (!rawLevels) {
+      out[channel] = {
+        label,
+        description,
+        levels: (Array.isArray(baseCh.levels) ? baseCh.levels : []).map((lv) => ({ code: lv.code, name: lv.name })),
+      };
+      continue;
+    }
+    if (rawLevels.length === 0) errors.push(`${channel} 通道至少保留一个等级`);
+    const seen = new Set();
+    const cleaned = [];
+    for (const lv of rawLevels) {
+      const code = lv && typeof lv === "object" && typeof lv.code === "string" ? lv.code.trim() : "";
+      const m = LEVEL_CODE_RE.exec(code);
+      if (!m || m[1] !== channel) {
+        errors.push(`等级代号 ${code || "(空)"} 格式非法（应为 ${channel}1、${channel}2 …）`);
+        continue;
+      }
+      if (seen.has(code)) {
+        errors.push(`等级代号 ${code} 重复`);
+        continue;
+      }
+      seen.add(code);
+      const name = typeof lv.name === "string" ? lv.name.trim().slice(0, 24) : "";
+      if (!name) errors.push(`等级 ${code} 名称不能为空`);
+      cleaned.push({ code, name: name || code });
+    }
+    cleaned.sort((a, b) => Number(a.code.slice(1)) - Number(b.code.slice(1)));
+    out[channel] = {
+      label,
+      description,
+      levels: cleaned.length ? cleaned : (Array.isArray(baseCh.levels) ? baseCh.levels : []).map((lv) => ({ code: lv.code, name: lv.name })),
+    };
+  }
+  if (errors.length) return { ok: false, code: "E_INVALID_LEVELS", message: errors[0], errors };
+  return { ok: true, levels: out };
+}
+
+/** v5.11/v5.12：等级通道目录覆盖；非法时整体回退 base。 */
+export function normalizeLevelsOverride(raw, base = DEFAULT_LEVELS) {
+  const result = validateLevelsDirectory(raw, base);
+  return result.ok ? result.levels : cloneLevels(base);
 }
 
 const CHANNELS = new Set(Object.values(LEVEL_CHANNEL));
@@ -339,10 +381,16 @@ function sortChannels(list) {
   return [...list].sort((a, b) => CHANNEL_ORDER[a.channel] - CHANNEL_ORDER[b.channel]);
 }
 
-function defaultLevelFor(channel, role) {
+function defaultLevelFor(channel, role, levels = DEFAULT_LEVELS) {
   const preferred = DEFAULT_EMPLOYEE_LEVEL[role];
-  if (typeof preferred === "string" && preferred.startsWith(channel)) return preferred;
-  return channel === LEVEL_CHANNEL.MANAGEMENT ? DEFAULT_EMPLOYEE_LEVEL.manager : DEFAULT_EMPLOYEE_LEVEL.staff;
+  const track = levels?.[channel]?.levels;
+  const has = (code) => !Array.isArray(track) || track.some((l) => l.code === code);
+  const first = () => (Array.isArray(track) && track.length ? track[0].code : undefined);
+  if (!(typeof preferred === "string" && preferred.startsWith(channel))) {
+    const legacy = channel === LEVEL_CHANNEL.MANAGEMENT ? DEFAULT_EMPLOYEE_LEVEL.manager : DEFAULT_EMPLOYEE_LEVEL.staff;
+    return has(legacy) ? legacy : (first() ?? legacy);
+  }
+  return has(preferred) ? preferred : (first() ?? preferred);
 }
 
 /** 主通道：含 M 即 M，否则 P（docs/21 §1.1）。 */
@@ -374,7 +422,7 @@ export function normalizeChannels(employeeLike, levels = DEFAULT_LEVELS) {
     }
     let lv = level;
     if (!track.some((l) => l?.code === lv)) {
-      lv = defaultLevelFor(channel, role);
+      lv = defaultLevelFor(channel, role, levels);
       if (level !== undefined && level !== null && level !== "") {
         warnings.push(`员工 ${id} ${channel} 等级非法（${level}），回退默认 ${lv}`);
       }
@@ -669,12 +717,13 @@ export function createEmployee(
 
   // 通道（docs/21 §1.1）：显式 channels 优先；否则旧 channel/level；否则按岗位默认。
   const expectedChannel = channelForRole(r);
+  const catalog = (c && c.levels) || DEFAULT_LEVELS;
   let channelList;
   if (Array.isArray(channels)) {
     if (channels.length === 0) throw orgError("至少保留一个通道", "E_LAST_CHANNEL");
     channelList = channels.map((item) => {
       if (!item || !CHANNELS.has(item.channel)) throw orgError(`非法 channel: ${item?.channel}`, "E_INVALID_CHANNEL");
-      const resolved = resolveLevel(item.channel, item.level ?? defaultLevelFor(item.channel, r));
+      const resolved = resolveLevel(item.channel, item.level ?? defaultLevelFor(item.channel, r, catalog), catalog);
       return { channel: resolved.channel, level: resolved.code };
     });
     if (new Set(channelList.map((x) => x.channel)).size !== channelList.length) {
@@ -686,7 +735,7 @@ export function createEmployee(
     if (ch !== expectedChannel) {
       throw orgError(`channel ${ch} 与岗位 ${r} 不一致（应 ${expectedChannel}）`, "E_CHANNEL_CONFLICT");
     }
-    const resolved = resolveLevel(ch, level ?? defaultLevelFor(ch, r));
+    const resolved = resolveLevel(ch, level ?? defaultLevelFor(ch, r, catalog), catalog);
     channelList = [{ channel: resolved.channel, level: resolved.code }];
   }
   if (r === EMPLOYEE_ROLE.MANAGER && !channelList.some((x) => x.channel === LEVEL_CHANNEL.MANAGEMENT)) {

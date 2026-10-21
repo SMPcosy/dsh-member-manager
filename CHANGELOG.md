@@ -121,6 +121,13 @@
 - **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
 - **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
 
+### 新增：总架构自定义能力增强——占位符说明、等级可增删、按钮改名「自定义」（v5.12）
+- **编号规则说明**：自定义编号规则弹层新增占位符用法说明（`{seq}`/`{seq:N}`/`{dept}`/`{channel}`/`{level}` 含义与示例，多行渲染）。
+- **等级梯度可增删**：等级通道弹层每级可删除（仅剩 1 级时隐藏）、每通道可添加等级（代号自动递增），保存走 `setLevels`；shared 新增 `validateLevelsDirectory` 校验代号格式/重复/空名/每通道 ≥1 级。
+- **引用保护**：删除仍被员工使用的等级返回 `E_LEVEL_IN_USE` 并提示员工名；`defaultLevelFor`/`createEmployee` 改为按 `company.levels` 目录取等级。
+- **按钮改名**：meta 卡两个入口按钮改为「自定义」（`cpCustomize`）。
+- **测试**：company-levels 42、company-runtime 48、company-panel 66；全量 474/474；`node scripts/verify-company.mjs` 19/19。
+
 ### 变更：移除导入名册按钮 + 人事详情资料区 3 列布局（v5.10）
 
 - **面板**：总架构工具栏删除「导入名册资料」按钮（`cpImportProfiles`/`cpImportDone` 文案、`importRosterProfiles()` 调用、`syncResult`/`syncError` 状态一并删除；host 侧 action 保留）；「人事管理」详情页的「公司化资料」改为 3 列栅格——第 1 行「中文显示名 / 岗位名称」，第 2 行「技能选择 / 模型选择」，第 3 列（跨两行）整列留给「岗位职责」条目编辑；前两列压缩为 `minmax(120px,190px)`，剩余宽度全部给岗位职责列。

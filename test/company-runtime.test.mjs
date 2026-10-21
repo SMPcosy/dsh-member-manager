@@ -995,34 +995,85 @@ test("POST /company/op setNumbering 持久化编号规则；非法模板拒绝",
   await rt2.shutdown();
 });
 
-test("POST /company/op setLevels 只改名不增删；未知代号与空名拒绝", async () => {
+test("POST /company/op setLevels 可增删等级：名称可改、可新增等级；被引用等级不可删；非法代号/空名拒绝", async () => {
   const dataDir = `/tmp/test-dsh-member-manager-levels-${Date.now()}`;
   const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
   await rt.boot();
   const op = findOpRoute(rt);
   const base = rt.view().levels;
-  const payload = (mutateName) => ({
-    M: { label: base.M.label, levels: base.M.levels.map((lv) => ({ code: lv.code, name: lv.code === "M2" ? mutateName : lv.name })) },
-    P: { label: base.P.label, levels: base.P.levels.map((lv) => ({ code: lv.code, name: lv.name })) },
+  const mapLevels = (fn) => ({
+    M: { label: base.M.label, levels: base.M.levels.map(fn) },
+    P: { label: base.P.label, levels: base.P.levels.map(fn) },
   });
 
-  const res = await op.handler({}, new URL("http://localhost/company/op"), { action: "setLevels", args: { levels: payload("项目经理") } });
-  assert.equal(res.ok, true);
-  const m2 = rt.view().levels.M.levels.find((lv) => lv.code === "M2");
-  assert.equal(m2.name, "项目经理");
-  assert.equal(rt.view().levels.M.levels.length, base.M.levels.length, "不能增删等级");
-
-  const unknown = await op.handler({}, new URL("http://localhost/company/op"), {
+  // 1) 改名
+  const renamed = await op.handler({}, new URL("http://localhost/company/op"), {
     action: "setLevels",
-    args: { levels: { M: { levels: [{ code: "M9", name: "影子" }] } } },
+    args: { levels: mapLevels((lv) => ({ code: lv.code, name: lv.code === "M2" ? "项目经理" : lv.name })) },
   });
-  assert.equal(unknown.ok, false);
-  assert.equal(unknown.code, "E_INVALID_LEVELS");
+  assert.equal(renamed.ok, true);
+  assert.equal(rt.view().levels.M.levels.find((lv) => lv.code === "M2").name, "项目经理");
+  assert.equal(rt.view().levels.M.levels.length, base.M.levels.length);
 
-  const blank = await op.handler({}, new URL("http://localhost/company/op"), { action: "setLevels", args: { levels: payload("   ") } });
+  // 2) 新增一个等级（梯度数量可改）
+  const added = await op.handler({}, new URL("http://localhost/company/op"), {
+    action: "setLevels",
+    args: {
+      levels: {
+        M: { levels: [...rt.view().levels.M.levels.map((lv) => ({ code: lv.code, name: lv.name })), { code: "M7", name: "资深总监" }] },
+        P: { levels: rt.view().levels.P.levels.map((lv) => ({ code: lv.code, name: lv.name })) },
+      },
+    },
+  });
+  assert.equal(added.ok, true);
+  assert.equal(rt.view().levels.M.levels.length, base.M.levels.length + 1);
+  assert.equal(rt.view().levels.M.levels.find((lv) => lv.code === "M7").name, "资深总监");
+  // 重启后保留
+  await rt.shutdown();
+  const rt2 = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt2.boot();
+  assert.equal(rt2.view().levels.M.levels.some((lv) => lv.code === "M7"), true, "自定义等级应持久化");
+  const op2 = findOpRoute(rt2);
+
+  // 3) 删除仍被员工引用的等级 → E_LEVEL_IN_USE
+  await op2.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d1", name: "研发部" } });
+  await op2.handler({}, new URL("http://localhost/company/op"), {
+    action: "createEmployee",
+    args: { id: "e1", displayName: "员工一", department: "d1", role: "staff", kind: "permanent", channels: [{ channel: "M", level: "M7" }] },
+  });
+  const inUse = await op2.handler({}, new URL("http://localhost/company/op"), {
+    action: "setLevels",
+    args: { levels: { M: { levels: rt2.view().levels.M.levels.filter((lv) => lv.code !== "M7").map((lv) => ({ code: lv.code, name: lv.name })) } } },
+  });
+  assert.equal(inUse.ok, false);
+  assert.equal(inUse.code, "E_LEVEL_IN_USE");
+  assert.match(inUse.message, /员工一/);
+  assert.equal(rt2.view().levels.M.levels.some((lv) => lv.code === "M7"), true, "被引用等级应保留");
+
+  // 4) 非法代号 / 空名 / 空目录拒绝
+  const badCode = await op2.handler({}, new URL("http://localhost/company/op"), {
+    action: "setLevels",
+    args: { levels: { M: { levels: [{ code: "X2", name: "错" }] } } },
+  });
+  assert.equal(badCode.ok, false);
+  assert.equal(badCode.code, "E_INVALID_LEVELS");
+  assert.match(badCode.message, /格式非法/);
+
+  const blank = await op2.handler({}, new URL("http://localhost/company/op"), {
+    action: "setLevels",
+    args: { levels: { M: { levels: [{ code: "M1", name: "   " }] } } },
+  });
   assert.equal(blank.ok, false);
   assert.equal(blank.code, "E_INVALID_LEVELS");
-  await rt.shutdown();
+
+  const empty = await op2.handler({}, new URL("http://localhost/company/op"), {
+    action: "setLevels",
+    args: { levels: { M: { levels: [] } } },
+  });
+  assert.equal(empty.ok, false);
+  assert.equal(empty.code, "E_INVALID_LEVELS");
+
+  await rt2.shutdown();
 });
 
 test("POST /company/op updateDepartment 持久化 borrowPolicy", async () => {

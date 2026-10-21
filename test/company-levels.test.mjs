@@ -28,6 +28,7 @@ import {
   normalizeChannels,
   normalizeManagementName,
   normalizeLevelsOverride,
+  validateLevelsDirectory,
   MANAGEMENT_NAME_DEFAULT,
   primaryChannelOf,
   resolveChannelLevel,
@@ -508,19 +509,49 @@ test("normalizeManagementName：trim/截断 40 字，非字符串回落空串", 
   assert.equal(normalizeManagementName(42), "");
 });
 
-test("normalizeLevelsOverride：只覆盖 label/description 与各级名称，代号与数量不变", () => {
+test("validateLevelsDirectory：等级可增删，代号必须是「通道字母+序号」，每通道至少 1 级", () => {
+  const added = validateLevelsDirectory({
+    M: { label: "管理岗", levels: [{ code: "M1", name: "一线主管" }, { code: "M2", name: "部门经理" }, { code: "M7", name: "高级总监" }] },
+    P: { levels: [{ code: "P1", name: "见习" }, { code: "P3", name: "工程师" }] },
+  });
+  assert.equal(added.ok, true);
+  assert.deepEqual(added.levels.M.levels.map((lv) => lv.code), ["M1", "M2", "M7"], "等级可增删且按序号排序");
+  assert.equal(added.levels.M.levels.find((lv) => lv.code === "M7").name, "高级总监");
+  assert.equal(added.levels.M.label, "管理岗");
+  assert.deepEqual(added.levels.P.levels.map((lv) => lv.code), ["P1", "P3"]);
+
+  const badCode = validateLevelsDirectory({ M: { levels: [{ code: "X2", name: "错" }] } });
+  assert.equal(badCode.ok, false);
+  assert.equal(badCode.code, "E_INVALID_LEVELS");
+  assert.match(badCode.message, /格式非法/);
+
+  const dup = validateLevelsDirectory({ M: { levels: [{ code: "M1", name: "a" }, { code: "M1", name: "b" }] } });
+  assert.equal(dup.ok, false);
+  assert.match(dup.message, /重复/);
+
+  const blank = validateLevelsDirectory({ P: { levels: [{ code: "P1", name: "  " }] } });
+  assert.equal(blank.ok, false);
+  assert.match(blank.message, /名称不能为空/);
+
+  const empty = validateLevelsDirectory({ M: { levels: [] } });
+  assert.equal(empty.ok, false);
+  assert.match(empty.message, /至少保留一个等级/);
+});
+
+test("normalizeLevelsOverride：合法覆盖原样返回，非法整体回退 base", () => {
   const raw = {
-    M: { label: "管理岗", description: "带团队", levels: [{ code: "M2", name: "项目经理" }, { code: "M9", name: "影子" }] },
+    M: { label: "管理岗", description: "带团队", levels: [{ code: "M1", name: "主管" }, { code: "M6", name: "资深经理" }] },
     P: { label: "技术岗", levels: [{ code: "P1", name: "见习工程师" }] },
   };
   const out = normalizeLevelsOverride(raw);
   assert.equal(out.M.label, "管理岗");
   assert.equal(out.M.description, "带团队");
-  assert.equal(out.M.levels.length, DEFAULT_LEVELS.M.levels.length, "不能增删等级");
-  assert.equal(out.M.levels.find((lv) => lv.code === "M2").name, "项目经理");
-  assert.equal(out.M.levels.some((lv) => lv.code === "M9"), false, "未知代号不写入");
-  assert.equal(out.P.levels.find((lv) => lv.code === "P1").name, "见习工程师");
-  assert.equal(out.P.levels.find((lv) => lv.code === "P3").name, DEFAULT_LEVELS.P.levels.find((lv) => lv.code === "P3").name, "未覆盖的等级保持默认");
+  assert.deepEqual(out.M.levels.map((lv) => lv.code), ["M1", "M6"], "可增删且排序");
+  assert.equal(out.P.label, "技术岗");
+  assert.deepEqual(out.P.levels.map((lv) => lv.code), ["P1"], "只给 1 级也可以");
+
+  const bad = normalizeLevelsOverride({ M: { levels: [{ code: "B9", name: "非法" }] } });
+  assert.deepEqual(bad.M.levels.map((lv) => lv.code), DEFAULT_LEVELS.M.levels.map((lv) => lv.code), "非法覆盖整体回退默认");
 });
 
 test("normalizeCompany：managementName 默认「管理层」，自定义名与等级覆盖随数据保留", () => {

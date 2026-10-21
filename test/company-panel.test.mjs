@@ -2287,11 +2287,11 @@ test("管理层弹层：重命名 → POST setManagementName，成功后刷新�
   assert.equal(made.seed[12], made.t("cpSaved"), "应提示已保存");
 });
 
-test("总架构 meta 卡：编辑编号规则 → POST setNumbering（含 {seq} 与起始号）", async () => {
+test("总架构 meta 卡：自定义编号规则 → POST setNumbering（含 {seq} 与起始号）", async () => {
   const calls = [];
   const made = renderCompany({ fetch: companyFetch(calls) });
-  const edit = buttonByLabel(made.tree, made.t("cpEditNumbering"))[0];
-  assert.ok(edit, "meta 卡应有编辑编号规则按钮");
+  const edit = buttonByLabel(made.tree, made.t("cpCustomize"))[0];
+  assert.ok(edit, "meta 卡应有自定义（编号规则）按钮");
   edit.onClick();
   assert.equal(made.seed[16], true, "应打开编号规则弹层");
 
@@ -2316,11 +2316,11 @@ test("总架构 meta 卡：编辑编号规则 → POST setNumbering（含 {seq} 
   assert.equal(made.seed[16], false, "保存成功后关闭弹层");
 });
 
-test("总架构 meta 卡：编辑等级通道 → POST setLevels（只改名称、代号原样）", async () => {
+test("总架构 meta 卡：自定义等级通道 → POST setLevels（只改名称、代号原样）", async () => {
   const calls = [];
   const made = renderCompany({ fetch: companyFetch(calls) });
-  const edit = buttonByLabel(made.tree, made.t("cpEditLevels"))[0];
-  assert.ok(edit, "meta 卡应有编辑等级通道按钮");
+  const edit = buttonByLabel(made.tree, made.t("cpCustomize"))[1];
+  assert.ok(edit, "meta 卡应有自定义（等级通道）按钮");
   edit.onClick();
   assert.equal(made.seed[18], true, "应打开等级通道弹层");
 
@@ -2340,9 +2340,45 @@ test("总架构 meta 卡：编辑等级通道 → POST setLevels（只改名称�
   assert.equal(op.body.action, "setLevels");
   const m2 = op.body.args.levels.M.levels.find((row) => row.code === "M2");
   assert.equal(m2.name, "项目经理");
-  assert.equal(op.body.args.levels.M.levels.length, LEVELS.M.levels.length, "M 通道等级数量不变（不能增删）");
+  assert.equal(op.body.args.levels.M.levels.length, LEVELS.M.levels.length, "未增删时等级数量不变");
   assert.equal(op.body.args.levels.P.levels.length, LEVELS.P.levels.length);
   assert.equal(made.seed[18], false);
+});
+
+test("自定义等级通道：可添加等级（代号自动递增）并提交数量变化", async () => {
+  const calls = [];
+  const made = renderCompany({ fetch: companyFetch(calls) });
+  const edit = buttonByLabel(made.tree, made.t("cpCustomize"))[1];
+  edit.onClick();
+  assert.equal(made.seed[18], true, "应打开等级通道弹层");
+
+  made.react.reset();
+  let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const add = buttonByLabel(tree, made.t("cpAddLevel"))[0];
+  assert.ok(add, "应有添加等级按钮");
+  add.onClick();
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const inputs = collectElements(tree, (node) => node.type === "input");
+  const newLevel = inputs.find((node) => !node.props.value);
+  assert.ok(newLevel, "应出现一个空名称的新等级输入框");
+  newLevel.props.onChange({ target: { value: "资深总监" } });
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const save = buttonByLabel(tree, made.t("cpSaveLevels"))[0];
+  await save.onClick();
+  await tick();
+
+  const op = calls.find((call) => call.method === "POST" && /\/company\/op$/.test(call.url));
+  assert.ok(op, "应提交 setLevels");
+  assert.equal(op.body.action, "setLevels");
+  const levels = op.body.args.levels.M.levels;
+  assert.equal(levels.length, LEVELS.M.levels.length + 1, "提交后 M 通道多一级");
+  const added = levels[levels.length - 1];
+  assert.equal(added.code, "M4", "新等级代号自动递增（M3 之后为 M4）");
+  assert.equal(added.name, "资深总监");
 });
 
 test("部门弹层：部门编辑 → POST updateDepartment 带 borrowPolicy/accepts", async () => {

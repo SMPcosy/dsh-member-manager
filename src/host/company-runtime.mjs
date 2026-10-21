@@ -9,7 +9,7 @@ import { createDispatcher } from "./company-dispatcher.mjs";
 import { createScheduler } from "./company-scheduler.mjs";
 import { CompanyStore } from "../shared/company-store.mjs";
 import { resolveCompanyConfig } from "../shared/company-config.mjs";
-import { emptyCompany, createDepartment, createEmployee, updateDepartment, updateEmployee, promoteEmployee, fireEmployee, ensureCompanyCodes, describeEmployeeLevel, describeEmployeeChannels, setEmployeeChannels, primaryChannelOf, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY, DEFAULT_LEVELS, DEFAULT_NUMBERING, normalizeManagementName, normalizeLevelsOverride, MANAGEMENT_NAME_DEFAULT } from "../shared/company-org.mjs";
+import { emptyCompany, createDepartment, createEmployee, updateDepartment, updateEmployee, promoteEmployee, fireEmployee, ensureCompanyCodes, describeEmployeeLevel, describeEmployeeChannels, setEmployeeChannels, primaryChannelOf, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY, DEFAULT_LEVELS, DEFAULT_NUMBERING, normalizeManagementName, normalizeLevelsOverride, validateLevelsDirectory, MANAGEMENT_NAME_DEFAULT } from "../shared/company-org.mjs";
 import { emptyLedger, transitionOrder, ORDER_STATES } from "../shared/company-ledger.mjs";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
@@ -503,21 +503,27 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     return numbering;
   }
 
-  /** 校验 levels 覆盖参数：代号不可增删、名称非空；通过后交给 normalizeLevelsOverride 合并。 */
+  /** v5.12：等级目录可增删等级；校验格式/名称，并拒绝删除仍被员工引用的等级。 */
   function applyLevelsOverride(raw, current) {
-    for (const channel of ["M", "P"]) {
-      const incoming = Array.isArray(raw?.[channel]?.levels) ? raw[channel].levels : [];
-      const allowed = new Set((current[channel]?.levels || []).map((lv) => lv.code));
-      for (const lv of incoming) {
-        if (!lv || typeof lv !== "object" || typeof lv.code !== "string") continue;
-        if (!allowed.has(lv.code)) {
-          return { ok: false, code: "E_INVALID_LEVELS", message: `等级代号 ${lv.code} 不存在（不能新增/删除等级）` };
+    const checked = validateLevelsDirectory(raw, current);
+    if (!checked.ok) return { ok: false, code: "E_INVALID_LEVELS", message: checked.message };
+    const levels = checked.levels;
+    for (const emp of runtime.company.employees || []) {
+      const channels = Array.isArray(emp.channels) && emp.channels.length
+        ? emp.channels
+        : [{ channel: emp.channel, level: emp.level }];
+      for (const entry of channels) {
+        const track = levels[entry.channel]?.levels || [];
+        if (!entry.level || !track.some((lv) => lv.code === entry.level)) {
+          return {
+            ok: false,
+            code: "E_LEVEL_IN_USE",
+            message: `等级 ${entry.level || "(空)"} 仍被员工「${emp.displayName || emp.id}」使用，不能删除`,
+          };
         }
-        const name = typeof lv.name === "string" ? lv.name.trim() : "";
-        if (!name) return { ok: false, code: "E_INVALID_LEVELS", message: `等级 ${lv.code} 名称不能为空` };
       }
     }
-    return { ok: true, levels: normalizeLevelsOverride(raw, current) };
+    return { ok: true, levels };
   }
 
   function makeOpId(prefix) {
