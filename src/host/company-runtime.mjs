@@ -1021,6 +1021,19 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     // 编号：company.numbering > config.numbering > DEFAULT_NUMBERING
     const numbering = runtime.company.numbering || config.numbering || DEFAULT_NUMBERING;
     runtime.config.numbering = numbering;
+    // v5.12.2：历史数据里的旧通道显示名迁移（专业技术通道 → 技术通道）
+    if (runtime.company.levels && runtime.company.levels.P && runtime.company.levels.P.label === "专业技术通道") {
+      runtime.company = {
+        ...runtime.company,
+        levels: { ...runtime.company.levels, P: { ...runtime.company.levels.P, label: "技术通道" } },
+      };
+      try {
+        await store.saveCompany(runtime.company);
+        await store.appendAudit({ type: "company.levels_label_migrated", label: "技术通道" });
+      } catch (err) {
+        bootWarnings.push(`通道显示名迁移失败: ${err.message}`);
+      }
+    }
     // v5.11：等级通道显示名优先用 company.json 里的覆盖（面板可编辑），否则用配置/默认。
     const levels = runtime.company.levels
       ? normalizeLevelsOverride(runtime.company.levels, config.levels)

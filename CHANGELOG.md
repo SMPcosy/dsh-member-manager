@@ -121,6 +121,10 @@
 - **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
 - **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
 
+### 修复：历史数据中的旧通道显示名自动迁移（v5.12.3）
+- boot 时若 `company.json` 持久化的等级目录里 P 通道 label 仍是「专业技术通道」，自动改写为「技术通道」、持久化并写审计 `company.levels_label_migrated`。
+- **测试**：company-runtime 50；全量 477/477。
+
 ### 变更：P 通道显示名改为「技术通道」（v5.12.2）
 - 「专业技术通道」统一改为「技术通道」，与管理通道同为 4 字，面板等级图例、KPI、通道编辑弹层与默认等级目录同步更新（英文仍为 Professional track）。
 - 历史数据不受影响（等级代号与员工数据未变）；**全量 476/476**。

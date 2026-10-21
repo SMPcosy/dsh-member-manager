@@ -312,6 +312,39 @@ test("boot 自动为历史无 code 数据补号并持久化", async () => {
   await rt2.shutdown();
 });
 
+test("boot 迁移历史通道显示名：专业技术通道 → 技术通道", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-level-label-${Date.now()}`;
+  const { mkdir, writeFile, readFile } = await import("node:fs/promises");
+  await mkdir(`${dataDir}/company`, { recursive: true });
+  await writeFile(
+    `${dataDir}/company/company.json`,
+    JSON.stringify({
+      company: {
+        version: 1,
+        status: "idle",
+        departments: [],
+        employees: [],
+        levels: {
+          M: { label: "管理通道", levels: [{ code: "M1", name: "主管" }] },
+          P: { label: "专业技术通道", levels: [{ code: "P1", name: "初级工程师" }] },
+        },
+      },
+    }),
+    "utf8",
+  );
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  assert.equal(rt.view().levels.P.label, "技术通道");
+  await rt.shutdown();
+  const rows = (await readFile(`${dataDir}/company/audit.jsonl`, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.ok(rows.find((r) => r.type === "company.levels_label_migrated"), "应写显示名迁移审计");
+  const persisted = JSON.parse(await readFile(`${dataDir}/company/company.json`, "utf8"));
+  assert.equal(persisted.company.levels.P.label, "技术通道", "迁移后应持久化");
+});
+
 test("boot 补号审计 count 反映实际补号数量（历史数据）", async () => {
   const dataDir = `/tmp/test-dsh-member-manager-codes-audit-${Date.now()}`;
   const { mkdir, writeFile, readFile } = await import("node:fs/promises");
