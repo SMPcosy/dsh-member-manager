@@ -121,6 +121,12 @@
 - **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
 - **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
 
+### 新增：预览/部门编辑列出「本部门员工」详情（v5.18）
+
+- 新建部门的「创建预览」弹窗在字段区下方新增只读「本部门员工（N）」区块；新建部门尚无员工时显示空态文案「暂无员工，创建后可招聘或调岗」，若预览的 ID/名称命中已存在部门则列出该部门员工详情。
+- 部门弹层的「部门编辑」表单底部同样列出该部门员工详情（工号、通道等级徽章、姓名、岗位、状态点，含已停用员工），新增 `cpDeptEmployees`/`cpPreviewNoEmployees` 文案键（zh/en 对称）。
+- `test/company-panel.test.mjs` 扩展预览与部门编辑用例的断言（员工区块计数/空态/员工详情）。
+
 ### 变更：新建部门改为「创建预览」两步（v5.17）
 
 - 「新建部门」对话框删除「解析」按钮与提示行；一句话描述 textarea 改为**灰色示例占位**（`cpNewDeptBriefPh`，例：新建市场部，编制 5 人，负责市场推广）。

@@ -794,6 +794,9 @@ test("字典：v5 文案 zh/en 严格对称，中文与 docs/21 §4.3 一致", (
   assert.equal(zh.cpNewDeptName, "部门名称");
   assert.equal(zh.cpPreviewDept, "创建预览");
   assert.equal(en.cpPreviewDept, "Create preview");
+  assert.equal(zh.cpDeptEmployees, "本部门员工");
+  assert.equal(en.cpDeptEmployees, "Department employees");
+  assert.ok(zh.cpPreviewNoEmployees && en.cpPreviewNoEmployees, "缺少空态文案");
   assert.equal(zh.cpPreviewBack, "返回修改");
   assert.ok(zh.cpNewDeptBriefPh.includes("例："), "描述栏应以示例内容作占位");
   assert.equal(zh.cpParse, undefined, "「解析」按钮文案应移除");
@@ -1170,6 +1173,8 @@ test("新建部门：点「创建预览」自动解析一句话并打开预览�
   const values = collectElements(preview, (node) => node.type === "input").map((node) => String(node.props.value));
   assert.ok(values.includes("市场"), "预览里名称应为解析结果：" + values.join("|"));
   assert.ok(values.includes("5"), "预览里编制应为解析结果：" + values.join("|"));
+  assert.ok(text.includes(t("cpDeptEmployees") + "（0）"), "预览应显示「本部门员工」区块：新建部门为空");
+  assert.ok(text.includes(t("cpPreviewNoEmployees")), "新建部门预览应显示「暂无员工」空态提示");
 });
 
 test("新建部门：预览确认后创建 POST createDepartment，成功后关闭并刷新 overview", async () => {
@@ -2424,6 +2429,14 @@ test("部门弹层：部门编辑 → POST updateDepartment 带 borrowPolicy/acc
 
   made.react.reset();
   let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const editText = treeText(tree);
+  assert.ok(
+    editText.includes(made.t("cpDeptEmployees") + "（3）"),
+    "部门编辑表单应列出本部门员工计数：" + editText.slice(0, 240),
+  );
+  for (const employeeName of ["插件组负责人", "插件工程师", "前插件工程师"]) {
+    assert.ok(editText.includes(employeeName), "部门编辑表单应列出员工详情：" + employeeName);
+  }
   const name = collectElements(tree, (node) => node.type === "input").find((node) => String(node.props.value) === "插件组");
   name.props.onChange({ target: { value: "插件部" } });
   made.react.reset();
