@@ -1187,7 +1187,7 @@ test("新建部门：点「创建预览」自动解析一句话并打开预览�
   assert.deepEqual(names, ["新员工 1", "新员工 2", "新员工 3", "新员工 4", "新员工 5"], "预览应列出预生成员工姓名");
 });
 
-test("新建部门：点「创建」先建部门，再按预览逐个创建预生成员工，成功关闭并刷新", async () => {
+test("新建部门：预览员工只是预设，点「创建」只 POST createDepartment，不写员工", async () => {
   const calls = [];
   const { t, seed, tree } = renderCompany({
     newDeptOpen: true,
@@ -1196,10 +1196,9 @@ test("新建部门：点「创建」先建部门，再按预览逐个创建预�
       name: "市场部",
       charter: "负责市场",
       capacity: "2",
-      createdId: null,
       employees: [
-        { key: "k1", displayName: "市场专员甲", channel: "P", level: "P4", created: false },
-        { key: "k2", displayName: "市场经理乙", channel: "M", level: "M1", created: false },
+        { key: "k1", displayName: "市场专员甲", title: "工程师", skills: ["编码实现"], model: "", channel: "P", level: "P4" },
+        { key: "k2", displayName: "市场经理乙", title: "架构师", skills: ["系统设计"], model: "", channel: "M", level: "M1" },
       ],
     },
     fetch: companyFetch(calls, { opResult: { ok: true, departmentId: "dept-market", code: "D03" } }),
@@ -1208,61 +1207,38 @@ test("新建部门：点「创建」先建部门，再按预览逐个创建预�
   await tick();
 
   const ops = calls.filter((c) => c.url.endsWith("/company/op")).map((c) => c.body);
-  assert.equal(ops.length, 3, "应发 1 次建部门 + 2 次建员工：" + JSON.stringify(ops));
-  assert.equal(ops[0].action, "createDepartment");
-  assert.equal(ops[1].action, "createEmployee");
-  assert.deepEqual(
-    { displayName: ops[1].args.displayName, department: ops[1].args.department, role: ops[1].args.role, kind: ops[1].args.kind, channel: ops[1].args.channel, level: ops[1].args.level },
-    { displayName: "市场专员甲", department: "dept-market", role: "staff", kind: "permanent", channel: "P", level: "P4" },
-  );
-  assert.equal(ops[2].args.displayName, "市场经理乙");
-  assert.equal(ops[2].args.channel, "M");
-  assert.equal(ops[2].args.level, "M1");
+  assert.deepEqual(ops.map((row) => row.action), ["createDepartment"], "预设员工不写入后台：" + JSON.stringify(ops));
+  assert.equal(ops[0].args.capacity, 2);
   assert.equal(seed[6], false, "成功后应关闭对话框");
   assert.equal(seed[22], null, "成功后应清空预览状态");
+  assert.ok(calls.filter((c) => c.url.endsWith("/company/overview")).length >= 1, "成功后应刷新 overview");
 });
 
-test("新建部门：部分员工创建失败时保留预览并提示，已建员工标记 created", async () => {
-  const calls = [];
-  let opCount = 0;
-  const fetch = async (url, init) => {
-    const u = String(url);
-    calls.push({ url: u, method: (init && init.method) || "GET", body: init && init.body ? JSON.parse(init.body) : null });
-    if (u.endsWith("/company/op")) {
-      opCount += 1;
-      const body = init && init.body ? JSON.parse(init.body) : {};
-      if (body.action === "createDepartment") return { ok: true, status: 200, json: async () => ({ ok: true, data: { ok: true, departmentId: "dept-new", code: "D09" } }) };
-      if (body.action === "createEmployee" && body.args.level === "M1") {
-        return { ok: true, status: 200, json: async () => ({ ok: false, code: "E_BOOM", message: "员工爆炸了" }) };
-      }
-      return { ok: true, status: 200, json: async () => ({ ok: true, data: { ok: true } }) };
-    }
-    return { ok: true, status: 200, json: async () => ({ ok: true, data: overviewFixture() }) };
-  };
+test("新建部门：预览员工可预设岗位/技能/模型，编辑只改本地预设", () => {
   const { t, seed, tree } = renderCompany({
     newDeptOpen: true,
     newDeptPreview: {
       id: "",
       name: "市场部",
       charter: "",
-      capacity: "2",
-      createdId: null,
-      employees: [
-        { key: "k1", displayName: "市场专员甲", channel: "P", level: "P4", created: false },
-        { key: "k2", displayName: "市场经理乙", channel: "M", level: "M1", created: false },
-      ],
+      capacity: "1",
+      employees: [{ key: "k1", displayName: "新员工 1", title: "", duties: [], skills: [], model: "", channel: "P", level: "P1" }],
     },
-    fetch,
+    fetch: companyFetch([]),
   });
-  await buttonByLabel(tree, t("cpCreateDept"))[0].onClick();
-  await tick();
+  for (const key of ["cpEmpTitle", "cpEmpSkills", "cpEmpModel"]) {
+    const fields = collectElements(tree, (node) => node.type === "input" && node.props.placeholder === t(key));
+    assert.equal(fields.length, 1, "预览应出现 " + key + " 输入");
+  }
+  const inputs = collectElements(tree, (node) => node.type === "input" && node.props.placeholder === t("cpEmpTitle"));
+  assert.equal(inputs.length, 1, "应有 1 行岗位输入");
+  inputs[0].props.onChange({ target: { value: "数据分析师" } });
+  assert.equal(seed[22].employees[0].title, "数据分析师", "岗位预设应写回本地预览状态");
 
-  assert.ok(opCount >= 3, "应尝试建部门与两名员工");
-  assert.ok(seed[22], "预览应保持打开（部门已创建）");
-  assert.equal(seed[22].createdId, "dept-new", "预览应记住已创建的部门");
-  assert.equal(seed[22].employees[0].created, true, "成功员工应标记 created");
-  assert.equal(seed[22].employees[1].created, false, "失败员工不应标记 created");
-  assert.ok(seed[9] && /员工爆炸了|E_BOOM/.test(seed[9]), "应显示员工创建失败错误：" + String(seed[9]));
+  const skillInput = collectElements(tree, (node) => node.type === "input" && node.props.placeholder === t("cpEmpSkills"))[0];
+  assert.ok(skillInput, "应有技能输入");
+  skillInput.props.onChange({ target: { value: "数据分析、报表" } });
+  assert.equal(JSON.stringify(seed[22].employees[0].skills), JSON.stringify(["数据分析", "报表"]), "技能预设应按「、」拆条");
 });
 
 test("新建部门：预览确认后创建 POST createDepartment，成功后关闭并刷新 overview", async () => {
@@ -1686,13 +1662,33 @@ test("buildEmployeeCenter：筛选 departmentCode / 未知 filter 回落 all / c
   assert.equal(lead.departmentCode, "D01");
 });
 
+test("cpParseBrief：从一句话解析预生成员工（名称+职责），岗位/技能用角色词典预设", () => {
+  const { exports } = loadBundle(makeReact());
+  const parse = exports.__internals.cpParseBrief;
+  const parsed = parse("新建插件部，编制 3 人：插件架构负责机制、插件编写负责实现、插件审阅负责复核");
+  assert.equal(parsed.name, "插件");
+  assert.equal(parsed.capacity, 3);
+  assert.equal(parsed.employees.length, 3);
+  assert.equal(parsed.employees[0].displayName, "插件架构");
+  assert.equal(parsed.employees[0].title, "架构师");
+  assert.equal(JSON.stringify(parsed.employees[0].skills), JSON.stringify(["系统设计", "代码审阅"]));
+  assert.equal(JSON.stringify(parsed.employees[0].duties), JSON.stringify(["机制"]));
+  assert.equal(parsed.employees[1].title, "工程师");
+  assert.equal(JSON.stringify(parsed.employees[1].skills), JSON.stringify(["编码实现", "单元测试"]));
+  assert.equal(parsed.employees[2].title, "审阅工程师");
+  assert.equal(parsed.employees[2].channel, "P");
+
+  const noPeople = parse("新建市场部，编制 5 人");
+  assert.equal(JSON.stringify(noPeople.employees), "[]", "没有成员描述时不做预设");
+});
+
 test("cpParseBrief：解析一句话建部门的名称/编制/说明；解析失败时名称取首句", () => {
   const { exports } = loadBundle(makeReact());
   const parse = exports.__internals.cpParseBrief;
 
   assert.equal(
     JSON.stringify(parse("新建市场部，编制 5 人")),
-    JSON.stringify({ name: "市场", capacity: 5, charter: "新建市场部，编制 5 人" }),
+    JSON.stringify({ name: "市场", capacity: 5, charter: "新建市场部，编制 5 人", employees: [] }),
   );
   assert.equal(parse("新建运维部门 8 人").name, "运维");
   assert.equal(parse("新建运维部门 8 人").capacity, 8);

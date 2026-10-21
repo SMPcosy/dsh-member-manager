@@ -121,6 +121,14 @@
 - **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
 - **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
 
+### 变更：新建部门预览改为「员工预设方案」——只建部门，员工不写后台（v5.20）
+
+- **一句话解析员工预设**：`cpParseBrief` 返回新增 `employees`；解析「新建插件部，编制 3 人：插件架构负责机制、插件编写负责实现」时，取最后一个 `：` 之后的片段按顿号/comma 切分，匹配「名称负责职责」生成预设行（≤12 行、按编制截断）。
+- **角色词典预设岗位/技能**：新增 `CP_BRIEF_ROLE_PRESETS` 与 `cpBriefRolePreset`，按姓名+职责关键词匹配（架构→架构师[系统设计,代码审阅]、审阅→审阅工程师、验证/测试→测试工程师、设计/界面/前端→界面工程师、文档/知识→文档工程师、数据/分析→数据分析师、运维/部署→运维工程师、编写/开发/实现/工程→工程师[编码实现,单元测试]）。
+- **预览编辑器四列扩展**：预设行可编辑姓名/岗位/技能（「、」分隔，≤12 条）/模型，另可改通道（M/P）/等级或删除行；无成员描述时仍按编制生成「新员工 1..N」默认行。
+- **只建部门**：点「创建」只发一次 `createDepartment`，不再逐个 `createEmployee`；`cpPlannedHint` 明示「岗位/技能/模型仅作参考，不会写入后台」；移除 `cpPreviewEmpFailed` 与 createdId/✓ 重试逻辑；`返回修改` 常驻可用。
+- **测试**：company-panel 70 用例（新增「预览员工只是预设，点创建只 POST createDepartment」「一句话解析预生成员工 + 角色词典」）；全量 486/486。
+
 ### 新增：新建部门预览按编制预生成员工并一并创建（v5.19）
 
 - 点「创建预览」时按编制人数 N（上限 50）自动**预生成 N 名员工行**：默认姓名「新员工 1..N」、通道 P、等级取该通道目录首级；预览内可改姓名、切换 M/P 通道与等级、删除行。
