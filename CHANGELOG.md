@@ -4,6 +4,13 @@
 
 本版本把插件从「名册管理覆盖层」升级为「单包公司化运行时」：不再依赖 DSH 原生团队层（`ctx.agentTeams`），只用 `ctx.agents` / `ctx.subagents` 承载两级组织（部门经理 → 员工）的派工闭环。
 
+### 文档：README 精简重写（v5.28）
+
+- README 从 534 行 / 52,126 B 重写为 271 行 / 17,425 B（约 -67%），保留中英双语 `<details>` 折叠结构与居中头部。
+- 移除过时内容：未发布的「已发布到官方 npm」标题、已删除的小组管理 UI 描述（改为「名册覆盖层，兼容保留」）、与面板不符的示例、重复的三处面板说明、连续分隔线。
+- 对齐实现：29 个宿主端工具（16 名册 + 13 公司化）、`company_admin` 12 个 action、`company_hire` 含 `channels/title/duties/model/provider`、`defaultOrderMode: async|wait`、4 个页签、面板无轮询 / 右栏工作网 2s、`/orgmap` v3、`POST /company/op`、`npm run check|test|verify`（499/499、19 项自检）。
+- 补齐安装三种方式（npm 发布后 / 本地 link / 从旧包迁移脚本）、数据目录（`company/`、`backups/`、`pending-migration.json`）、配置项 12 行、双通道与编号规则、已知限制。
+
 ### 文档：README 历史清理、移除旧截图（v5.27）
 
 - 删除 README 中 v0.2.4 及更早版本的「更新要点」历史段落（中英各一份），统一改为「历史版本更新要点见 CHANGELOG.md」。
