@@ -121,6 +121,10 @@
 - **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
 - **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
 
+### 调整：工作网「管理层」节点右对齐（v5.14.2）
+
+- 右栏工作网竖向布局中，管理层节点从顶部居中改为**顶部行最右侧**（与员工卡片同侧），部门行仍自左向右排布，连线自动改为跨越式折线。
+
 ### 新增：公司名称自定义 + 工作网竖向布局（v5.14）
 
 - 插件面板页头「成员管理」标题后直接显示**公司名称**（与标题同字号），点击弹出编辑菜单保存（1–40 字符，写入 `company.json` 并审计 `company.renamed`），`GET /state` 与 `GET /orgmap` 均返回 `companyName`。
