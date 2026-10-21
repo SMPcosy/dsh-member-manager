@@ -52,7 +52,7 @@ export const DEFAULT_LEVELS = Object.freeze({
     ],
   },
   P: {
-    label: "专业技术通道",
+    label: "技术通道",
     description: "技术岗：不管人，靠专业深度与产出晋升。",
     levels: [
       { code: "P1", name: "初级工程师" },

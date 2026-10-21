@@ -37,7 +37,7 @@ Click a heading below to view **English** or **中文** .
 - 💰 **成本与审计**：员工/经理会话的 token 与请求数按「员工 / 部门 / 工单」聚合（`GET /company/costs`）；组织与账本落 `company.json`，审计追加到 `audit.jsonl`（append-only、加载时对账重放）。`company_admin` 当前支持 `createDepartment` / `createEmployee` / `setRoutingRules`。
 - 🧯 **全链路降级**：宿主没有 `agents` / `subagents` 服务时，公司化工具返回 `E_NO_AGENTS`，名册覆盖层（既有 16 个名册工具 + 面板 + 路由）不受影响；Agent 启动失败只记 warning，不阻断插件加载。
 - 🧩 **新增 Web 只读接口**：`GET /company/{overview,org,board,costs,orders}`，统一 `{ ok: true, data }` 信封；`GET /state` 附带 `company` 摘要。
-- 🎖️ **M/P 双通道等级与编号体系**：管理通道（M1 主管 → M5 副总裁）与专业技术通道（P1 初级工程师 → P6 首席专家）双通道；**同一名员工可同时拥有 M 与 P 两个通道等级**（`channels: [{channel,level}]`，至少一个；`manager` 必含 M、`window` 仅 P），旧 `channel/level` 字段保留为主通道兼容。每名员工有唯一工号（默认 `E0001`、`E0002`…）并标注等级与部门，每个部门有唯一编号（默认 `D01`、`D02`…），两者都支持自定义模板。`company_hire` 可指定 `code/channels/channel/level`，`company_admin` 新增 `updateDepartment` / `promoteEmployee`（可按通道晋升、增删通道） / `setChannels` / `setNumbering` / `setManagementName` / `setLevels`（等级可增删）；历史数据在 boot 时自动补号补通道，不丢员工。
+- 🎖️ **M/P 双通道等级与编号体系**：管理通道（M1 主管 → M5 副总裁）与技术通道（P1 初级工程师 → P6 首席专家）双通道；**同一名员工可同时拥有 M 与 P 两个通道等级**（`channels: [{channel,level}]`，至少一个；`manager` 必含 M、`window` 仅 P），旧 `channel/level` 字段保留为主通道兼容。每名员工有唯一工号（默认 `E0001`、`E0002`…）并标注等级与部门，每个部门有唯一编号（默认 `D01`、`D02`…），两者都支持自定义模板。`company_hire` 可指定 `code/channels/channel/level`，`company_admin` 新增 `updateDepartment` / `promoteEmployee`（可按通道晋升、增删通道） / `setChannels` / `setNumbering` / `setManagementName` / `setLevels`（等级可增删）；历史数据在 boot 时自动补号补通道，不丢员工。
 - 🖥️ **「总架构」组织架构图面板**：面板共 4 个页签——总架构（默认首屏）/ 员工中心 / 工作流 / 备份与更新；「总架构」是组织架构图——最高层「管理层」虚拟汇总节点（M 通道员工人数，点击打开只读弹层列出所有 M 通道员工；该节点只是展示聚合，不改变员工部门归属）向下竖直连接各部门图框（部门图框仍显示该部门 M 通道等级最高的领导节点）；点部门图框弹出部门弹层（两个页签：部门架构图 / 成员详情；成员行只有一个「人事管理」按钮，点击在行下方展开该员工详情页——公司化信息 + 可编辑的**公司化资料**（3 列布局：显示名/岗位名称、技能/模型选择器，第 3 列整列岗位职责按条目最多 8 条，保存即写回公司化员工，模型覆盖在该员工会话生效）+ 通道/晋升/停用/调岗四项操作；员工行渲染双通道等级徽章）；工具栏「新建部门」内置一句话解析（原「一句话建组」并入）、部门弹层底部可「删除部门」（仅空部门）；管理层节点标题旁可「重命名」，图表下方「编号规则」「等级图例」两行各带「自定义」按钮（编号模板/起始号、通道名称与等级名称可自定义，弹层内含占位符用法说明，等级可增删、删除靠前等级后自动顺位、被员工使用且无映射的等级不可删），部门弹层页签行新增「部门编辑」（名称/编号/编制/职责描述/接单范围/借调策略）；图表下方保留 KPI、编号规则、等级图例与成本归因（按员工/部门/工单 top5）；两个面板页均为打开拉一次 + 手动「刷新」（无自动轮询），读 `GET /api/dsh-member-manager/company/overview`，写 `POST /api/dsh-member-manager/company/op`。
 - 🎯 **组织架构图任务视角（并入本版）**：组织架构图从「全团队」改为**任务作用域**——一个 root 会话就是一个任务，图上只出现这个任务真正需要的参与者（大总管 + `parentSession` 指向它的成员），不再把整个名册都铺出来。
 - 🔽 **任务下拉切换（并入本版）**：右栏 tab 顶部新增任务选择器（由 `GET /orgmap` 返回的 `tasks[]` 驱动，带运行中标记与人数），切任务即换图；没有任何任务时显示空态并禁用下拉。
@@ -57,7 +57,7 @@ Click a heading below to view **English** or **中文** .
 
 ## M/P 双通道等级与编号
 
-**双通道**：`manager` 走管理通道 M，`staff` / `window` 走专业技术通道 P；等级目录默认：
+**双通道**：`manager` 走管理通道 M，`staff` / `window` 走技术通道 P；等级目录默认：
 
 | 通道 | 等级 |
 | --- | --- |
@@ -77,7 +77,7 @@ Click a heading below to view **English** or **中文** .
     },
     "levels": {
       "M": { "label": "管理通道", "levels": [{ "code": "M1", "name": "主管" }, { "code": "M2", "name": "经理" }] },
-      "P": { "label": "专业技术通道", "levels": [{ "code": "P1", "name": "初级工程师" }, { "code": "P2", "name": "工程师" }] }
+      "P": { "label": "技术通道", "levels": [{ "code": "P1", "name": "初级工程师" }, { "code": "P2", "name": "工程师" }] }
     }
   }
 }

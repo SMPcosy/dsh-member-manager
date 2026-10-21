@@ -226,7 +226,7 @@ const LEVELS = {
     ],
   },
   P: {
-    label: "专业技术通道",
+    label: "技术通道",
     description: "技术纵深",
     levels: [
       { code: "P1", name: "初级工程师" },
@@ -798,7 +798,7 @@ test("字典：v5 文案 zh/en 严格对称，中文与 docs/21 §4.3 一致", (
   assert.equal(zh.cpDeptCount, "部门");
   assert.equal(zh.cpEmpCount, "员工");
   assert.equal(zh.cpChannelM, "管理通道");
-  assert.equal(zh.cpChannelP, "专业技术通道");
+  assert.equal(zh.cpChannelP, "技术通道");
   assert.equal(zh.cpCode, "工号");
   assert.equal(zh.cpLevel, "等级");
   assert.equal(zh.cpHeadcount, "编制");
@@ -1088,7 +1088,7 @@ test("CompanyOrgPanel：8 个 KPI + 编号规则 + 等级图例 + 成本归因�
   assert.match(text, /部门 2/);
   assert.match(text, /员工 5/);
   assert.match(text, /管理通道 1/);
-  assert.match(text, /专业技术通道 4/);
+  assert.match(text, /技术通道 4/);
   assert.match(text, /工单数 7/);
   assert.match(text, /已完成 5/);
   assert.match(text, /Token 合计 12[,.]?345/);
@@ -1271,7 +1271,7 @@ test("部门弹层：部门架构图页签按 M/P 两栏渲染并按等级降序
   const modalTree = internals.CompanyOrgPanel({ t });
   const text = treeText(modalTree);
   assert.match(text, /管理通道/);
-  assert.match(text, /专业技术通道/);
+  assert.match(text, /技术通道/);
   // M 栏只有 emp-lead(M2)，P 栏 dev(P4) 在 gone(P2) 之前
   assert.ok(text.indexOf("E0002") < text.indexOf("E0005"), "P 栏应按等级降序（P4 在 P2 前）");
   // 部门架构图页签不出现写操作按钮

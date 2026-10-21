@@ -121,6 +121,10 @@
 - **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
 - **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
 
+### 变更：P 通道显示名改为「技术通道」（v5.12.2）
+- 「专业技术通道」统一改为「技术通道」，与管理通道同为 4 字，面板等级图例、KPI、通道编辑弹层与默认等级目录同步更新（英文仍为 Professional track）。
+- 历史数据不受影响（等级代号与员工数据未变）；**全量 476/476**。
+
 ### 新增：删除等级后自动顺位（v5.12.1）
 - 等级通道弹层删除某一等级后，剩余等级代号立即重排（如删 P1，原 P2 显示为 P1）；保存时随 `setLevels` 提交 `levelRemap`。
 - host `applyLevelsOverride` 按 `levelRemap` 同步改写员工 `channels[].level` 与 legacy `channel/level`；无映射且旧代号不在新目录报 `E_LEVEL_IN_USE`，映射目标非法报 `E_INVALID_LEVELS`。
