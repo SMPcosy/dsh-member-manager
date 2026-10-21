@@ -1,7 +1,6 @@
 <div align="center">
 
 # 📇 DSH Member Manager / 成员管理
-# 已发布到官方NPM
 **A DeepSeek Harness plugin for team org structure, Chinese display names, roles, skills and per‑member model overrides.**
 
 **一个管理团队组织架构、中文显示名、岗位职责、技能，以及按成员模型覆盖的 DSH 插件。**
@@ -34,7 +33,7 @@ Click a heading below to view **English** or **中文** .
 - 🏢 **公司化运行时（本版核心）**：在名册覆盖层之上，把成员当作「公司」来编排——**部门、工单（order）、派工凭证（attempt）、回报与验收、审计流水、token 成本归因**。全部建立在 `ctx.agents` / `ctx.subagents` 的会话能力之上，**不依赖原生 team 层**。
 - 🧵 **四条工具线自动隔离**：窗口线（`company_order` / `company_status` / `company_ask` / `company_cancel`）只能下单、查询、催办；经理线（`company_assign` / `company_review` / `company_borrow` / `company_report` / `company_escalate` 等 11 个）管理派工与验收；员工线（`company_accept` / `company_report` / `company_ask_help`）只做自己的活；管理线（`company_hire` / `company_admin`）仅 owner 可用。越权调用返回 `E_TOOL_LINE`，隔离由 `tools.restrict` 白名单 + 同步 `tools.guard` + 执行体 `exec.agent.session.id` 反查三道共同保证。
 - 🪪 **attempt 凭证防串单**：`company_report` 必带 `attemptId`，陈旧 attempt 直接拒绝；`company_order` 支持 `clientOrderId` 幂等重放；工单依赖完成后才解锁下游。
-- 💰 **成本与审计**：员工/经理会话的 token 与请求数按「员工 / 部门 / 工单」聚合（`GET /company/costs`）；组织与账本落 `company.json`，审计追加到 `audit.jsonl`（append-only、加载时对账重放）。`company_admin` 当前支持 `createDepartment` / `createEmployee` / `setRoutingRules`。
+- 💰 **成本与审计**：员工/经理会话的 token 与请求数按「员工 / 部门 / 工单」聚合（`GET /company/costs`）；组织与账本落 `company.json`，审计追加到 `audit.jsonl`（append-only、加载时对账重放）。`company_admin` 覆盖 12 个控制面动作（部门/员工/编号/等级/通道/档案/名册导入，详见下方工具表）。
 - 🧯 **全链路降级**：宿主没有 `agents` / `subagents` 服务时，公司化工具返回 `E_NO_AGENTS`，名册覆盖层（既有 16 个名册工具 + 面板 + 路由）不受影响；Agent 启动失败只记 warning，不阻断插件加载。
 - 🧩 **新增 Web 只读接口**：`GET /company/{overview,org,board,costs,orders}`，统一 `{ ok: true, data }` 信封；`GET /state` 附带 `company` 摘要。
 - 🎖️ **M/P 双通道等级与编号体系**：管理通道（M1 主管 → M5 副总裁）与技术通道（P1 初级工程师 → P6 首席专家）双通道；**同一名员工可同时拥有 M 与 P 两个通道等级**（`channels: [{channel,level}]`，至少一个；`manager` 必含 M、`window` 仅 P），旧 `channel/level` 字段保留为主通道兼容。每名员工有唯一工号（默认 `E0001`、`E0002`…）并标注等级与部门，每个部门有唯一编号（默认 `D01`、`D02`…），两者都支持自定义模板。`company_hire` 可指定 `code/channels/channel/level`，`company_admin` 新增 `updateDepartment` / `promoteEmployee`（可按通道晋升、增删通道） / `setChannels` / `setNumbering` / `setManagementName` / `setLevels`（等级可增删）；历史数据在 boot 时自动补号补通道，不丢员工。
@@ -49,7 +48,7 @@ Click a heading below to view **English** or **中文** .
 ## 公司化运行时怎么用
 
 1. 确认名册里有成员（`member_list` / 面板）。
-2. 首次需要时调用 `company_admin({ action: "createDepartment" | "createEmployee" | "setRoutingRules" })` 建组织，或直接 `company_order`：运行时会在 boot 时创建根级 owner 会话，并按配置建立部门与经理会话。
+2. 首次需要时调用 `company_admin({ action: "createDepartment" | "createEmployee" | "updateDepartment" | "promoteEmployee" | "setChannels" | "setNumbering" | "setManagementName" | "setLevels" })` 建组织，或直接 `company_order`：运行时会在 boot 时创建根级 owner 会话，并按配置建立部门与经理会话。
 3. 在任意前台会话里 `company_order({ type, title, dept?, acceptance? })` 下单；经理线用 `company_assign` 派工，员工收到唤醒消息后干活，并**必须** `company_report({ orderId, attemptId, status, summary })` 回报。
 4. 用 `company_status` 或面板/`GET /company/board` 看工单与工位；`GET /company/costs` 看成本。
 5. 停机/卸载时运行时按「停派工 → 等 idle（超时）→ cancel → drainChildren → dispose owner」顺序优雅收尾，审计落盘。
@@ -166,20 +165,21 @@ Click a heading below to view **English** or **中文** .
 <img width="2196" height="1640" alt="DSH Member Manager04" src="https://github.com/user-attachments/assets/b40fe472-cf54-4a8e-b27c-f17cae4c41b6" />
 
 
-- 📊 **Web 面板**：组织架构、行内编辑、未登记成员一键登记、诊断信息。
+- 📊 **Web 面板**：总架构组织架构图、员工中心、部门人事管理（公司化资料 + 通道/晋升/停用/调岗）、工作流与备份/更新。
 
-- 🛰️ **丰富工具**：12 个宿主端工具，Agent 可完整读写名册。
+- 🛰️ **丰富工具**：29 个宿主端工具（16 个名册 + 13 个公司化），Agent 可完整读写名册并编排公司化流程。
 
 ---
 
 ## 安装
 
-### 方式 A：从插件市场安装
+### 方式 A：从 npm / 插件市场安装
 
 ```bash
-dsh-member-manager
+dsh plugin --profile desktop add dsh-member-manager
 ```
-复制上述插件名dsh-member-manager，在DSH进行如下操作
+
+安装后**必须重启 DSH**。也可以在 DSH 插件市场搜索 `dsh-member-manager` 安装。
 
 <img width="2558" height="1640" alt="member-manager​安装图示" src="https://github.com/user-attachments/assets/b0b211a3-898f-4dc2-9a17-d13a4671581a" />
 
@@ -219,14 +219,14 @@ node scripts/migrate-old-plugin.mjs --apply
 
 ### 卸载
 
-把插件条目从 profile 的 `cordis.patch.yml` / bundle 列表移除后重启 DSH 即可。名册文件会保留在 `~/.dsh/storages/member-manager/`，可手动删除。
+移除 profile 中该插件的三处登记（`package.json` 的 `dependencies`、`dsh.profile.bundles`、`cordis.yml` 条目；或执行 `dsh plugin --profile desktop remove dsh-member-manager`）后重启 DSH。名册与公司化数据保留在 `~/.dsh/storages/member-manager/`，可手动删除。
 
 ---
 
 ## 使用
 
 - **在对话里调用工具**：直接对 Agent 说「列出组织架构」「把张三加入数据组」等，或用 `member_list` / `member_add` / `member_set_role` / `member_set_skills` / `group_manage` 等工具。
-- **在面板里操作**：进入 Web 面板 → 组织架构视图可视化编辑。
+- **在面板里操作**：设置 →「成员管理」→ 总架构 / 员工中心 / 工作流 / 备份与更新。
 - **同步核心成员**：点击面板「同步核心成员」或调用 `member_sync`，把当前团队批量登记进名册。
 
 ---
@@ -299,7 +299,7 @@ node scripts/migrate-old-plugin.mjs --apply
 | `company_accept` | 员工 | 接受派工：`{attemptId}` |
 | `company_ask_help` | 员工 | 求助：`{attemptId,question?}`，落账并转发经理 |
 | `company_hire` | OWNER | 新增员工：`{id,displayName?,department?,role?,kind?,code?,channel?,level?}`（可指定工号/通道/等级，缺省按 role 推导并自动编号） |
-| `company_admin` | OWNER | 控制面：`{action:"createDepartment"|"createEmployee"|"updateDepartment"|"promoteEmployee"|"setRoutingRules"|"setNumbering"|"setManagementName"|"setLevels",args}`（`promoteEmployee` 同通道逐级晋升/跨通道显式转，`setNumbering` 改编号模板，`setLevels` 改等级目录并可增删等级） |
+| `company_admin` | OWNER | 控制面：`{action:"createDepartment"|"createEmployee"|"updateDepartment"|"promoteEmployee"|"setChannels"|"setNumbering"|"setManagementName"|"setCompanyName"|"setLevels"|"updateEmployeeProfile"|"importRosterProfiles"|"setRoutingRules",args}`（`promoteEmployee` 同通道逐级晋升/跨通道显式转，`setNumbering` 改编号模板，`setLevels` 改等级目录并可增删等级） |
 
 > 越权调用（例如员工线调 `company_assign`）返回 `{ ok:false, code:"E_TOOL_LINE" }`；公司运行时未就绪（宿主缺 `agents`/`subagents`）返回 `{ ok:false, code:"E_NO_AGENTS" }`。
 
@@ -363,7 +363,7 @@ MIT
 - 🏢 **Company runtime (the core of this release)**: on top of the roster overlay, members can be orchestrated like a company — **departments, orders, attempt credentials, reports & acceptance, audit trail, token cost attribution** — built entirely on `ctx.agents` / `ctx.subagents` session APIs, **no native team layer required**.
 - 🧵 **Four auto-isolated tool lines**: window line (`company_order` / `company_status` / `company_ask` / `company_cancel`) can only place, inspect and chase orders; manager line (11 tools incl. `company_assign` / `company_review` / `company_borrow` / `company_report` / `company_escalate`) dispatches and accepts; staff line (`company_accept` / `company_report` / `company_ask_help`) only does its own work; the owner line (`company_hire` / `company_admin`) is owner-only. Cross-line calls return `E_TOOL_LINE`, enforced by a `tools.restrict` allow-list, a synchronous `tools.guard` and an execution-time `exec.agent.session.id` lookup.
 - 🪪 **Attempt credentials prevent double-reporting**: `company_report` must carry `attemptId`; stale attempts are rejected. `company_order` accepts `clientOrderId` for idempotent retries, and downstream orders unlock only after their `deps` are done.
-- 💰 **Cost & audit**: employee/manager session tokens and request counts are aggregated per employee / department / order (`GET /company/costs`); org and ledger live in `company.json` while an append-only `audit.jsonl` is replayed on load. `company_admin` currently supports `createDepartment` / `createEmployee` / `setRoutingRules`.
+- 💰 **Cost & audit**: employee/manager session tokens and request counts are aggregated per employee / department / order (`GET /company/costs`); org and ledger live in `company.json` while an append-only `audit.jsonl` is replayed on load. `company_admin` covers 12 control-plane actions (departments / employees / numbering / levels / channels / profiles / roster import — see the tool table below).
 - 🧯 **Degrades everywhere**: with no `agents` / `subagents` service the company tools answer `E_NO_AGENTS` while the roster overlay (existing 16 roster tools, panel, routes) keeps working; agent boot failures only log a warning and never break plugin load.
 - 🧩 **New read-only web routes**: `GET /company/{overview,org,board,costs,orders}` in a uniform `{ ok: true, data }` envelope; `GET /state` carries a `company` summary.
 - 🎖️ **M/P dual-channel levels & numbering**: two career channels — Management (M1 Supervisor → M5 VP) and Professional (P1 Junior Engineer → P6 Principal Expert). **One employee can hold both M and P channel levels at once** (`channels: [{channel,level}]`, at least one; `manager` must include M, `window` only P), with the legacy `channel/level` fields kept as the primary channel for compatibility. Every employee gets a unique employee code (default `E0001`, `E0002`…) plus a level and department; every department gets a unique code (default `D01`, `D02`…). Both patterns are customizable. `company_hire` accepts `code/channels/channel/level`; `company_admin` gains `updateDepartment` / `promoteEmployee` (per-channel promotion, add/remove channels) / `setChannels` / `setNumbering` / `setManagementName` / `setLevels` (levels can be added or removed); legacy data is back-filled on boot without dropping employees.
@@ -484,20 +484,21 @@ Precedence: persisted `numbering` in `company.json` (e.g. via `company_admin.set
 <img width="2196" height="1640" alt="DSH Member Manager04" src="https://github.com/user-attachments/assets/b40fe472-cf54-4a8e-b27c-f17cae4c41b6" />
 
 
-- 📊 **Web panel**: org‑chart view, inline editing, one‑click registration of unregistered members, diagnostics.
+- 📊 **Web panel**: overall-architecture chart, employee center, per-employee HR details (company profile + channels/promote/fire/move), workflow and maintenance tabs.
 
-- 🛰️ **Rich tools**: 12 host tools; agents can read and write the roster completely.
+- 🛰️ **Rich tools**: 29 host tools (16 roster + 13 company); agents can read and write the roster and drive company workflows end-to-end.
 
 ---
 
 ## Installation
 
-### Option A: install from the plugin registry (after publishing)
+### Option A: install from npm / the plugin registry
 
 ```bash
-dsh-member-manager
+dsh plugin --profile desktop add dsh-member-manager
 ```
-Copy the plugin name dsh-member-manager, then in DSH perform the following steps:
+
+Restart DSH afterwards. You can also search for `dsh-member-manager` in the DSH plugin market.
 
 <img width="2558" height="1640" alt="member-manager​安装图示" src="https://github.com/user-attachments/assets/b0b211a3-898f-4dc2-9a17-d13a4671581a" />
 
@@ -535,14 +536,14 @@ node scripts/migrate-old-plugin.mjs --apply
 
 ### Uninstall
 
-Remove the plugin entry from the profile's `cordis.patch.yml` / bundle list, then restart DSH. The registry file is kept at `~/.dsh/storages/member-manager/` and can be deleted manually.
+Remove the three profile registrations (the `package.json` `dependencies` entry, `dsh.profile.bundles`, and the `cordis.yml` entry; or run `dsh plugin --profile desktop remove dsh-member-manager`), then restart DSH. The roster and company data stay at `~/.dsh/storages/member-manager/` and can be deleted manually.
 
 ---
 
 ## Usage
 
 - **Via tools in chat**: tell the Agent "list the org structure", "add 张三 to the 数据组", or call `member_list` / `member_add` / `member_set_role` / `member_set_skills` / `group_manage` directly.
-- **Via the panel**: open the Web panel and edit the org chart visually.
+- **Via the panel**: Settings → "Member Manager" → Overall arch / Employee center / Workflow / Backup & update.
 - **Sync core members**: click "Register core members" in the panel, or call `member_sync`, to bulk‑register the current team.
 
 ---
@@ -615,7 +616,7 @@ All options are optional (omitted ⇒ default):
 | `company_accept` | staff | Accept a dispatch: `{attemptId}` |
 | `company_ask_help` | staff | Ask for help: `{attemptId,question?}` records and forwards to the manager |
 | `company_hire` | OWNER | Add an employee: `{id,displayName?,department?,role?,kind?,code?,channel?,level?}` (code/channel/level optional; derived from role and auto-numbered when omitted) |
-| `company_admin` | OWNER | Control plane: `{action:"createDepartment"|"createEmployee"|"updateDepartment"|"promoteEmployee"|"setRoutingRules"|"setNumbering"|"setManagementName"|"setLevels",args}` (`promoteEmployee` steps one level in-channel or crosses explicitly; `setNumbering` changes code templates; `setLevels` edits the level directory incl. add/remove) |
+| `company_admin` | OWNER | Control plane: `{action:"createDepartment"|"createEmployee"|"updateDepartment"|"promoteEmployee"|"setChannels"|"setNumbering"|"setManagementName"|"setCompanyName"|"setLevels"|"updateEmployeeProfile"|"importRosterProfiles"|"setRoutingRules",args}` (`promoteEmployee` steps one level in-channel or crosses explicitly; `setNumbering` changes code templates; `setLevels` edits the level directory incl. add/remove) |
 
 > Cross-line calls (e.g. a staff session calling `company_assign`) return `{ ok:false, code:"E_TOOL_LINE" }`; when the host lacks `agents`/`subagents` the company tools return `{ ok:false, code:"E_NO_AGENTS" }`.
 
