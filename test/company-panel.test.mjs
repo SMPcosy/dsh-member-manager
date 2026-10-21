@@ -911,8 +911,19 @@ test("CompanyOrgPanel：架构图 = 管理层虚拟节点 + 领导节点 + 部�
   assert.match(text, /文档组/);
   assert.match(text, /负责人：插件组负责人/);
   assert.match(text, /负责人：未设负责人/);
-  assert.match(text, /编制 3\/4 · M 1 · P 2/);
-  assert.match(text, /编制 1\/2 · M 0 · P 1/);
+
+  // v6：部门框内通道人数改为 M/P 徽章 + 右侧编制文本
+  const deptBoxes = collectElements(tree, (node) => node.type === "button" && node.props.title === t("cpDeptBoxHint")).map((node) => textOf(node));
+  assert.equal(deptBoxes.length, 2, "架构图应有两个部门框");
+  assert.match(deptBoxes[0], /\[D01\]/);
+  assert.match(deptBoxes[0], /负责人：插件组负责人/);
+  assert.match(deptBoxes[0], /M 1/);
+  assert.match(deptBoxes[0], /P 2/);
+  assert.match(deptBoxes[0], /3\/4/);
+  assert.match(deptBoxes[1], /\[D02\]/);
+  assert.match(deptBoxes[1], /M 0/);
+  assert.match(deptBoxes[1], /P 1/);
+  assert.match(deptBoxes[1], /1\/2/);
 
   // 领导节点显示 M 徽章 + 姓名 + 工号；无负责人是虚线占位
   assert.match(text, /M2/);
