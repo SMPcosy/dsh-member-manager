@@ -4,6 +4,14 @@
 
 本版本把插件从「名册管理覆盖层」升级为「单包公司化运行时」：不再依赖 DSH 原生团队层（`ctx.agentTeams`），只用 `ctx.agents` / `ctx.subagents` 承载两级组织（部门经理 → 员工）的派工闭环。
 
+### 新增：旧包名兼容转发包（v5.26）
+
+- 新增 `compat/dsh-plugin-member-manager/`：旧包名 `dsh-plugin-member-manager` 的转发包（0.3.1），`dependencies` 指向 `dsh-member-manager@^0.3.0`，`lib/index.js` / `lib/client.js` 用 `export *` 转发新包 host/client 入口，`cordis.patch.yml` 仍插入旧名条目。发布后老用户的旧包名安装命令继续可用（npm 不支持包名重定向，这是唯一可靠做法）。
+- 主包 `package.json` 移除 `repository` 字段：不依赖 GitHub 仓库也能 `npm publish`；保留 `npm run migrate` 快捷方式。
+- 新增 `test/compat-package.test.mjs`（3 用例：元数据/转发导出解析到新包/挂载声明与弃用说明）；`scripts/verify-company.mjs` 自检纳入兼容包文件与测试（仍 19 项）。
+- `docs/14` 新增「方式 D：维护者发布到 npm（不需要 GitHub 仓库）」：`npm login` → `npm pack --dry-run` → 发布主包 → 发布转发包 → `npm deprecate` 旧版本，并给出发布前临时 profile 实测步骤。
+- 全量 **499/499**、`node scripts/verify-company.mjs` **19/19**。
+
 ### 新增：旧包一键迁移与首次启动自动数据迁移（v5.25）
 
 - 新增 `scripts/migrate-old-plugin.mjs`：一键把 profile 从旧包 `dsh-plugin-member-manager` 升级到 `dsh-member-manager`——默认 dry-run，`--apply` 时先备份 profile，再改写 `dependencies` / `bundles` / `cordis.yml` 三处、删除旧包目录，并写入数据迁移标记 `<dataDir>/pending-migration.json`；支持 `--mode npm|link`、`--target`、`--data-only`（只写标记）、`--no-marker`、`--no-uninstall`。

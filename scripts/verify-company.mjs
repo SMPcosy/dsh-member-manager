@@ -100,17 +100,20 @@ await check("设计/审阅/交付文档", () => {
   for (const d of docs) must(existsSync(path.join(REPO, "docs", d)), `缺少 docs/${d}`);
   return `${docs.length} 篇`;
 });
-await check("安装/切换/回滚脚本", () => {
+await check("脚本与兼容包", () => {
   for (const f of ["verify-company.mjs", "switch-to-dsh-member-manager.mjs", "rollback-to-dsh-plugin-member-manager.mjs", "migrate-old-plugin.mjs"]) {
     must(existsSync(path.join(REPO, "scripts", f)), `缺少 scripts/${f}`);
   }
-  return "4 个";
+  for (const f of ["package.json", "lib/index.js", "lib/client.js", "cordis.patch.yml"]) {
+    must(existsSync(path.join(REPO, "compat", "dsh-plugin-member-manager", f)), `缺少 compat/dsh-plugin-member-manager/${f}`);
+  }
+  return "4 脚本 + 兼容包";
 });
 await check("关键测试文件", () => {
-  for (const f of ["company-levels.test.mjs", "company-panel.test.mjs", "migrate-plugin.test.mjs"]) {
+  for (const f of ["company-levels.test.mjs", "company-panel.test.mjs", "migrate-plugin.test.mjs", "compat-package.test.mjs"]) {
     must(existsSync(path.join(REPO, "test", f)), `缺少 test/${f}`);
   }
-  return "3 个";
+  return "4 个";
 });
 await check("总架构组织架构图字样", () => {
   const client = readFileSync(path.join(REPO, "lib", "client.js"), "utf8");

@@ -196,6 +196,9 @@ dsh plugin --profile desktop add link:"<本仓库绝对路径>"
 
 
 
+
+> **旧包名用户**：`dsh-plugin-member-manager` 已通过 npm 转发包（`compat/dsh-plugin-member-manager@0.3.1`）继续可用——装旧包名会自动安装并加载 `dsh-member-manager`。新用户请直接安装新包名；两个包不要同时启用。
+
 ### 方式 C：从旧包升级（`dsh-plugin-member-manager` → `dsh-member-manager`）
 
 ```bash
@@ -508,6 +511,9 @@ dsh plugin --profile desktop add link:"<absolute path to this repo>"
 
 > **Restart DSH afterwards** (this plugin does not hot‑reload):  
 > restart the desktop app, or exit and re‑enter. After the GUI refreshes you'll find "Member Manager" in Settings / the sidebar.
+
+
+> **Old package name**: `dsh-plugin-member-manager` keeps working through the npm forwarding package (`compat/dsh-plugin-member-manager@0.3.1`), which installs and re-exports `dsh-member-manager`. New users should install the new name directly; never enable both packages at once.
 
 ### Option C: upgrade from the old package (`dsh-plugin-member-manager` → `dsh-member-manager`)
 

@@ -1,0 +1,12 @@
+# ============================================================================
+# dsh-plugin-member-manager —— 旧包名兼容转发包（bundke patch）
+# ============================================================================
+# 本包已弃用，仅保留旧包名可安装性：
+#   - 插件实现与 Web 客户端全部由依赖包 dsh-member-manager 提供；
+#   - 安装本包 = 安装 dsh-member-manager@^0.3.0，并按其 bundle patch 注册插件。
+# 推荐直接安装新包：dsh plugin --profile desktop add dsh-member-manager
+# ============================================================================
+
+- insert:
+    - id: dsh-plugin-member-manager
+      name: dsh-plugin-member-manager
