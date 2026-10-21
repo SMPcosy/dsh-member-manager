@@ -4,6 +4,13 @@
 
 本版本把插件从「名册管理覆盖层」升级为「单包公司化运行时」：不再依赖 DSH 原生团队层（`ctx.agentTeams`），只用 `ctx.agents` / `ctx.subagents` 承载两级组织（部门经理 → 员工）的派工闭环。
 
+### 修复：员工会话保留宿主标准工具（v5.24）
+
+- **现象**：给「内容部」派发宣传图工单后，员工（staff 线）调用 `ops_bash` 被 `E_TOOL_LINE` 拒绝，无法运行 Python/Pillow、无法写文件，只能回报 blocked（单元测试全绿但真实任务做不了）。
+- **根因**：`setupAgentContext` 用 `tools.restrict(allow=company_* 白名单)` 过滤继承层，把宿主标准工具（读写文件 / bash / 技能）一并滤掉；`guard` 又对一切工具名做白名单校验。
+- **修复**：`src/host/company-employees.mjs` 不再调用 `restrictTools`；`guard` 只对 `company_*` 工具做线白名单校验（其他工具放行），执行体内部仍保留会话反查。行隔离语义 = 拦公司管理工具越权，不剥夺员工干活所需的标准工具。
+- **影响**：员工/窗口线仍不能调用 `company_hire`/`company_admin` 等越权公司工具；488 测试全绿，无需数据迁移。
+
 ### 重命名
 
 - 包名 / 插件 id / 面板 API 前缀：`dsh-plugin-member-manager` → `dsh-member-manager`（版本号仍为 0.3.0，属品牌重整而非 API 破坏）。
