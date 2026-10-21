@@ -1671,15 +1671,55 @@ test("cpParseBrief：从一句话解析预生成员工（名称+职责），岗�
   assert.equal(parsed.employees.length, 3);
   assert.equal(parsed.employees[0].displayName, "插件架构");
   assert.equal(parsed.employees[0].title, "架构师");
-  assert.equal(JSON.stringify(parsed.employees[0].skills), JSON.stringify(["系统设计", "代码审阅"]));
+  assert.equal(JSON.stringify(parsed.employees[0].skills), JSON.stringify(["系统设计", "领域建模", "代码审阅", "技术选型"]));
   assert.equal(JSON.stringify(parsed.employees[0].duties), JSON.stringify(["机制"]));
+  assert.equal(parsed.employees[0].model, "deepseek-v4-pro-0813");
   assert.equal(parsed.employees[1].title, "工程师");
-  assert.equal(JSON.stringify(parsed.employees[1].skills), JSON.stringify(["编码实现", "单元测试"]));
+  assert.equal(JSON.stringify(parsed.employees[1].skills), JSON.stringify(["编码实现", "单元测试", "接口设计"]));
+  assert.equal(parsed.employees[1].model, "kimi-k2.7-code");
   assert.equal(parsed.employees[2].title, "审阅工程师");
   assert.equal(parsed.employees[2].channel, "P");
+  assert.equal(parsed.employees[2].model, "deepseek-v4-pro-0813");
 
   const noPeople = parse("新建市场部，编制 5 人");
   assert.equal(JSON.stringify(noPeople.employees), "[]", "没有成员描述时不做预设");
+});
+
+test("cpBriefRolePreset：覆盖常见电脑办公岗位，并模拟岗位技能与模型", () => {
+  const { exports } = loadBundle(makeReact());
+  const preset = exports.__internals.cpBriefRolePreset;
+  const cases = [
+    ["财务负责记账", "会计", "deepseek-v4.1-flash-1017"],
+    ["人事负责招聘", "人事专员", "deepseek-v4.1-flash-1017"],
+    ["销售负责客户开发", "销售经理", "deepseek-v4.1-flash-1017"],
+    ["客服负责工单", "客服专员", "deepseek-v4.1-flash-1017"],
+    ["法务负责合同审查", "法务专员", "deepseek-v4-pro-0813"],
+    ["翻译负责本地化", "翻译", "deepseek-v4.1-flash-1017"],
+    ["视频剪辑", "视频编辑", "deepseek-v4.1-flash-1017"],
+    ["运维负责部署", "运维工程师", "kimi-k2.7-code"],
+    ["测试负责用例", "测试工程师", "kimi-k2.7-code"],
+    ["UI 设计", "设计师", "deepseek-v4-pro-0813"],
+    ["数据分析", "数据分析师", "deepseek-v4-pro-0813"],
+    ["总经理", "总经理", "deepseek-v4-pro-0813"],
+    ["产品经理", "产品经理", "deepseek-v4-pro-0813"],
+    ["项目经理", "项目经理", "deepseek-v4-pro-0813"],
+    ["架构负责设计", "架构师", "deepseek-v4-pro-0813"],
+    ["后端开发", "后端工程师", "kimi-k2.7-code"],
+    ["行政助理", "行政专员", "deepseek-v4.1-flash-1017"],
+    ["采购专员", "供应链专员", "deepseek-v4.1-flash-1017"],
+    ["审计", "审计师", "deepseek-v4-pro-0813"],
+    ["研究员", "研究员", "deepseek-v4-pro-0813"],
+  ];
+  for (const [text, title, model] of cases) {
+    const got = preset(text);
+    assert.equal(got.title, title, text + " 应预设岗位 " + title + "，实际 " + got.title);
+    assert.equal(got.model, model, text + " 应预设模型 " + model + "，实际 " + got.model);
+    assert.ok(got.skills.length >= 3, text + " 应至少预设 3 条技能");
+  }
+  const none = preset("完全无法识别的岗位");
+  assert.equal(none.title, "");
+  assert.equal(none.model, "");
+  assert.equal(JSON.stringify(none.skills), "[]");
 });
 
 test("cpParseBrief：解析一句话建部门的名称/编制/说明；解析失败时名称取首句", () => {
