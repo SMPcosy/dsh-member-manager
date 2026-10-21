@@ -103,6 +103,14 @@
 - **修复**：`importRosterProfiles` 曾误读 `member.duties.title` / `member.duties.duties`，而名册成员的真实形状是 `{ title, duties: string[] }`（title 与 duties 同级），导致真实名册的岗位与职责永远导不进来；现改为读 `member.title` 与 `member.duties` 数组，单测夹具同步改为真实形状并断言 title/duties 被补入。
 - **测试**：shared/host/panel 新增用例，全量 **465/465**，`node scripts/verify-company.mjs` **19/19**。
 
+
+### 变更：移除名册分组与名册 UI（v5.9）
+
+- **数据**：删除 `registry.json` 的 3 个名册分组（管理层 / 插件部 / 知识库），13 名成员变为未分组（删除前备份 `~/.dsh/backups/registry-before-group-removal-20261021T142037.json`，成员档案保留，人事详情页的显示名/岗位/职责/技能/模型已由 v5.8 迁入公司化员工）。
+- **面板**：总架构工具栏移除「从名册同步」按钮；调岗表单移除「名册部门」下拉；client 侧 `cpSyncRoster`/`cpSyncDone`/`cpSyncSummary`/`cpRegistryMembers` 删除，`CompanyOrgPanel` 不再接收名册 props。保留「导入名册资料」按钮（只补公司化员工空字段）。
+- **host**：`syncRoster` action 保留（向后兼容，面板不再暴露）；`moveEmployee` 不再联动 `assignGroup`。
+- **测试**：`test/company-panel.test.mjs` 66→60 用例（删除名册同步与名册部门用例，新增「CompanyOrgPanel 只接收 t」）；全量 **459/459**，`node scripts/verify-company.mjs` **19/19**。
+
 ### 调整：名册部门并入调岗、岗位职责条目化（v5.7）
 
 - **名册部门移入调岗**：人事详情页的名册资料不再包含「名册部门」下拉；调岗表单新增「名册部门」下拉（仅关联名册的员工显示），提交时先发公司化 `moveEmployee`，再发名册 `assignGroup`，成功后刷新名册与总架构概览并回到详情。

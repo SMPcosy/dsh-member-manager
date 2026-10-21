@@ -398,14 +398,7 @@ function renderCompany(options = {}) {
   const react = makeReact(seed, { mutable: true });
   const fetchFn = options.fetch || overviewFetch();
   const { exports } = loadBundle(react, { fetch: fetchFn, confirm: options.confirm });
-  const registryMembers = options.registryMembers || [];
-  const registryGroups = options.registryGroups || [];
-  const panelProps = {
-    t,
-    registryMembers,
-    registryGroups,
-    onRegistryRefresh: options.onRegistryRefresh,
-  };
+  const panelProps = { t };
   const render = () => exports.__internals.CompanyOrgPanel(panelProps);
   return {
     t,
@@ -669,13 +662,11 @@ test("源码：v5 总架构结构——默认 company、管理层节点、/compa
   assert.match(src, /cpHrActions: "人事操作"/);
   assert.match(src, /cpHrPolicy: "会话策略"/);
   assert.match(src, /cpMainChannel: "通道说明"/);
-  assert.match(src, /function cpRegistryMembers\(state\)/);
-  assert.match(src, /cpRegistryMembers: cpRegistryMembers/);
+  assert.equal(src.includes("cpRegistryMembers"), false, "名册扁平化 helper 应已移除");
   assert.match(src, /function hrDetail\(emp\)/);
   assert.match(src, /function hrProfileBlock\(emp\)/);
   assert.match(src, /function closeEditor\(\)/);
-  assert.match(src, /registryMembers: cpRegistryMembers\(state\)/);
-  assert.match(src, /onRegistryRefresh: load/);
+  assert.equal(src.includes("registryMembers"), false, "CompanyOrgPanel 不再接收名册成员");
   assert.match(src, /setEditor\(hrEmployeeId != null \? \{ kind: "hr", employeeId: hrEmployeeId \} : null\)/);
   assert.match(src, /opPost\("updateEmployeeProfile"/);
   assert.match(src, /opPost\("importRosterProfiles"/);
@@ -750,8 +741,6 @@ test("字典：v5 文案 zh/en 严格对称，中文与 docs/21 §4.3 一致", (
   assert.equal(zh.cpHrPolicy, "会话策略");
   assert.equal(en.cpHrPolicy, "Session policy");
   assert.equal(zh.cpHrAliases, "别名（逗号分隔）");
-  assert.equal(zh.cpHrGroup, "名册部门");
-  assert.equal(en.cpHrGroup, "Roster group");
   assert.equal(zh.cpHrModel, "模型覆盖");
   assert.equal(en.cpHrModel, "Model override");
   assert.equal(zh.cpHrStatus, "状态");
@@ -786,10 +775,8 @@ test("字典：v5 文案 zh/en 严格对称，中文与 docs/21 §4.3 一致", (
   assert.equal(zh.cpOpFailed, "操作失败");
   assert.equal(zh.cpClose, "关闭");
 
-  // v4.1 从名册同步 / 删除部门
-  assert.equal(zh.cpSyncRoster, "从名册同步");
-  assert.equal(en.cpSyncRoster, "Sync from roster");
-  assert.ok(zh.cpSyncDone.includes("{depts}") && zh.cpSyncDone.includes("{employees}") && zh.cpSyncDone.includes("{updated}"));
+  // v4.1 删除部门
+  assert.equal(zh.cpSyncRoster, undefined, "「从名册同步」文案应已移除");
   assert.equal(zh.cpDeleteDept, "删除部门");
   assert.equal(en.cpDeleteDept, "Delete department");
   assert.ok(zh.cpDeleteDeptConfirm.includes("{name}") && zh.cpDeleteDeptConfirm.includes("{code}"));
@@ -1649,7 +1636,7 @@ test("总架构页：打开拉一次、不注册自动轮询定时器，手动�
   assert.equal(timers.length, 0, "手动刷新也不应创建定时器");
 });
 
-test("总架构工具栏：标题 → 新建部门 → 从名册同步 → 刷新 → 更新于（全部左对齐）", () => {
+test("总架构工具栏：标题 → 新建部门 → 导入名册资料 → 刷新 → 更新于（全部左对齐）", () => {
   const react = makeReactLive([overviewFixture(), null, false, 1700000000000]);
   const { exports } = loadBundle(react, { fetch: companyFetch([]) });
   const t = translator("zh");
@@ -1660,9 +1647,9 @@ test("总架构工具栏：标题 → 新建部门 → 从名册同步 → 刷�
   const start = labels.indexOf(t("cpNewDept"));
   assert.ok(start >= 0, "工具栏应有新建部门按钮");
   assert.deepEqual(
-    labels.slice(start, start + 4),
-    [t("cpNewDept"), t("cpSyncRoster"), t("cpImportProfiles"), t("cpRefresh")],
-    "按钮顺序应为 新建部门 → 从名册同步 → 导入名册资料 → 刷新",
+    labels.slice(start, start + 3),
+    [t("cpNewDept"), t("cpImportProfiles"), t("cpRefresh")],
+    "按钮顺序应为 新建部门 → 导入名册资料 → 刷新",
   );
 
   const text = treeText(tree);
@@ -1688,110 +1675,7 @@ test("总架构工具栏：标题 → 新建部门 → 从名册同步 → 刷�
   );
 });
 
-/* ==================== ⑦ 从名册同步 / 删除部门（docs/16 §4.4 v4.1） ==================== */
-
-/** 点「从名册同步」按钮并等 promise 落定 */
-async function clickSync(tree, t) {
-  const buttons = buttonByLabel(tree, t("cpSyncRoster"));
-  assert.equal(buttons.length, 1, "工具栏应有「从名册同步」按钮");
-  await buttons[0].onClick();
-  await tick();
-}
-
-test("从名册同步：按钮 POST action=syncRoster，成功提示计数并刷新 overview，busy 时禁用", async () => {
-  const calls = [];
-  const { t, seed, tree, react, internals } = renderCompany({
-    fetch: companyFetch(calls, {
-      opResult: { createdDepartments: ["D03", "D04"], createdEmployees: ["E0006", "E0007", "E0008", "E0009", "E0010"], updatedEmployees: ["emp-dev", "emp-doc", "emp-free"] },
-    }),
-  });
-  await clickSync(tree, t);
-
-  const op = calls.find((c) => c.url.endsWith("/company/op"));
-  assert.ok(op, "应发 /company/op 请求");
-  assert.equal(op.method, "POST");
-  assert.deepEqual(op.body, { action: "syncRoster", args: {} });
-  assert.ok(calls.some((c) => c.url.endsWith("/company/overview")), "同步成功后应刷新 overview");
-
-  // 成功提示行（含新增部门/员工、更新数）
-  assert.equal(seed[11], t("cpSyncDone", { depts: 2, employees: 5, updated: 3 }));
-  react.reset();
-  const after = internals.CompanyOrgPanel({ t });
-  assert.match(treeText(after), /已同步：新增 2 个部门、5 名员工，更新 3 名/);
-
-  // busy 期间按钮禁用
-  const busyRender = renderCompany({ busy: true });
-  const busyButton = buttonByLabel(busyRender.tree, busyRender.t("cpSyncRoster"))[0];
-  assert.equal(busyButton.disabled, true, "busy 时「从名册同步」应禁用");
-});
-
-test("从名册同步：失败显示红字 cpOpFailed + code/message，不覆盖 overview", async () => {
-  const { t, seed, react, tree, internals } = renderCompany({
-    fetch: companyFetch([], { opResult: { ok: false, code: "E_NO_REGISTRY", message: "未找到名册文件" } }),
-  });
-  await clickSync(tree, t);
-
-  assert.equal(seed[11], null, "失败时不应显示成功提示");
-  assert.match(String(seed[12]), /E_NO_REGISTRY/);
-  assert.match(String(seed[12]), /未找到名册文件/);
-  react.reset();
-  const after = internals.CompanyOrgPanel({ t });
-  const text = treeText(after);
-  assert.match(text, new RegExp(t("cpOpFailed")));
-  assert.match(text, /E_NO_REGISTRY/);
-});
-
-test("cpSyncSummary：按 createdDepartments/createdEmployees/updatedEmployees 计数并格式化，缺字段兜底 0", () => {
-  const { exports } = loadBundle(makeReact());
-  const summary = exports.__internals.cpSyncSummary;
-  const t = translator("zh");
-
-  assert.equal(
-    summary(t, { createdDepartments: ["D01", "D02"], createdEmployees: ["E1", "E2", "E3", "E4", "E5"], updatedEmployees: ["e1", "e2", "e3"] }),
-    "已同步：新增 2 个部门、5 名员工，更新 3 名",
-  );
-  // 单参形态（无 t）也能给出中文文案
-  assert.equal(summary({ createdDepartments: [] }), "已同步：新增 0 个部门、0 名员工，更新 0 名");
-  assert.equal(summary(t, null), t("cpSyncDone", { depts: 0, employees: 0, updated: 0 }));
-  // 数字形态兜底
-  assert.equal(summary(t, { createdDepartments: 2, createdEmployees: 5, updatedEmployees: 3 }), "已同步：新增 2 个部门、5 名员工，更新 3 名");
-});
-
-test("从名册同步：结果行 5 秒后自动清除（保留 state，定时器 5000ms）", () => {
-  const timers = [];
-  const fakeSetTimeout = (fn, ms) => {
-    timers.push({ fn, ms });
-    return timers.length;
-  };
-  const react = makeReactLive(cpSeed({ syncResult: "已同步：新增 1 个部门、0 名员工，更新 0 名" }));
-  const { exports } = loadBundle(react, { fetch: companyFetch([]), setTimeout: fakeSetTimeout, clearTimeout: () => {} });
-  const t = translator("zh");
-
-  exports.__internals.CompanyOrgPanel({ t });
-  react.flushEffects();
-  const clearTimer = timers.find((timer) => timer.ms === 5000);
-  assert.ok(clearTimer, "结果行应注册 5s 清除定时器");
-
-  clearTimer.fn();
-  react.reset();
-  const after = exports.__internals.CompanyOrgPanel({ t });
-  assert.equal(treeText(after).includes("已同步"), false, "5s 后结果行应从界面消失");
-});
-
-test("从名册同步：手动刷新会立即清除结果行", async () => {
-  const calls = [];
-  const { t, seed, tree } = renderCompany({
-    syncResult: "已同步：新增 1 个部门、2 名员工，更新 0 名",
-    fetch: companyFetch(calls, { opResult: { createdDepartments: ["D03"], createdEmployees: ["E0006", "E0007"], updatedEmployees: [] } }),
-  });
-  // 有种子结果行时先能看到
-  assert.match(treeText(tree), /已同步：新增 1 个部门、2 名员工，更新 0 名/);
-  await buttonByLabel(tree, t("cpRefresh"))[0].onClick();
-  await tick();
-  assert.equal(seed[11], null, "刷新应清除结果行");
-  assert.equal(seed[12], null, "刷新应清除错误行");
-  assert.ok(calls.some((c) => c.url.endsWith("/company/overview")));
-});
+/* ==================== ⑦ 删除部门（docs/16 §4.4 v4.1） ==================== */
 
 test("删除部门：confirm 取消不发请求，弹层保持打开", async () => {
   const calls = [];
@@ -2157,9 +2041,6 @@ test("公司化资料：展示可编辑字段，保存单次 POST updateEmployee
     deptModal: "dept-plugin",
     modalTab: "members",
     fetch: companyFetch(calls),
-    onRegistryRefresh: async () => {
-      refreshed += 1;
-    },
   });
   openHr(made, "E0001");
   made.react.reset();
@@ -2199,51 +2080,28 @@ test("公司化资料：展示可编辑字段，保存单次 POST updateEmployee
   assert.equal(ops[0].args.title, "负责人");
   assert.ok(ops[0].args.duties.includes("汇报"), "职责条目应随保存提交");
   assert.ok(ops[0].args.duties.length <= 8, "职责最多 8 条");
-  assert.equal(refreshed, 1, "保存后刷新名册");
   assert.ok(calls.some((c) => c.url.endsWith("/company/overview")), "保存后应刷新 overview");
   assert.equal(String(made.seed[10].kind), "hr", "保存后详情保持打开");
   assert.equal(made.seed[14], made.t("cpSaved"), "保存成功提示");
 });
 
-test("调岗表单：名册部门下拉随调岗提交，保存时 POST moveEmployee + assignGroup", async () => {
+test("调岗表单：选择目标部门后 POST moveEmployee，不再写名册分组", async () => {
   const calls = [];
-  let refreshed = 0;
-  const made = renderCompany({
-    deptModal: "dept-plugin",
-    modalTab: "members",
-    fetch: companyFetch(calls),
-    registryMembers: [
-      { target: "emp-dev", displayName: "插件工程师", title: "工程师", duties: [], skills: [], aliases: [], groupId: "g-1", status: "active", isRetired: false },
-    ],
-    registryGroups: [
-      { id: "g-1", name: "数据组" },
-      { id: "g-2", name: "文档组" },
-    ],
-    onRegistryRefresh: async () => {
-      refreshed += 1;
-    },
-  });
+  const made = renderCompany({ deptModal: "dept-plugin", modalTab: "members", fetch: companyFetch(calls) });
 
   openHrAction(made, "E0002", made.t("cpMove"));
-  assert.equal(made.seed[10].rosterTarget, "emp-dev", "调岗表单应带名册 target");
-  assert.equal(made.seed[10].groupId, "g-1", "调岗表单应带当前名册部门");
+  made.react.reset();
+  const tree = made.internals.CompanyOrgPanel(made.panelProps);
+  assert.equal(treeText(tree).includes(made.t("cpHrGroup")), false, "调岗表单不应再有「名册部门」下拉");
 
   made.react.reset();
-  let tree = made.internals.CompanyOrgPanel(made.panelProps);
-  const groupSelect = collectElements(tree, (n) => n.type === "select" && n.props.value === "g-1")[0];
-  assert.ok(groupSelect, "调岗表单应有名册部门下拉");
-  groupSelect.props.onChange({ target: { value: "g-2" } });
-
-  made.react.reset();
-  tree = made.internals.CompanyOrgPanel(made.panelProps);
-  await primaryButton(tree, made.t("cpMove")).onClick();
+  await primaryButton(made.internals.CompanyOrgPanel(made.panelProps), made.t("cpMove")).onClick();
   await tick();
 
   const companyOps = calls.filter((c) => c.url.endsWith("/company/op")).map((c) => c.body);
   assert.deepEqual(companyOps[0], { action: "moveEmployee", args: { employeeId: "emp-dev", department: "dept-doc" } });
-  const registryOps = calls.filter((c) => c.url.endsWith("/op") && !c.url.endsWith("/company/op")).map((c) => c.body);
-  assert.deepEqual(registryOps[0], { op: "assignGroup", args: { target: "emp-dev", groupId: "g-2" } });
-  assert.equal(refreshed, 1, "改分组后应刷新名册");
+  const registryOps = calls.filter((c) => c.url.endsWith("/op") && !c.url.endsWith("/company/op"));
+  assert.equal(registryOps.length, 0, "调岗不应再写名册分组");
   assert.equal(String(made.seed[10].kind), "hr", "调岗成功后回到人事详情");
 });
 
@@ -2286,9 +2144,6 @@ test("v5.5 人事详情：技能选择弹层——按钮带已选数量、勾选
     deptModal: "dept-plugin",
     modalTab: "members",
     fetch: companyFetch([]),
-    registryMembers: [
-      { target: "emp-lead", displayName: "负责人", title: "组长", duties: [], skills: ["react"], aliases: [], groupId: "g-1", status: "active", isRetired: false },
-    ],
   });
   openHr(made, "E0001");
   made.react.reset();
@@ -2325,9 +2180,6 @@ test("v5.5 人事详情：模型选择弹层——打开拉 /models、选择写�
     deptModal: "dept-plugin",
     modalTab: "members",
     fetch: companyFetch(calls),
-    registryMembers: [
-      { target: "emp-lead", displayName: "负责人", title: "组长", duties: [], skills: [], aliases: [], groupId: "g-1", status: "active", isRetired: false },
-    ],
   });
   openHr(made, "E0001");
   made.react.reset();
@@ -2359,31 +2211,9 @@ test("v5.5 人事详情：模型选择弹层——打开拉 /models、选择写�
   assert.equal(seed10(made).model, "", "使用默认应清空 model");
 });
 
-test("Panel：向 CompanyOrgPanel 传 registryMembers（扁平化 + 分组名）/registryGroups/onRegistryRefresh", () => {
+test("Panel：CompanyOrgPanel 只接收 t，不再传名册 props（v5.9 清理）", () => {
   const { tree, internals } = renderPanel();
   const company = collectElements(tree, (node) => node.type === internals.CompanyOrgPanel)[0];
   assert.ok(company, "默认应渲染 CompanyOrgPanel");
-  assert.equal(company.props.registryMembers.length, 1);
-  assert.equal(company.props.registryMembers[0].target, "data-organizer");
-  assert.equal(company.props.registryMembers[0].rosterGroupId, "g-1");
-  assert.equal(company.props.registryMembers[0].rosterGroupName, "数据组");
-  assert.equal(company.props.registryGroups.length, 1);
-  assert.equal(company.props.registryGroups[0].name, "数据组");
-  assert.equal(typeof company.props.onRegistryRefresh, "function");
-});
-
-test("cpRegistryMembers：扁平化 groups + ungrouped，并附 rosterGroupName", () => {
-  const { exports } = loadBundle(makeReact());
-  const members = exports.__internals.cpRegistryMembers(sampleView());
-  assert.equal(members.length, 1);
-  assert.equal(members[0].target, "data-organizer");
-  assert.equal(members[0].rosterGroupId, "g-1");
-  assert.equal(members[0].rosterGroupName, "数据组");
-
-  const view = sampleView();
-  view.ungrouped = [{ target: "solo", displayName: "散人" }];
-  const all = exports.__internals.cpRegistryMembers(view);
-  assert.equal(all.length, 2);
-  assert.equal(all[1].rosterGroupName, "");
-  assert.equal(exports.__internals.cpRegistryMembers(null).length, 0);
+  assert.deepEqual(Object.keys(company.props).sort(), ["t"], "公司化面板不再依赖名册数据");
 });
