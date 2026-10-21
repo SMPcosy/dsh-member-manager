@@ -366,10 +366,12 @@ function overviewFetch(calls = [], data = overviewFixture()) {
 
 /* ==================== CompanyOrgPanel 渲染助手 ==================== */
 
-/** CompanyOrgPanel 的 useState 顺序（v5.5：追加 15 rosterPicker / 16 modelProviders）：
+/** CompanyOrgPanel 的 useState 顺序（v5.11：21 槽，追加 15–21 四个编辑器）：
  *  0 overview / 1 error / 2 busy / 3 updatedAt / 4 deptModal / 5 modalTab /
  *  6 newDeptOpen / 7 newDeptDraft / 8 opError / 9 newDeptError / 10 editor /
- *  11 mgmtOpen / 12 saved / 13 rosterPicker / 14 modelProviders */
+ *  11 mgmtOpen / 12 saved / 13 rosterPicker / 14 modelProviders /
+ *  15 mgmtRename / 16 numberingOpen / 17 numberingDraft / 18 levelsOpen /
+ *  19 levelsDraft / 20 deptEditOpen / 21 deptEditDraft */
 function cpSeed(options = {}) {
   return [
     options.overview === undefined ? overviewFixture() : options.overview,
@@ -387,6 +389,13 @@ function cpSeed(options = {}) {
     options.saved === undefined ? null : options.saved,
     options.rosterPicker === undefined ? null : options.rosterPicker,
     options.modelProviders === undefined ? null : options.modelProviders,
+    options.mgmtRename === undefined ? null : options.mgmtRename,
+    options.numberingOpen || false,
+    options.numberingDraft === undefined ? null : options.numberingDraft,
+    options.levelsOpen || false,
+    options.levelsDraft === undefined ? null : options.levelsDraft,
+    options.deptEditOpen || false,
+    options.deptEditDraft === undefined ? null : options.deptEditDraft,
   ];
 }
 
@@ -2214,4 +2223,157 @@ test("Panel：CompanyOrgPanel 只接收 t，不再传名册 props（v5.9 清理�
   const company = collectElements(tree, (node) => node.type === internals.CompanyOrgPanel)[0];
   assert.ok(company, "默认应渲染 CompanyOrgPanel");
   assert.deepEqual(Object.keys(company.props).sort(), ["t"], "公司化面板不再依赖名册数据");
+});
+
+/* ==================== v5.11：管理层重命名 / 编号规则 / 等级通道 / 部门编辑 ==================== */
+
+test("源码：v5.11 四个编辑器入口与四个 op 均已接线", () => {
+  const src = fs.readFileSync(BUNDLE, "utf8");
+  for (const key of [
+    "cpRename",
+    "cpMgmtName",
+    "cpEditNumbering",
+    "cpEditLevels",
+    "cpDeptEdit",
+    "cpSaveNumbering",
+    "cpSaveLevels",
+    "cpEmpPattern",
+    "cpDeptPattern",
+    "cpChannelLabelLabel",
+    "cpBorrowPolicyField",
+  ]) {
+    assert.ok(src.includes(key + ":"), `字典应包含 ${key}`);
+  }
+  assert.ok(src.includes('opPost("setManagementName"'), "应 POST setManagementName");
+  assert.ok(src.includes('opPost("setNumbering"'), "应 POST setNumbering");
+  assert.ok(src.includes('opPost("setLevels"'), "应 POST setLevels");
+  assert.ok(src.includes("managementName"), "视图应读取 managementName");
+  assert.ok(src.includes("numberingModalEl") && src.includes("levelsModalEl"), "应有两个配置弹层");
+});
+
+test("管理层弹层：重命名 → POST setManagementName，成功后刷新并提示已保存", async () => {
+  const calls = [];
+  const made = renderCompany({ fetch: companyFetch(calls) });
+  const mgmt = collectButtons(made.tree).find((button) => String(button.label).startsWith(made.t("cpManagement")));
+  assert.ok(mgmt, "架构图应有管理层节点");
+  mgmt.onClick();
+  assert.equal(made.seed[11], true, "点击管理层应打开只读弹层");
+
+  made.react.reset();
+  let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const rename = buttonByLabel(tree, made.t("cpRename"))[0];
+  assert.ok(rename, "弹层应有重命名按钮");
+  rename.onClick();
+  assert.equal(made.seed[15], made.t("cpManagement"), "默认填入当前管理层名称");
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const input = collectElements(tree, (node) => node.type === "input")[0];
+  assert.equal(input.props.value, made.t("cpManagement"));
+  input.props.onChange({ target: { value: "执行管理层" } });
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const save = buttonByLabel(tree, made.t("cpSave"))[0];
+  assert.ok(save, "应有保存按钮");
+  await save.onClick();
+  await tick();
+
+  const op = calls.find((call) => call.method === "POST" && /\/company\/op$/.test(call.url));
+  assert.ok(op, "应调用 /company/op");
+  assert.equal(op.body.action, "setManagementName");
+  assert.deepEqual(op.body.args, { name: "执行管理层" });
+  assert.equal(made.seed[15], null, "保存成功后关闭重命名输入");
+  assert.equal(made.seed[12], made.t("cpSaved"), "应提示已保存");
+});
+
+test("总架构 meta 卡：编辑编号规则 → POST setNumbering（含 {seq} 与起始号）", async () => {
+  const calls = [];
+  const made = renderCompany({ fetch: companyFetch(calls) });
+  const edit = buttonByLabel(made.tree, made.t("cpEditNumbering"))[0];
+  assert.ok(edit, "meta 卡应有编辑编号规则按钮");
+  edit.onClick();
+  assert.equal(made.seed[16], true, "应打开编号规则弹层");
+
+  made.react.reset();
+  let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const pattern = collectElements(tree, (node) => node.type === "input").find((node) => String(node.props.value).includes("{seq"));
+  assert.ok(pattern, "应有编号模板输入");
+  pattern.props.onChange({ target: { value: "EMP{seq:3}" } });
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const save = buttonByLabel(tree, made.t("cpSaveNumbering"))[0];
+  assert.ok(save, "应有保存编号规则按钮");
+  await save.onClick();
+  await tick();
+
+  const op = calls.find((call) => call.method === "POST" && /\/company\/op$/.test(call.url));
+  assert.equal(op.body.action, "setNumbering");
+  assert.equal(op.body.args.employee.pattern, "EMP{seq:3}");
+  assert.equal(op.body.args.employee.start, 1);
+  assert.equal(op.body.args.department.pattern.includes("{seq"), true);
+  assert.equal(made.seed[16], false, "保存成功后关闭弹层");
+});
+
+test("总架构 meta 卡：编辑等级通道 → POST setLevels（只改名称、代号原样）", async () => {
+  const calls = [];
+  const made = renderCompany({ fetch: companyFetch(calls) });
+  const edit = buttonByLabel(made.tree, made.t("cpEditLevels"))[0];
+  assert.ok(edit, "meta 卡应有编辑等级通道按钮");
+  edit.onClick();
+  assert.equal(made.seed[18], true, "应打开等级通道弹层");
+
+  made.react.reset();
+  let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const level = collectElements(tree, (node) => node.type === "input").find((node) => String(node.props.value) === "经理");
+  assert.ok(level, "应有 M2 名称输入");
+  level.props.onChange({ target: { value: "项目经理" } });
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const save = buttonByLabel(tree, made.t("cpSaveLevels"))[0];
+  await save.onClick();
+  await tick();
+
+  const op = calls.find((call) => call.method === "POST" && /\/company\/op$/.test(call.url));
+  assert.equal(op.body.action, "setLevels");
+  const m2 = op.body.args.levels.M.levels.find((row) => row.code === "M2");
+  assert.equal(m2.name, "项目经理");
+  assert.equal(op.body.args.levels.M.levels.length, LEVELS.M.levels.length, "M 通道等级数量不变（不能增删）");
+  assert.equal(op.body.args.levels.P.levels.length, LEVELS.P.levels.length);
+  assert.equal(made.seed[18], false);
+});
+
+test("部门弹层：部门编辑 → POST updateDepartment 带 borrowPolicy/accepts", async () => {
+  const calls = [];
+  const made = renderCompany({ deptModal: "dept-plugin", fetch: companyFetch(calls) });
+  const edit = buttonByLabel(made.tree, made.t("cpDeptEdit"))[0];
+  assert.ok(edit, "部门弹层应有部门编辑按钮");
+  edit.onClick();
+  assert.equal(made.seed[20], true, "应展开部门编辑表单");
+  assert.equal(made.seed[21].name, "插件组");
+
+  made.react.reset();
+  let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const name = collectElements(tree, (node) => node.type === "input").find((node) => String(node.props.value) === "插件组");
+  name.props.onChange({ target: { value: "插件部" } });
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const policy = collectElements(tree, (node) => node.type === "input").find((node) => String(node.props.value) === "{}");
+  policy.props.onChange({ target: { value: '{"mode":"borrow-only"}' } });
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const save = buttonByLabel(tree, made.t("cpSave"))[0];
+  await save.onClick();
+  await tick();
+
+  const op = calls.find((call) => call.method === "POST" && /\/company\/op$/.test(call.url));
+  assert.equal(op.body.action, "updateDepartment");
+  assert.equal(op.body.args.departmentId, "dept-plugin");
+  assert.equal(op.body.args.name, "插件部");
+  assert.equal(op.body.args.code, "D01");
+  assert.deepEqual(op.body.args.borrowPolicy, { mode: "borrow-only" });
+  assert.deepEqual(op.body.args.accepts, []);
+  assert.equal(made.seed[20], false);
 });

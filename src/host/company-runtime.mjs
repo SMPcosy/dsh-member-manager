@@ -9,7 +9,7 @@ import { createDispatcher } from "./company-dispatcher.mjs";
 import { createScheduler } from "./company-scheduler.mjs";
 import { CompanyStore } from "../shared/company-store.mjs";
 import { resolveCompanyConfig } from "../shared/company-config.mjs";
-import { emptyCompany, createDepartment, createEmployee, updateDepartment, updateEmployee, promoteEmployee, fireEmployee, ensureCompanyCodes, describeEmployeeLevel, describeEmployeeChannels, setEmployeeChannels, primaryChannelOf, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY, DEFAULT_LEVELS, DEFAULT_NUMBERING } from "../shared/company-org.mjs";
+import { emptyCompany, createDepartment, createEmployee, updateDepartment, updateEmployee, promoteEmployee, fireEmployee, ensureCompanyCodes, describeEmployeeLevel, describeEmployeeChannels, setEmployeeChannels, primaryChannelOf, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY, DEFAULT_LEVELS, DEFAULT_NUMBERING, normalizeManagementName, normalizeLevelsOverride, MANAGEMENT_NAME_DEFAULT } from "../shared/company-org.mjs";
 import { emptyLedger, transitionOrder, ORDER_STATES } from "../shared/company-ledger.mjs";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
@@ -184,7 +184,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         properties: {
           action: {
             type: "string",
-            enum: ["createDepartment", "createEmployee", "setRoutingRules", "updateDepartment", "promoteEmployee", "setNumbering", "setChannels", "updateEmployeeProfile", "importRosterProfiles"],
+            enum: ["createDepartment", "createEmployee", "setRoutingRules", "updateDepartment", "promoteEmployee", "setNumbering", "setManagementName", "setLevels", "setChannels", "updateEmployeeProfile", "importRosterProfiles"],
             description: "管理动作",
           },
           args: { type: "object" },
@@ -445,7 +445,24 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
             runtime.company = { ...runtime.company, numbering };
             await store.saveCompany(runtime.company);
             await store.appendAudit({ type: "numbering_set", numbering });
-            break;
+            return { ok: true, numbering };
+          }
+          case "setManagementName": {
+            const name = normalizeManagementName(args.args && args.args.name);
+            if (!name) return { ok: false, code: "E_INVALID_INPUT", message: "name 必填（1-40 字符）" };
+            runtime.company = { ...runtime.company, managementName: name };
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "company.management_renamed", name });
+            return { ok: true, name };
+          }
+          case "setLevels": {
+            const result = applyLevelsOverride(args.args && args.args.levels ? args.args.levels : args.args || {}, runtime.config.levels);
+            if (!result.ok) return result;
+            runtime.config.levels = result.levels;
+            runtime.company = { ...runtime.company, levels: result.levels };
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "company.levels_set" });
+            return { ok: true, levels: result.levels };
           }
           default:
             return { ok: false, code: "E_UNKNOWN_ACTION" };
@@ -484,6 +501,23 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
       }
     }
     return numbering;
+  }
+
+  /** 校验 levels 覆盖参数：代号不可增删、名称非空；通过后交给 normalizeLevelsOverride 合并。 */
+  function applyLevelsOverride(raw, current) {
+    for (const channel of ["M", "P"]) {
+      const incoming = Array.isArray(raw?.[channel]?.levels) ? raw[channel].levels : [];
+      const allowed = new Set((current[channel]?.levels || []).map((lv) => lv.code));
+      for (const lv of incoming) {
+        if (!lv || typeof lv !== "object" || typeof lv.code !== "string") continue;
+        if (!allowed.has(lv.code)) {
+          return { ok: false, code: "E_INVALID_LEVELS", message: `等级代号 ${lv.code} 不存在（不能新增/删除等级）` };
+        }
+        const name = typeof lv.name === "string" ? lv.name.trim() : "";
+        if (!name) return { ok: false, code: "E_INVALID_LEVELS", message: `等级 ${lv.code} 名称不能为空` };
+      }
+    }
+    return { ok: true, levels: normalizeLevelsOverride(raw, current) };
   }
 
   function makeOpId(prefix) {
@@ -537,6 +571,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
               charter: args.charter,
               capacity: args.capacity,
               accepts: args.accepts,
+              borrowPolicy: args.borrowPolicy,
             });
             await store.saveCompany(runtime.company);
             const dept = runtime.company.departments.find((d) => d.id === departmentId);
@@ -712,6 +747,31 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
             await store.appendAudit({ type: "employee_promoted", employeeId, from: result.from, to: result.to });
             return { ok: true, from: result.from, to: result.to };
           });
+        }
+        case "setNumbering": {
+          const numbering = validateNumberingArgs(args, runtime.config.numbering);
+          runtime.config.numbering = numbering;
+          runtime.company = { ...runtime.company, numbering };
+          await store.saveCompany(runtime.company);
+          await store.appendAudit({ type: "numbering_set", numbering });
+          return { ok: true, numbering };
+        }
+        case "setManagementName": {
+          const name = normalizeManagementName(args.name);
+          if (!name) return { ok: false, code: "E_INVALID_INPUT", message: "name 必填（1-40 字符）" };
+          runtime.company = { ...runtime.company, managementName: name };
+          await store.saveCompany(runtime.company);
+          await store.appendAudit({ type: "company.management_renamed", name });
+          return { ok: true, name };
+        }
+        case "setLevels": {
+          const result = applyLevelsOverride(args.levels && typeof args.levels === "object" ? args.levels : args, runtime.config.levels);
+          if (!result.ok) return result;
+          runtime.config.levels = result.levels;
+          runtime.company = { ...runtime.company, levels: result.levels };
+          await store.saveCompany(runtime.company);
+          await store.appendAudit({ type: "company.levels_set" });
+          return { ok: true, levels: result.levels };
         }
         case "setChannels": {
           const employeeId = args.employeeId;
@@ -923,6 +983,12 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     // 编号：company.numbering > config.numbering > DEFAULT_NUMBERING
     const numbering = runtime.company.numbering || config.numbering || DEFAULT_NUMBERING;
     runtime.config.numbering = numbering;
+    // v5.11：等级通道显示名优先用 company.json 里的覆盖（面板可编辑），否则用配置/默认。
+    const levels = runtime.company.levels
+      ? normalizeLevelsOverride(runtime.company.levels, config.levels)
+      : config.levels;
+    runtime.company = runtime.company.levels ? { ...runtime.company, levels } : runtime.company;
+    runtime.config.levels = levels;
     if (!runtime.company.numbering) {
       runtime.company = { ...runtime.company, numbering };
     }
@@ -1121,7 +1187,11 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
       status: booted ? "running" : "stopped",
       warnings: bootWarnings,
       org: { departments, employees },
-      management: { channel: "M", employees: managementEmployees },
+      management: {
+        channel: "M",
+        name: runtime.company.managementName || MANAGEMENT_NAME_DEFAULT,
+        employees: managementEmployees,
+      },
       board: {
         orders: (runtime.ledger.orders || []).length,
         done: (runtime.ledger.orders || []).filter((o) => o.state === "done").length,

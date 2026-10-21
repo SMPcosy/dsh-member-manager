@@ -72,6 +72,52 @@ export const DEFAULT_NUMBERING = Object.freeze({
   department: { pattern: "D{seq:2}", start: 1 },
 });
 
+/* v5.11：架构图顶层「管理层」虚拟节点的显示名（只做展示，不落部门账本）。 */
+export const MANAGEMENT_NAME_DEFAULT = "管理层";
+export const MANAGEMENT_NAME_MAX = 40;
+
+export function normalizeManagementName(value) {
+  if (typeof value !== "string") return "";
+  return value.trim().slice(0, MANAGEMENT_NAME_MAX);
+}
+
+/**
+ * v5.11：等级通道目录的「显示名覆盖」——只允许改 label/description 与各级 name，
+ * 等级代号(code)以 base 为准（不可增删），保证既有员工的 level 引用始终有效。
+ * 返回与 DEFAULT_LEVELS 同形的完整对象；非法值回退 base。
+ */
+export function normalizeLevelsOverride(raw, base = DEFAULT_LEVELS) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const out = {};
+  for (const channel of [LEVEL_CHANNEL.MANAGEMENT, LEVEL_CHANNEL.PROFESSIONAL]) {
+    const baseCh = (base && base[channel]) || DEFAULT_LEVELS[channel];
+    const found = src[channel] && typeof src[channel] === "object" ? src[channel] : {};
+    const label =
+      typeof found.label === "string" && found.label.trim()
+        ? found.label.trim().slice(0, 20)
+        : baseCh.label;
+    const description =
+      typeof found.description === "string" && found.description.trim()
+        ? found.description.trim().slice(0, 160)
+        : baseCh.description || "";
+    const nameByCode = new Map();
+    for (const lv of Array.isArray(found.levels) ? found.levels : []) {
+      if (!lv || typeof lv !== "object" || typeof lv.code !== "string") continue;
+      const name = typeof lv.name === "string" ? lv.name.trim().slice(0, 24) : "";
+      if (name) nameByCode.set(lv.code, name);
+    }
+    out[channel] = {
+      label,
+      description,
+      levels: (Array.isArray(baseCh.levels) ? baseCh.levels : []).map((lv) => ({
+        code: lv.code,
+        name: nameByCode.get(lv.code) || lv.name,
+      })),
+    };
+  }
+  return out;
+}
+
 const CHANNELS = new Set(Object.values(LEVEL_CHANNEL));
 const MAX_CODE_ATTEMPTS = 100000;
 const MAX_CODE_LENGTH = 32;
@@ -102,6 +148,7 @@ export function emptyCompany(now = new Date().toISOString()) {
     employees: [],
     limits: {},
     numbering: clone(DEFAULT_NUMBERING),
+    managementName: MANAGEMENT_NAME_DEFAULT,
   };
 }
 
@@ -174,6 +221,17 @@ export function normalizeCompany(raw, now = new Date().toISOString()) {
       company.employees.push(e);
     } catch (err) {
       warnings.push(`丢弃非法员工 ${emp?.id}: ${err.message}`);
+    }
+  }
+
+  // v5.11：管理层显示名与等级通道显示名的持久化覆盖（只影响展示，不动账本结构）。
+  company.managementName = normalizeManagementName(company.managementName) || MANAGEMENT_NAME_DEFAULT;
+  if (raw && raw.levels !== undefined) {
+    if (raw.levels && typeof raw.levels === "object") {
+      company.levels = normalizeLevelsOverride(raw.levels);
+    } else {
+      delete company.levels;
+      warnings.push("levels 不是对象，已回退默认等级通道。");
     }
   }
 

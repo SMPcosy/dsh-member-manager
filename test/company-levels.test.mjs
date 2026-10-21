@@ -26,6 +26,9 @@ import {
   ensureCompanyCodes,
   promoteEmployee,
   normalizeChannels,
+  normalizeManagementName,
+  normalizeLevelsOverride,
+  MANAGEMENT_NAME_DEFAULT,
   primaryChannelOf,
   resolveChannelLevel,
   describeEmployeeChannels,
@@ -494,4 +497,53 @@ test("updateEmployee：允许更新 title/duties/model/provider", () => {
   assert.deepEqual(emp.duties, ["a", "b"]);
   assert.equal(emp.model, "llama");
   assert.equal(emp.provider, "local");
+});
+
+/* ==================== v5.11：管理层名称与等级通道覆盖 ==================== */
+
+test("normalizeManagementName：trim/截断 40 字，非字符串回落空串", () => {
+  assert.equal(normalizeManagementName("  执行管理层  "), "执行管理层");
+  assert.equal(normalizeManagementName("x".repeat(60)).length, 40);
+  assert.equal(normalizeManagementName(null), "");
+  assert.equal(normalizeManagementName(42), "");
+});
+
+test("normalizeLevelsOverride：只覆盖 label/description 与各级名称，代号与数量不变", () => {
+  const raw = {
+    M: { label: "管理岗", description: "带团队", levels: [{ code: "M2", name: "项目经理" }, { code: "M9", name: "影子" }] },
+    P: { label: "技术岗", levels: [{ code: "P1", name: "见习工程师" }] },
+  };
+  const out = normalizeLevelsOverride(raw);
+  assert.equal(out.M.label, "管理岗");
+  assert.equal(out.M.description, "带团队");
+  assert.equal(out.M.levels.length, DEFAULT_LEVELS.M.levels.length, "不能增删等级");
+  assert.equal(out.M.levels.find((lv) => lv.code === "M2").name, "项目经理");
+  assert.equal(out.M.levels.some((lv) => lv.code === "M9"), false, "未知代号不写入");
+  assert.equal(out.P.levels.find((lv) => lv.code === "P1").name, "见习工程师");
+  assert.equal(out.P.levels.find((lv) => lv.code === "P3").name, DEFAULT_LEVELS.P.levels.find((lv) => lv.code === "P3").name, "未覆盖的等级保持默认");
+});
+
+test("normalizeCompany：managementName 默认「管理层」，自定义名与等级覆盖随数据保留", () => {
+  const { company: fresh } = normalizeCompany(emptyCompany());
+  assert.equal(fresh.managementName, MANAGEMENT_NAME_DEFAULT);
+
+  const raw = emptyCompany();
+  raw.managementName = "  执行层  ";
+  raw.levels = { M: { label: "管理岗", levels: [{ code: "M2", name: "项目经理" }] } };
+  const { company: once } = normalizeCompany(raw);
+  assert.equal(once.managementName, "执行层");
+  assert.equal(once.levels.M.label, "管理岗");
+  assert.equal(once.levels.M.levels.find((lv) => lv.code === "M2").name, "项目经理");
+
+  const { company: twice } = normalizeCompany(JSON.parse(JSON.stringify(once)));
+  assert.equal(twice.managementName, "执行层", "重载不丢管理层名称");
+  assert.equal(twice.levels.M.levels.find((lv) => lv.code === "M2").name, "项目经理", "重载不丢等级覆盖");
+});
+
+test("normalizeCompany：非法 levels 回退默认并产生 warning", () => {
+  const raw = emptyCompany();
+  raw.levels = "not-an-object";
+  const { company: out, warnings } = normalizeCompany(raw);
+  assert.equal(out.levels, undefined, "非法 levels 应被丢弃");
+  assert.ok(warnings.some((w) => String(w).includes("levels")), "应有 levels 回退 warning");
 });

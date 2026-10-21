@@ -112,6 +112,15 @@
 - **测试**：`test/company-panel.test.mjs` 66→60 用例（删除名册同步与名册部门用例，新增「CompanyOrgPanel 只接收 t」）；全量 **459/459**，`node scripts/verify-company.mjs` **19/19**。
 
 
+### 新增：总架构图可编辑——管理层重命名、编号规则/等级通道自定义、部门编辑（v5.11）
+
+- **管理层重命名**：最高层「管理层」节点标题与只读弹层标题改用 `company.managementName`（默认「管理层」）；弹层新增「重命名」入口，保存 `POST /company/op {action:"setManagementName"}`（1–40 字符、审计 `company.management_renamed`），重启后保留。
+- **编号规则可编辑**：图表下方 meta 卡「编号规则」行新增编辑按钮 → 弹层里改员工/部门模板与起始号，保存 `setNumbering`（模板必须含 `{seq}`/`{seq:N}`，占位符限 `seq`/`dept`/`channel`/`level`，审计 `numbering_set`）。
+- **等级通道可编辑**：meta 卡「等级图例」行新增编辑按钮 → 弹层按 M/P 两段改通道名称与各等级名称，保存 `setLevels`（代号不可增删、名称非空、审计 `company.levels_set`），图例与员工等级徽章即时更新。
+- **部门编辑**：部门弹层「部门架构图」页签新增「部门编辑」按钮，表单含名称/编号/编制容量/职责描述/接单范围/借调策略，保存 `updateDepartment`（`borrowPolicy` 透传并落盘）。
+- **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
+- **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
+
 ### 变更：移除导入名册按钮 + 人事详情资料区 3 列布局（v5.10）
 
 - **面板**：总架构工具栏删除「导入名册资料」按钮（`cpImportProfiles`/`cpImportDone` 文案、`importRosterProfiles()` 调用、`syncResult`/`syncError` 状态一并删除；host 侧 action 保留）；「人事管理」详情页的「公司化资料」改为 3 列栅格——第 1 行「中文显示名 / 岗位名称」，第 2 行「技能选择 / 模型选择」，第 3 列（跨两行）整列留给「岗位职责」条目编辑；前两列压缩为 `minmax(120px,190px)`，剩余宽度全部给岗位职责列。

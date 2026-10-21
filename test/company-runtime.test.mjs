@@ -935,3 +935,111 @@ test("company_hire 含 provider+model 时 startActivation 传 agentOptions", asy
   assert.deepEqual(capturedRequest.agentOptions, { provider: "openai", model: "gpt-4" });
   await rt.shutdown();
 });
+
+/* ==================== v5.11 管理层重命名 / 编号规则 / 等级通道 / 部门编辑 ==================== */
+
+test("POST /company/op setManagementName 持久化并审计；空名拒绝", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-mgmt-name-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+
+  const res = await op.handler({}, new URL("http://localhost/company/op"), {
+    action: "setManagementName",
+    args: { name: "  执行管理层  " },
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.name, "执行管理层");
+  assert.equal(rt.view().management.name, "执行管理层", "view().management.name 应更新");
+
+  const empty = await op.handler({}, new URL("http://localhost/company/op"), {
+    action: "setManagementName",
+    args: { name: "   " },
+  });
+  assert.equal(empty.ok, false);
+  assert.equal(empty.code, "E_INVALID_INPUT");
+  await rt.shutdown();
+
+  const rt2 = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt2.boot();
+  assert.equal(rt2.view().management.name, "执行管理层", "重启后管理层名称仍在");
+  await rt2.shutdown();
+});
+
+test("POST /company/op setNumbering 持久化编号规则；非法模板拒绝", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-numbering-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+
+  const res = await op.handler({}, new URL("http://localhost/company/op"), {
+    action: "setNumbering",
+    args: { employee: { pattern: "EMP{seq:3}", start: 7 }, department: { pattern: "DEPT{seq:2}", start: 3 } },
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.numbering.employee.pattern, "EMP{seq:3}");
+  assert.equal(res.numbering.employee.start, 7);
+  assert.equal(rt.view().numbering.department.start, 3);
+
+  const bad = await op.handler({}, new URL("http://localhost/company/op"), {
+    action: "setNumbering",
+    args: { employee: { pattern: "EMP-", start: 1 } },
+  });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.code, "E_INVALID_NUMBERING");
+  await rt.shutdown();
+
+  const rt2 = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt2.boot();
+  assert.equal(rt2.view().numbering.employee.pattern, "EMP{seq:3}", "重启后编号规则仍在");
+  await rt2.shutdown();
+});
+
+test("POST /company/op setLevels 只改名不增删；未知代号与空名拒绝", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-levels-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  const base = rt.view().levels;
+  const payload = (mutateName) => ({
+    M: { label: base.M.label, levels: base.M.levels.map((lv) => ({ code: lv.code, name: lv.code === "M2" ? mutateName : lv.name })) },
+    P: { label: base.P.label, levels: base.P.levels.map((lv) => ({ code: lv.code, name: lv.name })) },
+  });
+
+  const res = await op.handler({}, new URL("http://localhost/company/op"), { action: "setLevels", args: { levels: payload("项目经理") } });
+  assert.equal(res.ok, true);
+  const m2 = rt.view().levels.M.levels.find((lv) => lv.code === "M2");
+  assert.equal(m2.name, "项目经理");
+  assert.equal(rt.view().levels.M.levels.length, base.M.levels.length, "不能增删等级");
+
+  const unknown = await op.handler({}, new URL("http://localhost/company/op"), {
+    action: "setLevels",
+    args: { levels: { M: { levels: [{ code: "M9", name: "影子" }] } } },
+  });
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.code, "E_INVALID_LEVELS");
+
+  const blank = await op.handler({}, new URL("http://localhost/company/op"), { action: "setLevels", args: { levels: payload("   ") } });
+  assert.equal(blank.ok, false);
+  assert.equal(blank.code, "E_INVALID_LEVELS");
+  await rt.shutdown();
+});
+
+test("POST /company/op updateDepartment 持久化 borrowPolicy", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-dept-borrow-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d1", name: "研发部", capacity: 3 } });
+
+  const res = await op.handler({}, new URL("http://localhost/company/op"), {
+    action: "updateDepartment",
+    args: { departmentId: "d1", name: "研发部", code: "D09", capacity: 5, charter: "负责研发", accepts: ["feature"], borrowPolicy: { mode: "borrow-only" } },
+  });
+  assert.equal(res.ok, true);
+  const dept = rt.view().org.departments.find((d) => d.id === "d1");
+  assert.equal(dept.code, "D09");
+  assert.equal(dept.capacity, 5);
+  assert.deepEqual(dept.borrowPolicy, { mode: "borrow-only" });
+  await rt.shutdown();
+});
