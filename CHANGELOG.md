@@ -121,6 +121,11 @@
 - **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
 - **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
 
+### 新增：删除等级后自动顺位（v5.12.1）
+- 等级通道弹层删除某一等级后，剩余等级代号立即重排（如删 P1，原 P2 显示为 P1）；保存时随 `setLevels` 提交 `levelRemap`。
+- host `applyLevelsOverride` 按 `levelRemap` 同步改写员工 `channels[].level` 与 legacy `channel/level`；无映射且旧代号不在新目录报 `E_LEVEL_IN_USE`，映射目标非法报 `E_INVALID_LEVELS`。
+- **测试**：company-runtime 49、company-panel 67；全量 476/476。
+
 ### 新增：总架构自定义能力增强——占位符说明、等级可增删、按钮改名「自定义」（v5.12）
 - **编号规则说明**：自定义编号规则弹层新增占位符用法说明（`{seq}`/`{seq:N}`/`{dept}`/`{channel}`/`{level}` 含义与示例，多行渲染）。
 - **等级梯度可增删**：等级通道弹层每级可删除（仅剩 1 级时隐藏）、每通道可添加等级（代号自动递增），保存走 `setLevels`；shared 新增 `validateLevelsDirectory` 校验代号格式/重复/空名/每通道 ≥1 级。

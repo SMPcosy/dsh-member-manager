@@ -995,6 +995,36 @@ test("POST /company/op setNumbering 持久化编号规则；非法模板拒绝",
   await rt2.shutdown();
 });
 
+test("POST /company/op setLevels 删除前序等级时按 levelRemap 顺位重映射员工等级", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-level-remap-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const op = findOpRoute(rt);
+  const ownerExec = { agent: { session: { id: rt.ownerSessionId } } };
+  await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { name: "顺位部", capacity: 4 } });
+  const hired = await rt.tools.find((t) => t.name === "company_hire").execute(
+    { id: "r1", displayName: "顺位员工", role: "staff", kind: "permanent", department: rt.view().org.departments[0].id, channels: [{ channel: "P", level: "P2" }] },
+    ownerExec,
+  );
+  assert.equal(hired.ok, true, JSON.stringify(hired));
+  assert.equal(rt.view().org.employees[0].channels[0].level, "P2");
+
+  const base = rt.view().levels;
+  const pLevels = base.P.levels.filter((lv) => lv.code !== "P1").map((lv) => ({ code: "P" + (Number(lv.code.slice(1)) - 1), name: lv.name }));
+  const res = await op.handler({}, new URL("http://localhost/company/op"), {
+    action: "setLevels",
+    args: {
+      levels: { M: { levels: base.M.levels.map((lv) => ({ code: lv.code, name: lv.name })) }, P: { levels: pLevels } },
+      levelRemap: { P: Object.fromEntries(base.P.levels.filter((lv) => lv.code !== "P1").map((lv) => [lv.code, "P" + (Number(lv.code.slice(1)) - 1)])) },
+    },
+  });
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(rt.view().levels.P.levels[0].code, "P1");
+  assert.equal(rt.view().levels.P.levels[0].name, "工程师", "原 P2 顺位为 P1");
+  assert.equal(rt.view().org.employees[0].channels[0].level, "P1", "员工的 P2 顺位为 P1");
+  assert.equal(rt.view().org.employees[0].level, "P1", "legacy level 同步更新");
+});
+
 test("POST /company/op setLevels 可增删等级：名称可改、可新增等级；被引用等级不可删；非法代号/空名拒绝", async () => {
   const dataDir = `/tmp/test-dsh-member-manager-levels-${Date.now()}`;
   const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });

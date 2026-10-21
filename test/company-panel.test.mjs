@@ -2381,6 +2381,34 @@ test("自定义等级通道：可添加等级（代号自动递增）并提交�
   assert.equal(added.name, "资深总监");
 });
 
+test("自定义等级通道：删除前序等级后自动顺位，提交 levelRemap", async () => {
+  const calls = [];
+  const made = renderCompany({ fetch: companyFetch(calls) });
+  const edit = buttonByLabel(made.tree, made.t("cpCustomize"))[1];
+  edit.onClick();
+  assert.equal(made.seed[18], true, "应打开等级通道弹层");
+
+  made.react.reset();
+  let tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const removeButtons = buttonByLabel(tree, made.t("cpRemoveLevel"));
+  assert.equal(removeButtons.length, LEVELS.M.levels.length + LEVELS.P.levels.length, "每个等级都有删除按钮");
+  removeButtons[LEVELS.M.levels.length].onClick(); // P1
+
+  made.react.reset();
+  tree = made.internals.CompanyOrgPanel(made.panelProps);
+  const save = buttonByLabel(tree, made.t("cpSaveLevels"))[0];
+  await save.onClick();
+  await tick();
+
+  const op = calls.find((call) => call.method === "POST" && /\/company\/op$/.test(call.url));
+  assert.ok(op, "应提交 setLevels");
+  const levels = op.body.args.levels.P.levels;
+  assert.equal(levels.length, LEVELS.P.levels.length - 1, "删除后 P 通道少一级");
+  assert.equal(levels[0].code, "P1", "后续等级自动顺位");
+  assert.equal(levels[0].name, "工程师", "原 P2 顺位为 P1");
+  assert.deepEqual(op.body.args.levelRemap.P, { P2: "P1", P3: "P2", P4: "P3", P5: "P4" }, "提交 levelRemap 供宿主重映射员工");
+});
+
 test("部门弹层：部门编辑 → POST updateDepartment 带 borrowPolicy/accepts", async () => {
   const calls = [];
   const made = renderCompany({ deptModal: "dept-plugin", fetch: companyFetch(calls) });

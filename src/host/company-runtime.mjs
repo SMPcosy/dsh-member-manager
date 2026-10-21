@@ -456,7 +456,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
             return { ok: true, name };
           }
           case "setLevels": {
-            const result = applyLevelsOverride(args.args && args.args.levels ? args.args.levels : args.args || {}, runtime.config.levels);
+            const result = applyLevelsOverride(args.args || {}, runtime.config.levels);
             if (!result.ok) return result;
             runtime.config.levels = result.levels;
             runtime.company = { ...runtime.company, levels: result.levels };
@@ -504,22 +504,54 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
   }
 
   /** v5.12：等级目录可增删等级；校验格式/名称，并拒绝删除仍被员工引用的等级。 */
-  function applyLevelsOverride(raw, current) {
+  function applyLevelsOverride(input, current) {
+    const raw = input && typeof input === "object" && input.levels && typeof input.levels === "object"
+      ? input.levels
+      : input || {};
+    const remap = input && typeof input === "object" && input.levelRemap && typeof input.levelRemap === "object"
+      ? input.levelRemap
+      : null;
     const checked = validateLevelsDirectory(raw, current);
     if (!checked.ok) return { ok: false, code: "E_INVALID_LEVELS", message: checked.message };
     const levels = checked.levels;
+    const updates = [];
     for (const emp of runtime.company.employees || []) {
       const channels = Array.isArray(emp.channels) && emp.channels.length
         ? emp.channels
         : [{ channel: emp.channel, level: emp.level }];
+      const next = [];
       for (const entry of channels) {
         const track = levels[entry.channel]?.levels || [];
-        if (!entry.level || !track.some((lv) => lv.code === entry.level)) {
+        const codes = track.map((lv) => lv.code);
+        let level = entry.level;
+        const mapped = remap && remap[entry.channel] ? remap[entry.channel][level] : undefined;
+        if (mapped !== undefined) {
+          if (!codes.includes(mapped)) {
+            return {
+              ok: false,
+              code: "E_INVALID_LEVELS",
+              message: `等级重映射目标 ${mapped} 不存在于 ${entry.channel} 通道目录`,
+            };
+          }
+          level = mapped;
+        } else if (!level || !codes.includes(level)) {
           return {
             ok: false,
             code: "E_LEVEL_IN_USE",
             message: `等级 ${entry.level || "(空)"} 仍被员工「${emp.displayName || emp.id}」使用，不能删除`,
           };
+        }
+        next.push({ ...entry, level });
+      }
+      updates.push([emp, next]);
+    }
+    for (const [emp, nextChannels] of updates) {
+      emp.channels = nextChannels;
+      if (emp.channel && emp.level) {
+        const primary = nextChannels.find((entry) => entry.channel === emp.channel) || nextChannels[0];
+        if (primary) {
+          emp.channel = primary.channel;
+          emp.level = primary.level;
         }
       }
     }
@@ -771,7 +803,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
           return { ok: true, name };
         }
         case "setLevels": {
-          const result = applyLevelsOverride(args.levels && typeof args.levels === "object" ? args.levels : args, runtime.config.levels);
+          const result = applyLevelsOverride(args, runtime.config.levels);
           if (!result.ok) return result;
           runtime.config.levels = result.levels;
           runtime.company = { ...runtime.company, levels: result.levels };
