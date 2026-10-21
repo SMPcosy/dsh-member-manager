@@ -396,6 +396,7 @@ function cpSeed(options = {}) {
     options.levelsDraft === undefined ? null : options.levelsDraft,
     options.deptEditOpen || false,
     options.deptEditDraft === undefined ? null : options.deptEditDraft,
+    options.newDeptPreview === undefined ? null : options.newDeptPreview,
   ];
 }
 
@@ -788,11 +789,15 @@ test("字典：v5 文案 zh/en 严格对称，中文与 docs/21 §4.3 一致", (
   assert.equal(en.cpDeleteDept, "Delete department");
   assert.ok(zh.cpDeleteDeptConfirm.includes("{name}") && zh.cpDeleteDeptConfirm.includes("{code}"));
 
-  // 新建部门
+  // 新建部门（v5.17：一句话描述自动解析 + 创建预览两步）
   assert.equal(zh.cpNewDept, "新建部门");
   assert.equal(zh.cpNewDeptName, "部门名称");
-  assert.equal(zh.cpParse, "解析");
-  assert.ok(zh.cpParseHint.includes("解析"));
+  assert.equal(zh.cpPreviewDept, "创建预览");
+  assert.equal(en.cpPreviewDept, "Create preview");
+  assert.equal(zh.cpPreviewBack, "返回修改");
+  assert.ok(zh.cpNewDeptBriefPh.includes("例："), "描述栏应以示例内容作占位");
+  assert.equal(zh.cpParse, undefined, "「解析」按钮文案应移除");
+  assert.equal(en.cpParse, undefined);
 
   // 总架构页保留的统计/图例/编号/成本
   assert.equal(zh.cpDeptCount, "部门");
@@ -1126,57 +1131,54 @@ test("CompanyOrgPanel：8 个 KPI + 编号规则 + 等级图例 + 成本归因�
   assert.ok(internals.buildCompanyOrgView);
 });
 
-test("CompanyOrgPanel：改按钮打开新建部门对话框（字段齐全，名称空 / 编制非法时禁用创建）", () => {
+test("CompanyOrgPanel：打开新建部门对话框（描述栏示例占位、无解析按钮、创建预览按钮常可用）", () => {
   const { t, tree } = renderCompany({ newDeptOpen: true, newDeptDraft: { id: "", name: "", charter: "", capacity: "4", brief: "" } });
   const inputs = collectElements(tree, (node) => node.type === "input" || node.type === "textarea");
   assert.ok(inputs.length >= 5, "对话框应有 ID/名称/说明/编制/一句话描述字段");
   const placeholders = inputs.map((node) => node.props.placeholder || "");
   assert.ok(placeholders.includes(t("cpAutoId")));
-  assert.equal(buttonByLabel(tree, t("cpParse")).length, 1);
+  assert.ok(placeholders.includes(t("cpNewDeptBriefPh")), "描述栏应以示例内容作占位");
+  assert.equal(buttonByLabel(tree, t("cpParse")).length, 0, "「解析」按钮应删除");
   const props = inputs.map((node) => node.props);
   assert.ok(props.some((p) => p.type === "number"));
 
-  const create = buttonByLabel(tree, t("cpCreateDept"))[0];
-  assert.ok(create);
-  assert.equal(create.disabled, true, "名称为空时创建按钮应禁用");
-
-  const invalid = renderCompany({ newDeptOpen: true, newDeptDraft: { id: "", name: "市场部", charter: "", capacity: "abc", brief: "" } });
-  assert.equal(buttonByLabel(invalid.tree, t("cpCreateDept"))[0].disabled, true, "编制非法时创建按钮应禁用");
-
-  const valid = renderCompany({ newDeptOpen: true, newDeptDraft: { id: "", name: "市场部", charter: "", capacity: "5", brief: "" } });
-  assert.equal(buttonByLabel(valid.tree, t("cpCreateDept"))[0].disabled, false);
+  const preview = buttonByLabel(tree, t("cpPreviewDept"))[0];
+  assert.ok(preview, "应有「创建预览」按钮");
+  assert.equal(preview.disabled, false, "空表单也可先解析预览（预览弹窗里再修正）");
+  assert.equal(buttonByLabel(tree, t("cpCreateDept")).length, 0, "创建按钮只在预览弹窗出现");
 });
 
-test("新建部门：一句话解析自动填名称/编制/说明，且解析不发请求", async () => {
+test("新建部门：点「创建预览」自动解析一句话并打开预览弹窗（纯客户端，不发请求）", () => {
   const calls = [];
-  const { t, seed, react, tree, internals } = renderCompany({
+  const { t, seed, tree } = renderCompany({
     newDeptOpen: true,
-    newDeptDraft: { id: "", name: "", charter: "", capacity: "4", brief: "新建市场部，编制 5 人" },
+    newDeptDraft: { id: "", name: "", charter: "", capacity: "", brief: "新建市场部，编制 5 人" },
     fetch: overviewFetch(calls),
   });
-  buttonByLabel(tree, t("cpParse"))[0].onClick();
+  buttonByLabel(tree, t("cpPreviewDept"))[0].onClick();
   assert.equal(calls.filter((c) => c.url.endsWith("/company/op")).length, 0, "解析是纯客户端逻辑");
-  assert.equal(seed[7].name, "市场");
-  assert.equal(seed[7].capacity, "5");
-  assert.match(seed[7].charter, /新建市场部/);
+  assert.equal(seed[22].name, "市场");
+  assert.equal(seed[22].capacity, "5");
+  assert.match(seed[22].charter, /新建市场部/);
 
-  // 重新渲染：输入框显示解析结果
-  react.reset();
-  const after = internals.CompanyOrgPanel({ t });
-  assert.match(treeText(after), /市场/);
-  const values = collectElements(after, (node) => node.type === "input" || node.type === "textarea").map((node) => String(node.props.value));
-  assert.ok(values.includes("市场"), "名称输入框应填入解析出的名称");
-  assert.ok(values.includes("5"), "编制输入框应填入解析出的编制");
+  const react = makeReact(seed, { mutable: true });
+  const { exports } = loadBundle(react, { fetch: overviewFetch() });
+  const preview = exports.__internals.CompanyOrgPanel({ t });
+  const text = treeText(preview);
+  assert.ok(text.includes(t("cpPreviewTitle")), "应弹出创建预览弹窗：" + text.slice(0, 120));
+  assert.equal(buttonByLabel(preview, t("cpPreviewBack")).length, 1, "预览弹窗应有「返回修改」");
+  const values = collectElements(preview, (node) => node.type === "input").map((node) => String(node.props.value));
+  assert.ok(values.includes("市场"), "预览里名称应为解析结果：" + values.join("|"));
+  assert.ok(values.includes("5"), "预览里编制应为解析结果：" + values.join("|"));
 });
 
-test("新建部门：创建 POST createDepartment，成功后关闭对话框并刷新 overview", async () => {
+test("新建部门：预览确认后创建 POST createDepartment，成功后关闭并刷新 overview", async () => {
   const calls = [];
-  const { t, seed, tree, internals } = renderCompany({
+  const { t, seed, tree } = renderCompany({
     newDeptOpen: true,
-    newDeptDraft: { id: "", name: "市场部", charter: "负责市场", capacity: "5", brief: "" },
+    newDeptPreview: { id: "", name: "市场部", charter: "负责市场", capacity: "5" },
     fetch: companyFetch(calls),
   });
-  assert.ok(internals);
   await buttonByLabel(tree, t("cpCreateDept"))[0].onClick();
   await tick();
 
@@ -1185,18 +1187,20 @@ test("新建部门：创建 POST createDepartment，成功后关闭对话框并�
   assert.equal(op.method, "POST");
   assert.deepEqual(op.body, { action: "createDepartment", args: { name: "市场部", charter: "负责市场", capacity: 5 } });
   assert.equal(seed[6], false, "成功后应关闭对话框");
+  assert.equal(seed[22], null, "成功后应清空预览状态");
   assert.ok(calls.filter((c) => c.url.endsWith("/company/overview")).length >= 1, "成功后应刷新 overview");
 });
 
-test("新建部门：创建失败显示 cpOpFailed + code/message，对话框保持打开", async () => {
+test("新建部门：预览创建失败显示 cpOpFailed + code/message，预览弹窗保持打开", async () => {
   const { t, seed, tree } = renderCompany({
     newDeptOpen: true,
-    newDeptDraft: { id: "", name: "市场部", charter: "", capacity: "4", brief: "" },
+    newDeptPreview: { id: "", name: "市场部", charter: "", capacity: "4" },
     fetch: companyFetch([], { opResult: { ok: false, code: "E_DEPT_DUPLICATE", message: "部门名称重复" } }),
   });
   await buttonByLabel(tree, t("cpCreateDept"))[0].onClick();
   await tick();
   assert.equal(seed[6], true, "失败时对话框保持打开");
+  assert.equal(seed[22].name, "市场部", "失败时预览状态保留");
   assert.match(String(seed[9]), /E_DEPT_DUPLICATE/);
   assert.match(String(seed[9]), /部门名称重复/);
 

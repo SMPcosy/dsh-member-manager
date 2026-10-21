@@ -121,6 +121,13 @@
 - **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
 - **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
 
+### 变更：新建部门改为「创建预览」两步（v5.17）
+
+- 「新建部门」对话框删除「解析」按钮与提示行；一句话描述 textarea 改为**灰色示例占位**（`cpNewDeptBriefPh`，例：新建市场部，编制 5 人，负责市场推广）。
+- 底部主按钮改为 `创建预览`（`cpPreviewDept`）：点击自动解析一句话（纯客户端、不发请求），把名称/说明/编制写入并打开「创建预览」弹窗。
+- 预览弹窗展示可编辑的四项（部门 ID/名称/说明/编制），支持 `返回修改` 回到第一步；点 `创建` 才真正 `POST /company/op createDepartment`，成功后关闭并刷新，失败在预览内显示 `{code}: {message}` 且保持打开。
+- `test/company-panel.test.mjs` 的对话框/解析/创建用例改写为两步流程（67 用例）。
+
 ### 视觉调整：管理层窄高卡片 + 工作网圆角总线连线（v5.16）
 
 - 管理层节点改为**窄高竖排卡片**：宽度 230px → 118px、最小高度 100px，状态点/名称/成员数/token 用量居中竖排，相对部门列自动上下居中。
