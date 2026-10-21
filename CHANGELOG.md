@@ -121,6 +121,13 @@
 - **工具层**：`company_admin` 新增 `setManagementName`/`setLevels`，`setNumbering` 返回值补 `numbering`；shared 新增 `normalizeManagementName`/`normalizeLevelsOverride`/`MANAGEMENT_NAME_DEFAULT`。
 - **测试**：company-levels 41、company-runtime 48、company-panel 65；全量 **472/472**，`node scripts/verify-company.mjs` **19/19**。
 
+### 变更：右侧栏「组织架构」改为公司化「工作网」（v5.13）
+
+- 右侧边栏 tab 更名为「工作网」，数据源从名册/任务参与者改为公司化组织：管理层（M 通道聚合）→ 部门（编号 + 负责人）→ 员工（工号 + 等级徽章 + 模型 + 任务 + 用量）。
+- `/orgmap` 升级为 version 3、`source: "company"`，新增 `worknet` 统计、部门 `code`/`managerName`、员工 `code`/`channel`/`level`/`levelName`；公司化未启用或无员工时回退旧任务视图（version 2）。
+- 页脚新增「员工 N / 部门 N」；任务下拉保留，仅影响任务摘要与动态连线。
+- **测试**：client-bundle 39 用例（新增工作网渲染用例）、全量 478/478；verify 19/19。
+
 ### 修复：历史数据中的旧通道显示名自动迁移（v5.12.3）
 - boot 时若 `company.json` 持久化的等级目录里 P 通道 label 仍是「专业技术通道」，自动改写为「技术通道」、持久化并写审计 `company.levels_label_migrated`。
 - **测试**：company-runtime 50；全量 477/477。

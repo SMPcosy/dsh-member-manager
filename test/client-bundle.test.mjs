@@ -1013,7 +1013,7 @@ const ORGMAP_FIXTURE = {
 test("组织架构图：格式化纯函数与布局常量", () => {
   const { exports } = loadBundle(makeReact());
   const I = exports.__internals;
-  assert.equal(I.ORGMAP_VERSION, 2);
+  assert.equal(I.ORGMAP_VERSION, 3);
   assert.equal(I.ORGMAP_CARD_W, 188);
   assert.equal(I.orgmapFormatTokens(0), "0");
   assert.equal(I.orgmapFormatTokens(1500), "1.5k");
@@ -1095,6 +1095,124 @@ test("组织架构图：无窗口框、无位置按钮的层级视图（并联�
 
   overlay.destroy();
   assert.equal(overlay.root.parentNode, null, "销毁后应移除节点");
+});
+
+const COMPANY_ORGMAP_FIXTURE = {
+  version: 3,
+  source: "company",
+  worknet: { departments: 2, employees: 3 },
+  generatedAt: "2026-10-21T08:40:00.000Z",
+  tasks: [],
+  task: null,
+  lead: {
+    target: "__management__",
+    displayName: "管理层",
+    title: "2 名 M 通道成员",
+    status: "idle",
+    usage: { total: 1200, requests: 2 },
+  },
+  groups: [
+    {
+      id: "plugin-dept",
+      name: "D02 插件部",
+      code: "D02",
+      managerName: "插件架构",
+      members: [
+        {
+          target: "plugin-arch",
+          displayName: "插件架构",
+          code: "E0002",
+          channel: "M",
+          level: "M2",
+          levelName: "经理",
+          status: "idle",
+          usage: { total: 1200, requests: 2 },
+          work: null,
+        },
+        {
+          target: "plugin-builder",
+          displayName: "插件编写",
+          code: "E0003",
+          channel: "P",
+          level: "P3",
+          levelName: "高级工程师",
+          status: "running",
+          usage: { total: 700, requests: 1 },
+          work: { subject: "实现工作网", status: "in_progress" },
+        },
+      ],
+    },
+    {
+      id: "kb-dept",
+      name: "D03 知识库",
+      code: "D03",
+      managerName: "文档编写",
+      members: [
+        {
+          target: "doc-writer",
+          displayName: "文档编写",
+          code: "E0010",
+          channel: "M",
+          level: "M2",
+          levelName: "经理",
+          status: "idle",
+          usage: { total: 0, requests: 0 },
+          work: null,
+        },
+      ],
+    },
+  ],
+  ungrouped: [],
+  members: [
+    { target: "plugin-arch", status: "idle", work: null },
+    { target: "plugin-builder", status: "running", work: { status: "in_progress" } },
+    { target: "doc-writer", status: "idle", work: null },
+  ],
+  totals: { totalTokens: 1900, requests: 3 },
+  dispatch: [{ from: "__management__", to: "plugin-builder", subject: "实现工作网", status: "in_progress" }],
+  dependency: [],
+};
+
+test("工作网：公司化数据渲染管理层→部门→员工，卡片带工号/等级徽章，部门显示负责人", async () => {
+  const { doc, win } = makeFakeDom();
+  const { exports } = loadBundle(makeReact(), {
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, data: COMPANY_ORGMAP_FIXTURE }) }),
+    setInterval,
+    clearInterval,
+  });
+  const overlay = exports.__internals.OrgChartOverlay({
+    document: doc,
+    window: win,
+    apiBase: "/api/dsh-member-manager",
+    t: (k) => k,
+    pollMs: 60000,
+    reportError: () => {},
+  });
+  for (let i = 0; i < 40 && !overlay.getData(); i++) await new Promise((r) => setTimeout(r, 10));
+  const data = overlay.getData();
+  assert.equal(data.source, "company");
+  assert.deepEqual(data.worknet, { departments: 2, employees: 3 });
+
+  const texts = [];
+  (function walk(n) {
+    if (!n) return;
+    if (typeof n.textContent === "string" && n.textContent && !n.children.length) texts.push(n.textContent);
+    for (const c of n.children || []) walk(c);
+  })(overlay.root);
+  const joined = texts.join(" | ");
+  assert.ok(joined.includes("管理层"), "首层应显示管理层节点：" + joined);
+  assert.ok(joined.includes("D02 插件部"), "应显示部门编号+名称：" + joined);
+  assert.ok(joined.includes("E0002"), "员工卡片应显示工号：" + joined);
+  assert.ok(joined.includes("M2"), "员工卡片应显示等级：" + joined);
+  assert.ok(joined.includes("ocStaff 3"), "页脚应显示员工数：" + joined);
+  assert.ok(joined.includes("ocDept 2"), "页脚应显示部门数：" + joined);
+
+  const stage = overlay.root.children[2].children[0];
+  const groupsRow = stage.children[2];
+  assert.equal(groupsRow.children.length, 2, "两个部门两簇");
+  const chip = groupsRow.children[0].children[0];
+  assert.equal(chip.getAttribute("title"), "负责人：插件架构", "部门色块 tooltip 应带负责人");
+  overlay.destroy();
 });
 
 test("组织架构图：任务下拉切换任务，只显示该任务的参与者（?task=）", async () => {

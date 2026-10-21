@@ -133,6 +133,8 @@ await check("总架构组织架构图字样", () => {
     "cpViewAll",
     "EmployeeCenterPanel",
     "cpDeleteDept",
+    "工作网",
+    "worknet",
     "cpRename",
     "cpMgmtName",
     "cpEditNumbering",
