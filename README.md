@@ -89,6 +89,43 @@ node scripts/migrate-old-plugin.mjs --apply  # 2) 备份 profile → 改写三�
 
 删除 profile 三处登记（`dependencies`、`dsh.profile.bundles`、`cordis.yml`；或 `dsh plugin --profile desktop remove dsh-member-manager`）后重启 DSH。数据保留在 `~/.dsh/storages/member-manager/`，可手动删除。
 
+## 与旧插件 `dsh-plugin-member-manager` 的关系
+
+本包是旧插件的**重命名升级版**（v0.3.0）。两者同源：从同一份代码 fork 而来，数据目录、名册文件格式和 16 个名册工具名保持一致；区别是包名 / 插件 id 改为 `dsh-member-manager`，并新增公司化运行时（部门 / 工号 / 双通道 / 工单 / 审计 / 成本）与 13 个 `company_*` 工具。
+
+| 维度 | 旧包 `dsh-plugin-member-manager` | 新包 `dsh-member-manager` |
+| --- | --- | --- |
+| 数据目录 | `~/.dsh/storages/member-manager/` | 相同（升级不迁移、不丢数据） |
+| 名册文件 | `registry.json`（成员 / 小组 / 技能 / 模型覆盖 / 备份） | 相同格式，直接读写 |
+| 名册工具 | 16 个 `member_*` / `group_manage` / `skill_list` / `model_list` | **同名保留**，旧脚本可继续用 |
+| 公司化数据 | 无 | 新增 `company/`（部门 / 员工 / 工单 / 审计 / 成本） |
+| 面板 | 组织架构 · 已停用 · 未登记 · 工作流 · 维护 | 总架构 · 员工中心 · 工作流 · 备份与更新 |
+| 维护状态 | 停止更新 | 唯一维护版本 |
+
+> 名册里的「小组」在新版只作**覆盖层与迁移来源**（面板以部门组织为主）；`company/` 数据旧包不存在，升级后为空，由「一键迁移」或面板自行建立。
+
+### 不能同时启用
+
+新旧包共用一个 DSH profile 时会重复注册 25 个名册工具与 16 条 HTTP 路由，并写入同一个数据目录，属未定义行为。切换前必须先移除旧包。
+
+### 三种切换方式
+
+| 方式 | 命令 | 适用场景 |
+| --- | --- | --- |
+| 一键迁移（推荐） | `node scripts/migrate-old-plugin.mjs` → `--apply` → 重启 | 已装旧包，并希望把名册迁成公司化组织 |
+| 只切插件 | `node scripts/switch-to-dsh-member-manager.mjs` → `--apply` → 重启 | 已装旧包，只换包，公司化组织稍后自建 |
+| 手工 | 删除 profile 三处旧登记（`dependencies` / `dsh.profile.bundles` / `cordis.yml`）与旧 `node_modules` 链接，再按「安装」加新包，重启 | 喜欢自己动手 |
+
+两个脚本都默认 **dry-run**，`--apply` 时先把 `package.json` / `cordis.yml` 备份到 `~/.dsh/backups/`；回滚用 `node scripts/rollback-to-dsh-plugin-member-manager.mjs --apply`。
+
+### 旧包名转发包
+
+`compat/dsh-plugin-member-manager`（v0.3.1）保留旧包名可安装：它只依赖新包，并把 host / client 入口 `export *` 转发，`cordis.patch.yml` 仍插入旧 id。用于「CI / 脚本里写死旧包名」的过渡期；**同样不能与新包同装**，过渡完请移除。
+
+### npm 上的处理
+
+npm 没有包名重定向。发布新包后建议对旧包执行 `npm deprecate dsh-plugin-member-manager@* "已更名为 dsh-member-manager，请安装新包"`；旧用户先 `dsh plugin --profile desktop remove dsh-plugin-member-manager`（或跑上面的切换脚本），再安装新包。
+
 ## 使用
 
 - **对话**：`member_list` / `member_add` 管理名册；`company_hire` / `company_admin` 建公司组织；`company_order` 起工单。
@@ -233,6 +270,43 @@ node scripts/migrate-old-plugin.mjs --apply  # 2) back up profile, rewrite 3 reg
 > A shim package under the old name (`compat/dsh-plugin-member-manager`, 0.3.1) re-exports this package. Never enable both at once.
 
 **Uninstall**: remove the three profile registrations (or `dsh plugin --profile desktop remove dsh-member-manager`) and restart. Data stays under `~/.dsh/storages/member-manager/`.
+
+## Relationship to the old `dsh-plugin-member-manager`
+
+This package is the **renamed successor** of the old plugin (v0.3.0). It is forked from the same code base: the data directory, `registry.json` format and the 16 roster tool names are unchanged. What differs is the package name / plugin id (`dsh-member-manager`), the new company runtime (departments, employee codes, dual M/P channels, orders, audit, cost) and 13 `company_*` tools.
+
+| Aspect | Old package | New package |
+| --- | --- | --- |
+| Data directory | `~/.dsh/storages/member-manager/` | same — upgrade in place, nothing migrated away |
+| Roster file | `registry.json` (members / groups / skills / model overrides / backups) | same format, read and written directly |
+| Roster tools | 16 `member_*` / `group_manage` / `skill_list` / `model_list` | kept under the same names |
+| Company data | none | new `company/` (departments / employees / orders / audit / cost) |
+| Panel | Organization · Retired · Unregistered · Workflow · Maintenance | Overall architecture · Employee center · Workflow · Backups & updates |
+| Maintenance | no longer updated | the only maintained version |
+
+> "Groups" in the roster now serve as a **compatibility overlay and migration source** only; the panel is department-centric. `company/` is new and starts empty — populate it with the one-step migration or from the panel.
+
+### Never enable both
+
+Both packages in one DSH profile would register 25 roster tools and 16 HTTP routes twice and write the same data directory — undefined behaviour. Remove the old package first.
+
+### Three ways to switch
+
+| Way | Command | When |
+| --- | --- | --- |
+| One-step migration (recommended) | `node scripts/migrate-old-plugin.mjs` → `--apply` → restart | old package installed and you want the roster migrated into the company org |
+| Swap the package only | `node scripts/switch-to-dsh-member-manager.mjs` → `--apply` → restart | old package installed, only switching the package |
+| Manual | drop the three old profile registrations (`dependencies`, `dsh.profile.bundles`, `cordis.yml`) and the old `node_modules` link, then install as in *Installation*, restart | you prefer doing it by hand |
+
+Both scripts default to **dry-run** and back up `package.json` / `cordis.yml` into `~/.dsh/backups/` before `--apply`. Roll back with `node scripts/rollback-to-dsh-plugin-member-manager.mjs --apply`.
+
+### Shim package under the old name
+
+`compat/dsh-plugin-member-manager` (v0.3.1) keeps the old name installable: it depends on the new package and re-exports host / client entry points, while its `cordis.patch.yml` still inserts the old id. Intended for a transition period when CI or scripts hard-code the old name; **it must not be enabled together with the new package**.
+
+### On npm
+
+npm has no package-name redirection. After publishing, deprecate the old one: `npm deprecate dsh-plugin-member-manager@* "renamed to dsh-member-manager, please install the new package"`. Old users should `dsh plugin --profile desktop remove dsh-plugin-member-manager` (or run the switch script) before installing the new package.
 
 ## Usage
 
