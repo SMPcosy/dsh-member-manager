@@ -45,9 +45,10 @@ Click a heading below to view **English** or **中文** .
 | 人事管理 | 行内展开详情：公司化资料（3 列：显示名/岗位、技能/模型选择器、职责 ≤8 条）+ 通道 / 晋升 / 停用 / 调岗 |
 | 部门弹层 | 两个页签（部门架构图 / 成员详情），内可招聘，页签行有「部门编辑」（名称/编号/编制/描述/接单范围/借调策略） |
 | 工作网 | 右侧栏：管理层 → 部门 → 员工（工号/等级/任务/用量），空闲折叠，2s 刷新；公司化关闭时回退任务视图 |
+| 大亨（小游戏） | 内置公司经营 demo：回合制 30 回合，用当前公司当开局种子，派单/招聘/晋升/升级部门/推进回合，金币·声望·评级，结果与真实公司数据隔离 |
 | 派工闭环 | order → attempt（派工凭证）→ accept → report → review；`attemptId` 防串单，派工失败自动回滚重派 |
 | 成本 & 审计 | token/请求按员工 / 部门 / 工单归因（`GET /company/costs`）；`audit.jsonl` append-only、加载时重放对账 |
-| 隔离与降级 | 四线工具白名单 + 同步 guard + 执行体会话反查；越权 `E_TOOL_LINE`，缺宿主服务 `E_NO_AGENTS`，开关关闭 `E_DISABLED`，均不影响名册功能 |
+| 隔离与降级 | 员工会话继承宿主标准工具；公司管理工具（`company_*`）走同步 guard + 执行体会话反查（v5.24 起不再收窄工具面）；越权 `E_TOOL_LINE`，缺宿主服务 `E_NO_AGENTS`，开关关闭 `E_DISABLED`，均不影响名册功能 |
 
 ## M/P 双通道与编号
 
@@ -99,7 +100,7 @@ node scripts/migrate-old-plugin.mjs --apply  # 2) 备份 profile → 改写三�
 | 名册文件 | `registry.json`（成员 / 小组 / 技能 / 模型覆盖 / 备份） | 相同格式，直接读写 |
 | 名册工具 | 16 个 `member_*` / `group_manage` / `skill_list` / `model_list` | **同名保留**，旧脚本可继续用 |
 | 公司化数据 | 无 | 新增 `company/`（部门 / 员工 / 工单 / 审计 / 成本） |
-| 面板 | 组织架构 · 已停用 · 未登记 · 工作流 · 维护 | 总架构 · 员工中心 · 工作流 · 备份与更新 |
+| 面板 | 组织架构 · 已停用 · 未登记 · 工作流 · 维护 | 总架构 · 大亨 · 员工中心 · 工作流 · 备份与更新 |
 | 维护状态 | 停止更新 | 唯一维护版本 |
 
 > 名册里的「小组」在新版只作**覆盖层与迁移来源**（面板以部门组织为主）；`company/` 数据旧包不存在，升级后为空，由「一键迁移」或面板自行建立。
@@ -129,9 +130,9 @@ npm 没有包名重定向。发布新包后建议对旧包执行 `npm deprecate 
 ## 使用
 
 - **对话**：`member_list` / `member_add` 管理名册；`company_hire` / `company_admin` 建公司组织；`company_order` 起工单。
-- **面板**：总架构（新建部门、编号/等级自定义、部门编辑）· 员工中心 · 工作流 · 备份与更新。
+- **面板**：总架构（新建部门、编号/等级自定义、部门编辑）· 大亨（内置小游戏）· 员工中心 · 工作流 · 备份与更新。
 - **同步核心成员**：面板「同步核心成员」按钮，或调用 `member_sync`（HTTP 路由拿不到 Agent 凭证，需工具触发一次）。
-- **HTTP**：`GET /api/dsh-member-manager/{health,state,skills,overrides,models,orgmap,workflow,update,backups}`、`POST …/op`；公司化只读 `GET …/company/{overview,org,board,costs,orders}`、写 `POST …/company/op`。
+- **HTTP**：`GET /api/dsh-member-manager/{health,state,skills,overrides,models,orgmap,workflow,update,backups}`、`POST …/op`；公司化只读 `GET …/company/{overview,org,board,costs,orders,game}`、写 `POST …/company/op` 与 `POST …/company/game/op`。
 
 ## 配置项
 
@@ -180,7 +181,7 @@ npm 没有包名重定向。发布新包后建议对旧包执行 `npm deprecate 
 
 ```bash
 npm run check   # 语法校验（lib/ src/ scripts/ compat/）
-npm test        # 499 tests / 499 pass
+npm test        # 523 tests / 523 pass
 npm run verify  # 19 项交付自检（元数据/文件/语法/导出契约/面板字样/测试不污染用户目录）
 ```
 
@@ -229,9 +230,10 @@ MIT（见 [LICENSE](./LICENSE)）；第三方许可见 [THIRD-PARTY-NOTICES.md](
 | Employee center | Full employee list sorted by department/level with department and disabled filters |
 | Personnel | Inline detail: company profile in 3 columns (display name/title, skill/model pickers, duties ≤8) plus channels / promote / disable / transfer |
 | Work network | Right sidebar: Management → departments → employees (code/level/task/usage), idle folded, 2s refresh; falls back to the task view when the company runtime is off |
+| Tycoon (mini-game) | Built-in company-management demo: 30-turn loop seeded from your current company — assign orders, hire, promote, upgrade departments, advance turns, earn coins/reputation/rating; fully isolated from real company data |
 | Dispatch loop | order → attempt → accept → report → review; `attemptId` prevents stale reports, failed dispatch rolls back and retries |
 | Cost & audit | Tokens/requests attributed per employee / department / order (`GET /company/costs`); append-only `audit.jsonl` replayed on load |
-| Isolation | Allow-lists per tool line + synchronous guard + session lookup; `E_TOOL_LINE`, `E_NO_AGENTS`, `E_DISABLED` never break roster features |
+| Isolation | Employee sessions inherit host tools; `company_*` management tools use a synchronous guard + session lookup (no tool-surface narrowing since v5.24); `E_TOOL_LINE`, `E_NO_AGENTS`, `E_DISABLED` never break roster features |
 
 ## M/P channels & numbering
 
@@ -281,7 +283,7 @@ This package is the **renamed successor** of the old plugin (v0.3.0). It is fork
 | Roster file | `registry.json` (members / groups / skills / model overrides / backups) | same format, read and written directly |
 | Roster tools | 16 `member_*` / `group_manage` / `skill_list` / `model_list` | kept under the same names |
 | Company data | none | new `company/` (departments / employees / orders / audit / cost) |
-| Panel | Organization · Retired · Unregistered · Workflow · Maintenance | Overall architecture · Employee center · Workflow · Backups & updates |
+| Panel | Organization · Retired · Unregistered · Workflow · Maintenance | Overall architecture · Tycoon · Employee center · Workflow · Backups & updates |
 | Maintenance | no longer updated | the only maintained version |
 
 > "Groups" in the roster now serve as a **compatibility overlay and migration source** only; the panel is department-centric. `company/` is new and starts empty — populate it with the one-step migration or from the panel.
@@ -311,8 +313,8 @@ npm has no package-name redirection. After publishing, deprecate the old one: `n
 ## Usage
 
 - **Chat**: `member_list` / `member_add` for the roster; `company_hire` / `company_admin` for the org; `company_order` to dispatch.
-- **Panel**: Overall architecture · Employee center · Workflow · Backups & updates; the "Sync core members" button or `member_sync` imports core team members into the roster.
-- **HTTP**: `GET /api/dsh-member-manager/{health,state,skills,models,orgmap,workflow,backups}`, `POST …/op`; company read-only `GET …/company/{overview,org,board,costs,orders}`, write `POST …/company/op`.
+- **Panel**: Overall architecture · Tycoon (mini-game) · Employee center · Workflow · Backups & updates; the "Sync core members" button or `member_sync` imports core team members into the roster.
+- **HTTP**: `GET /api/dsh-member-manager/{health,state,skills,models,orgmap,workflow,backups}`, `POST …/op`; company read-only `GET …/company/{overview,org,board,costs,orders,game}`, write `POST …/company/op` and `POST …/company/game/op`.
 
 ## Configuration (highlights)
 
@@ -330,7 +332,7 @@ Tool lines: OWNER 13 / manager 11 / staff 5 / window 4.
 
 ```bash
 npm run check   # syntax check
-npm test        # 499 tests / 499 pass
+npm test        # 523 tests / 523 pass
 npm run verify  # 19 delivery self-checks
 ```
 

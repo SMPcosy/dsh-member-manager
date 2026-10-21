@@ -604,7 +604,9 @@ test("源码：v5 总架构结构——默认 company、管理层节点、/compa
   // 默认 tab = company；页签 4 个，顺序 company → employees → workflow → maintain；部门架构不再占页签
   assert.match(src, /const \[tab, setTab\] = useState\("company"\)/);
   assert.ok(src.indexOf('tabBtn("company"') >= 0, "源码应注册 company 页签");
-  assert.ok(src.indexOf('tabBtn("company"') < src.indexOf('tabBtn("employees"'), "员工中心页签应排在总架构之后");
+  assert.ok(src.indexOf('tabBtn("game"') >= 0, "源码应注册 game 页签");
+  assert.ok(src.indexOf('tabBtn("company"') < src.indexOf('tabBtn("game"'), "大亨页签应排在总架构之后");
+  assert.ok(src.indexOf('tabBtn("game"') < src.indexOf('tabBtn("employees"'), "员工中心页签应排在大亨之后");
   assert.ok(src.indexOf('tabBtn("employees"') < src.indexOf('tabBtn("workflow"'), "工作流页签应排在员工中心之后");
   assert.ok(src.indexOf('tabBtn("workflow"') < src.indexOf('tabBtn("maintain"'), "备份与更新应排在工作流之后");
   assert.equal(src.includes('tabBtn("retired"'), false, "已停用页签应移除");
@@ -638,6 +640,13 @@ test("源码：v5 总架构结构——默认 company、管理层节点、/compa
   // task-24：员工中心仍是独立页签（v5 从总架构图中移除它的紧凑节点与「查看全部」）
   assert.match(src, /function EmployeeCenterPanel\(props\)/);
   assert.match(src, /EmployeeCenterPanel: EmployeeCenterPanel/);
+  assert.match(src, /tabGame: "大亨"/);
+  assert.match(src, /tabGame: "Tycoon"/);
+  assert.match(src, /function GamePanel\(props\)/);
+  assert.match(src, /GamePanel: GamePanel/);
+  assert.match(src, /api\("\/company\/game"\)/);
+  assert.match(src, /api\("\/company\/game\/op"/);
+  assert.match(src, /h\("div", \{ style: GAME_STYLE\.layout \}, deptCol, orderCol, logCol\)/);
   assert.equal(src.includes('t("cpViewAll")'), false, "「查看全部」按钮应移除");
   assert.equal(src.includes("onOpenEmployees"), false, "onOpenEmployees 回调应移除");
   assert.equal(src.includes("const employeeCenterCard"), false, "员工中心紧凑节点应移除");
@@ -714,6 +723,19 @@ test("字典：v5 文案 zh/en 严格对称，中文与 docs/21 §4.3 一致", (
   assert.equal(en.cpTitle, "Overall architecture");
   assert.equal(zh.tabOrg, "部门架构");
   assert.equal(en.tabOrg, "Department org");
+
+  // v6：公司大亨页签与游戏文案
+  assert.equal(zh.tabGame, "大亨");
+  assert.equal(en.tabGame, "Tycoon");
+  assert.equal(zh.gameStep, "推进一回合");
+  assert.equal(en.gameStep, "Next turn");
+  const zhGame = Object.keys(zh).filter((k) => k.startsWith("game")).sort();
+  const enGame = Object.keys(en).filter((k) => k.startsWith("game")).sort();
+  assert.deepEqual(zhGame, enGame);
+  assert.ok(zhGame.length >= 30, `game* 文案过少：${zhGame.length}`);
+  for (const key of zhGame) {
+    assert.doesNotMatch(String(en[key]), /[\u4e00-\u9fff]/, `en.${key} 含中文：${en[key]}`);
+  }
 
   // 架构图与员工中心
   assert.equal(zh.cpEmployeeCenter, "员工中心");
@@ -844,15 +866,15 @@ function renderPanel({ view = sampleView(), tab = "company", calls = [] } = {}) 
   return { t, seed, react, tree, internals: exports.__internals };
 }
 
-test("Panel：默认总架构，页签恰 4 个且顺序为 总架构→员工中心→工作流→备份与更新", () => {
+test("Panel：默认总架构，页签恰 5 个且顺序为 总架构→大亨→员工中心→工作流→备份与更新", () => {
   const { t, tree, internals } = renderPanel();
-  const expected = [t("cpTab"), t("cpEmployeeCenter"), t("tabWorkflow"), t("tabMaintain")];
+  const expected = [t("cpTab"), t("tabGame"), t("cpEmployeeCenter"), t("tabWorkflow"), t("tabMaintain")];
   const labels = collectButtons(tree)
     .map((button) => button.label)
     .filter((label) => expected.includes(label));
 
   assert.deepEqual(labels, expected);
-  assert.equal(labels.length, 4);
+  assert.equal(labels.length, 5);
   assert.equal(labels.includes(t("tabOrg")), false, "部门架构不应再占页签");
   assert.equal(collectElements(tree, (node) => node.type === internals.CompanyOrgPanel).length, 1, "默认应渲染 CompanyOrgPanel");
   assert.equal(findModal(tree).overlay, null, "默认不应出现部门弹层");
@@ -2621,4 +2643,246 @@ test("部门弹层：部门编辑 → POST updateDepartment 带 borrowPolicy/acc
   assert.deepEqual(op.body.args.borrowPolicy, { mode: "borrow-only" });
   assert.deepEqual(op.body.args.accepts, []);
   assert.equal(made.seed[20], false);
+});
+
+/* ==================== ⑩ v6 公司大亨页签 ==================== */
+
+const GAME_URL = "/api/dsh-member-manager/company/game";
+const GAME_OP_URL = "/api/dsh-member-manager/company/game/op";
+
+/** 公司大亨 fixture：与 src/host/company-game.mjs viewGame() 的返回形状一致 */
+function gameFixture(patch = {}) {
+  const base = {
+    version: 1,
+    companyName: "DSH 工作室",
+    turn: 3,
+    turnLimit: 30,
+    coins: 620,
+    reputation: 12,
+    status: "playing",
+    rating: null,
+    departments: [
+      { id: "dept-design", name: "设计部", mul: 1.15, upgrades: 1, capacity: 4, employees: ["g-1", "g-2"] },
+      { id: "dept-dev", name: "开发部", mul: 1, upgrades: 0, capacity: 2, employees: ["g-3"] },
+    ],
+    employees: [
+      { id: "g-1", name: "陈默", code: "E1001", channel: "P", level: 4, deptId: "dept-design", output: 34, salary: 15, fromCompany: true },
+      { id: "g-2", name: "林小满", code: "E1002", channel: "M", level: 2, deptId: "dept-design", output: 28, salary: 13, fromCompany: false },
+      { id: "g-3", name: "赵一鸣", code: "E1003", channel: "P", level: 2, deptId: "dept-dev", output: 16, salary: 7, fromCompany: false },
+    ],
+    orders: [
+      { id: "ord-1", title: "品牌视觉升级", need: 40, progress: 10, reward: 120, reputation: 2, deptId: null, status: "open" },
+      { id: "ord-2", title: "官网改版", need: 60, progress: 60, reward: 180, reputation: 3, deptId: "dept-dev", status: "active" },
+      { id: "ord-3", title: "新品海报", need: 20, progress: 20, reward: 60, reputation: 1, deptId: "dept-design", status: "done" },
+    ],
+    log: [
+      { turn: 3, text: "第 3 回合结算：收入 120，支出 30" },
+      { turn: 2, text: "完成订单：官网改版" },
+    ],
+    nextCosts: { hire: 300, upgradeDepartment: { "dept-design": 450, "dept-dev": 300 }, upgradeEmployee: { "g-1": 200, "g-2": 150, "g-3": 150 } },
+  };
+  return Object.assign(base, patch);
+}
+
+/** 游戏接口 fetch 替身：GET → view；POST /company/game/op → opData（成功 view 或 {ok:false,...}）。 */
+function gameFetch(calls = [], options = {}) {
+  const view = options.view || gameFixture();
+  return async (url, init) => {
+    const u = String(url);
+    const body = init && init.body ? JSON.parse(init.body) : null;
+    calls.push({ url: u, method: (init && init.method) || "GET", body: body });
+    if (u.endsWith("/company/game/op")) {
+      const data = options.opData !== undefined ? options.opData : options.opView || view;
+      return { ok: true, status: 200, json: async () => ({ ok: true, data: data }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true, data: view }) };
+  };
+}
+
+/** GamePanel 的 useState 顺序：0 view / 1 error / 2 busy / 3 orderDrafts / 4 hireDept */
+function gameSeed(options = {}) {
+  return [
+    options.view === undefined ? gameFixture() : options.view,
+    options.error || null,
+    options.busy || false,
+    options.orderDrafts || {},
+    options.hireDept || "",
+  ];
+}
+
+function renderGame(options = {}) {
+  const t = translator(options.lang || "zh");
+  const seed = gameSeed(options);
+  const react = makeReact(seed, { mutable: true });
+  const { exports } = loadBundle(react, { fetch: options.fetch || gameFetch(), confirm: options.confirm });
+  const render = () => exports.__internals.GamePanel({ t });
+  return {
+    t,
+    seed,
+    react,
+    internals: exports.__internals,
+    tree: render(),
+    rerender() {
+      react.reset();
+      return render();
+    },
+  };
+}
+
+/** 能跑 effect 的渲染：打开时真正发 GET，并记录是否注册定时器。 */
+async function renderGameLive(options = {}) {
+  const t = translator(options.lang || "zh");
+  const react = makeReactLive();
+  const timers = [];
+  const calls = options.calls || [];
+  const { exports } = loadBundle(react, {
+    fetch: options.fetch || gameFetch(calls),
+    setInterval: (fn, ms) => {
+      timers.push({ fn, ms });
+      return timers.length;
+    },
+    clearInterval: () => {},
+  });
+  react.reset();
+  let tree = exports.__internals.GamePanel({ t });
+  const loadingText = treeText(tree);
+  const cleanups = react.flushEffects();
+  await tick();
+  const render = () => {
+    react.reset();
+    return exports.__internals.GamePanel({ t });
+  };
+  tree = render();
+  return {
+    t,
+    react,
+    internals: exports.__internals,
+    tree,
+    loadingText,
+    timers,
+    calls,
+    cleanups,
+    rerender: render,
+  };
+}
+
+test("GamePanel：打开时 GET /company/game 一次并渲染公司名/金币/回合/部门/员工/订单/日志", async () => {
+  const calls = [];
+  const made = await renderGameLive({ fetch: gameFetch(calls) });
+
+  assert.match(made.loadingText, new RegExp(made.t("gameLoading")), "首次渲染（尚未拉到数据）显示加载中");
+  assert.equal(calls.filter((c) => c.url === GAME_URL).length, 1, "打开时应 GET 一次 /company/game");
+  assert.equal(calls.filter((c) => c.method === "POST").length, 0, "仅打开不应发写操作");
+  assert.equal(made.timers.length, 0, "大亨页不轮询：不注册定时器");
+
+  const text = treeText(made.tree);
+  assert.ok(text.includes("DSH 工作室"), "应渲染公司名");
+  assert.ok(text.includes("620"), "应渲染金币");
+  assert.ok(text.includes("3/30"), "应渲染回合 3/30");
+  assert.ok(text.includes("设计部"), "应渲染部门名");
+  assert.ok(text.includes("陈默"), "应渲染员工名");
+  assert.ok(text.includes("品牌视觉升级"), "应渲染订单标题");
+  assert.ok(text.includes("第 3 回合结算"), "应渲染日志");
+  assert.ok(
+    text.includes(made.t("gameDeptUpgrade") + " · 450"),
+    "部门升级按钮应显示 nextCosts 费用：" + text.slice(0, 200),
+  );
+  assert.ok(
+    text.includes(made.t("gameEmployeeUpgrade") + " · 200"),
+    "员工晋升按钮应显示 nextCosts 费用",
+  );
+});
+
+test("GamePanel：点「推进一回合」发出 {action:\"step\"}，用返回 view 更新（回合 +1，不再重新 GET）", async () => {
+  const calls = [];
+  const nextView = gameFixture({ turn: 4, coins: 700, log: [{ turn: 4, text: "第 4 回合结算" }] });
+  const made = await renderGameLive({ fetch: gameFetch(calls, { opView: nextView }) });
+
+  const step = buttonByLabel(made.tree, made.t("gameStep"))[0];
+  assert.ok(step, "应有「推进一回合」按钮");
+  await step.onClick();
+  await tick();
+
+  const ops = calls.filter((c) => c.url === GAME_OP_URL);
+  assert.equal(ops.length, 1, "应 POST 一次 /company/game/op");
+  assert.equal(ops[0].method, "POST");
+  assert.deepEqual(ops[0].body, { action: "step", args: {} });
+
+  const text = treeText(made.rerender());
+  assert.ok(text.includes("4/30"), "回合应更新为 4/30：" + text.slice(0, 160));
+  assert.ok(text.includes("700"), "金币应更新为 700");
+  assert.ok(text.includes("第 4 回合结算"), "日志应更新");
+  assert.equal(calls.filter((c) => c.url === GAME_URL).length, 1, "操作后用返回 view 更新，不再重新 GET");
+});
+
+test("GamePanel：失败响应显示 code + message（E_NO_COINS），并保留原 view", async () => {
+  const calls = [];
+  const made = await renderGameLive({
+    fetch: gameFetch(calls, { opData: { ok: false, code: "E_NO_COINS", message: "金币不足" } }),
+  });
+
+  const upgrade = buttonByLabel(made.tree, made.t("gameDeptUpgrade") + " · 450")[0];
+  assert.ok(upgrade, "应有升级部门按钮");
+  await upgrade.onClick();
+  await tick();
+
+  const text = treeText(made.rerender());
+  assert.ok(text.includes("E_NO_COINS: 金币不足"), "应显示错误码与信息：" + text.slice(0, 200));
+  assert.ok(text.includes("设计部"), "失败后仍保留原 view（部门仍在）");
+});
+
+test("GamePanel：结束态 banner——胜利显示评级+金币，破产显示提示，均带「再开一局」", () => {
+  const won = renderGame({ view: gameFixture({ status: "won", rating: "A", turn: 20 }) });
+  const wonText = treeText(won.tree);
+  assert.ok(
+    wonText.includes(won.t("gameWonBanner", { rating: "A", coins: 620 })),
+    "胜利 banner 应显示评级与金币：" + wonText.slice(0, 200),
+  );
+  assert.equal(buttonByLabel(won.tree, won.t("gamePlayAgain")).length, 1, "应提供「再开一局」");
+  assert.equal(buttonByLabel(won.tree, won.t("gameStep"))[0].disabled, true, "结束态不能推进回合");
+
+  const lost = renderGame({ view: gameFixture({ status: "lost", rating: "D", coins: -20, turn: 9 }) });
+  const lostText = treeText(lost.tree);
+  assert.ok(
+    lostText.includes(lost.t("gameLostBanner", { turn: 9, limit: 30 })),
+    "破产 banner 应显示回合与上限：" + lostText.slice(0, 200),
+  );
+  assert.ok(lostText.includes(lost.t("gameStatusLost")), "状态胶囊应显示破产");
+});
+
+test("GamePanel：订单派单——选择部门后发出 {action:\"assign\"}，载荷含 orderId/departmentId", async () => {
+  const calls = [];
+  const made = await renderGameLive({ fetch: gameFetch(calls) });
+
+  const selects = collectElements(made.tree, (node) => node.type === "select");
+  const assignSelect = selects.find((node) => String(node.props.value) === "");
+  assert.ok(assignSelect, "待派单订单应有部门下拉");
+  assignSelect.props.onChange({ target: { value: "dept-design" } });
+
+  const after = made.rerender();
+  const assignBtn = buttonByLabel(after, made.t("gameAssign"))[0];
+  assert.ok(assignBtn, "应有派单按钮");
+  assert.equal(assignBtn.disabled, false, "选好部门后派单按钮可用");
+  await assignBtn.onClick();
+  await tick();
+
+  const ops = calls.filter((c) => c.url === GAME_OP_URL);
+  assert.equal(ops.length, 1);
+  assert.deepEqual(ops[0].body, { action: "assign", args: { orderId: "ord-1", departmentId: "dept-design" } });
+});
+
+test("GamePanel：底部招聘显示费用，点击发出 {action:\"hire\"} 并带部门", async () => {
+  const calls = [];
+  const made = await renderGameLive({ fetch: gameFetch(calls) });
+
+  const text = treeText(made.tree);
+  assert.ok(text.includes(made.t("gameCost") + " 300"), "应显示招聘费用 300");
+  const hire = primaryButton(made.tree, made.t("gameHire"));
+  assert.ok(hire, "应有招聘主按钮");
+  await hire.onClick();
+  await tick();
+
+  const ops = calls.filter((c) => c.url === GAME_OP_URL);
+  assert.equal(ops.length, 1);
+  assert.deepEqual(ops[0].body, { action: "hire", args: { departmentId: "dept-design" } });
 });

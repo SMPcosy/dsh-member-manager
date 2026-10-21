@@ -110,10 +110,24 @@ await check("脚本与兼容包", () => {
   return "4 脚本 + 兼容包";
 });
 await check("关键测试文件", () => {
-  for (const f of ["company-levels.test.mjs", "company-panel.test.mjs", "migrate-plugin.test.mjs", "compat-package.test.mjs"]) {
+  for (const f of ["company-levels.test.mjs", "company-panel.test.mjs", "migrate-plugin.test.mjs", "compat-package.test.mjs", "company-game.test.mjs"]) {
     must(existsSync(path.join(REPO, "test", f)), `缺少 test/${f}`);
   }
-  return "4 个";
+  return "5 个";
+});
+await check("公司大亨（游戏）引擎与路由", async () => {
+  must(existsSync(path.join(REPO, "src", "host", "company-game.mjs")), "缺少 src/host/company-game.mjs");
+  const g = await import(pathToFileURL(path.join(REPO, "src", "host", "company-game.mjs")).href);
+  for (const fn of ["createGame", "seedFromCompanyView", "viewGame", "serializeGame", "deserializeGame", "assignOrder", "hireEmployee", "upgradeEmployee", "upgradeDepartment", "stepGame"]) {
+    must(typeof g[fn] === "function", `company-game 缺少导出 ${fn}`);
+  }
+  must(g.GAME_VERSION === 1, "GAME_VERSION 应为 1");
+  must(g.TURN_LIMIT === 30 && g.ORDER_SLOTS === 3 && g.START_COINS === 800, "游戏常量（回合/订单/金币）不符");
+  const rt = readFileSync(path.join(REPO, "src", "host", "company-runtime.mjs"), "utf8");
+  for (const s of ["/company/game", "/company/game/op", "company.game_new", "company.game_finished"]) {
+    must(rt.includes(s), `company-runtime 缺少游戏路由/审计 ${s}`);
+  }
+  return "引擎 + 2 条路由";
 });
 await check("总架构组织架构图字样", () => {
   const client = readFileSync(path.join(REPO, "lib", "client.js"), "utf8");
@@ -130,6 +144,14 @@ await check("总架构组织架构图字样", () => {
     "company/op",
     "cpTab",
     "cpEmployeeCenter",
+    "tabGame",
+    "大亨",
+    "Tycoon",
+    "GamePanel",
+    "company/game",
+    "gameStep",
+    "gameWonBanner",
+    "gameFormat",
     "ocFoldIdle",
     "ocFoldHide",
     "cpModalChart",

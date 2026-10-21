@@ -4,6 +4,14 @@
 
 本版本把插件从「名册管理覆盖层」升级为「单包公司化运行时」：不再依赖 DSH 原生团队层（`ctx.agentTeams`），只用 `ctx.agents` / `ctx.subagents` 承载两级组织（部门经理 → 员工）的派工闭环。
 
+### 新增：公司大亨内置小游戏（v6，2026-10-22）
+
+- 面板新增「大亨 / Tycoon」页签（5 个页签：总架构 → 大亨 → 员工中心 → 工作流 → 备份与更新），回合制公司经营 demo：用当前公司数据的部门/员工做开局种子，30 回合内冲评级 S/A/B/C。
+- 纯逻辑引擎 `src/host/company-game.mjs`（无 I/O、确定性 xorshift32 RNG、版本化存档）＋ host 2 条新路由（`GET /company/game`、`POST /company/game/op`，路由总数 18）；存档独立于公司数据：`<dataDir>/game/state.json`，懒加载，boot 不写盘；`new`/终局 `step` 记入审计（`company.game_new`/`company.game_finished`）。
+- 操作：派单、招聘（300 金币）、员工晋升、部门升级、推进回合；回合流程＝生产→工资与部门开销→补订单→结算（破产 `lost`，满 30 回合 `won`）。游戏与真实公司/账本完全隔离。
+- 测试：新增 `test/company-game.test.mjs` 17 用例，company-runtime 55（含重启读档）、company-panel 78、client-bundle 41、host-plugin 71（路由 18）；全量 **523/523**；`node scripts/verify-company.mjs` **20/20**（新增「公司大亨引擎与路由」检查）。
+- 文档：`docs/16` §5.9 契约与实现回填、`docs/15` §7.3.15 真机验收表、`docs/14` 计数与验收命令同步；README 中英功能表与测试数更新。
+
 ### 发布：npm 正式发布 `dsh-member-manager@0.3.0`（v5.30）
 
 - 主包已发布到 npm 公共 registry：`dsh-member-manager@0.3.0`（`latest`），tarball 457.2 kB / 59 文件（打包前从 `files` 移除 `test`、`demo`）；安装命令 `dsh plugin --profile desktop add dsh-member-manager`。

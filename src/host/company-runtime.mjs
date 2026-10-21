@@ -12,7 +12,8 @@ import { resolveCompanyConfig } from "../shared/company-config.mjs";
 import { emptyCompany, createDepartment, createEmployee, updateDepartment, updateEmployee, promoteEmployee, fireEmployee, ensureCompanyCodes, describeEmployeeLevel, describeEmployeeChannels, setEmployeeChannels, primaryChannelOf, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY, DEFAULT_LEVELS, DEFAULT_NUMBERING, normalizeManagementName, normalizeLevelsOverride, validateLevelsDirectory, MANAGEMENT_NAME_DEFAULT, normalizeCompanyName, COMPANY_NAME_DEFAULT } from "../shared/company-org.mjs";
 import { emptyLedger, transitionOrder, ORDER_STATES } from "../shared/company-ledger.mjs";
 import path from "node:path";
-import { readFile, writeFile, rm } from "node:fs/promises";
+import { readFile, writeFile, rm, mkdir, rename } from "node:fs/promises";
+import { createGame, seedFromCompanyView, viewGame, serializeGame, deserializeGame, assignOrder, hireEmployee, upgradeEmployee, upgradeDepartment, stepGame } from "./company-game.mjs";
 import crypto from "node:crypto";
 
 export const TOOL_NAMES = [
@@ -29,6 +30,8 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
   const { config } = resolveCompanyConfig(rawConfig);
   const workspaceDir = path.resolve(dataDir || process.env.DSH_DATA_DIR || ".", "workspace");
   const store = new CompanyStore(dataDir, { now: () => new Date().toISOString() });
+  // 公司大亨：游戏存档独立于 company.json，放 <dataDir>/game/state.json
+  const gamePath = path.join(dataDir, "game", "state.json");
 
   let fakeServices = null;
   // fake 模式注入 fake agents/subagents/provider，同时保留原 ctx 的其它能力
@@ -58,6 +61,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     sessionTools: new Map(),
     sessionAborts: new Map(),
     company: emptyCompany(),
+    game: null,
     ledger: emptyLedger(),
     ownerAgent: null,
     ownerHandle: null,
@@ -999,6 +1003,79 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     }
   }
 
+  /* --------------------------- 公司大亨（小游戏） --------------------------- */
+  // 游戏是 demo 定位：状态独立存档、不影响公司/账本；失败只影响游戏页签。
+  async function saveGameToDisk(game) {
+    const dir = path.dirname(gamePath);
+    await mkdir(dir, { recursive: true });
+    const tmp = `${gamePath}.tmp-${process.pid}-${Date.now()}`;
+    await writeFile(tmp, serializeGame(game), "utf8");
+    await rename(tmp, gamePath);
+  }
+
+  // 懒加载：首次请求 /company/game 时才读档/开局，避免启动阶段写盘。
+  async function bootGame() {
+    if (runtime.game) return runtime.game;
+    try {
+      const raw = await readFile(gamePath, "utf8");
+      const loaded = deserializeGame(raw);
+      if (loaded) {
+        runtime.game = loaded;
+        return loaded;
+      }
+      bootWarnings.push("游戏存档版本不兼容，已忽略并重新开局");
+    } catch {
+      // 首次进入：没有存档，正常走开局
+    }
+    runtime.game = createGame(seedFromCompanyView(view()));
+    try {
+      await saveGameToDisk(runtime.game);
+    } catch (err) {
+      bootWarnings.push(`游戏存档写入失败: ${err.message}`);
+    }
+    return runtime.game;
+  }
+
+  async function handleGameOp(req, url, body) {
+    const action = String(body?.action || "");
+    const args = body?.args && typeof body.args === "object" ? body.args : {};
+    try {
+      if (action === "new") {
+        runtime.game = createGame(seedFromCompanyView(view()), {
+          seed: Number.isFinite(Number(args.seed)) ? Number(args.seed) : undefined,
+          turnLimit: args.turnLimit,
+        });
+        await saveGameToDisk(runtime.game);
+        await store.appendAudit({ type: "company.game_new", turnLimit: runtime.game.turnLimit });
+        return viewGame(runtime.game);
+      }
+      if (!runtime.game) await bootGame();
+      if (!runtime.game) return { ok: false, code: "E_GAME_UNAVAILABLE", message: "游戏状态不可用" };
+      let res = null;
+      if (action === "step") res = stepGame(runtime.game);
+      else if (action === "assign") res = assignOrder(runtime.game, args);
+      else if (action === "hire") res = hireEmployee(runtime.game, args);
+      else if (action === "upgradeEmployee") res = upgradeEmployee(runtime.game, args);
+      else if (action === "upgradeDepartment") res = upgradeDepartment(runtime.game, args);
+      else return { ok: false, code: "E_UNKNOWN_ACTION", message: `未知操作: ${action || "(空)"}` };
+      if (!res || res.ok !== true) return res || { ok: false, code: "E_INTERNAL" };
+      runtime.game = res.game;
+      await saveGameToDisk(runtime.game);
+      if (action === "step" && runtime.game.status !== "playing") {
+        await store.appendAudit({
+          type: "company.game_finished",
+          status: runtime.game.status,
+          rating: runtime.game.rating,
+          coins: runtime.game.coins,
+          turn: runtime.game.turn,
+        });
+      }
+      return viewGame(runtime.game);
+    } catch (err) {
+      return { ok: false, code: "E_INTERNAL", message: err?.message || String(err) };
+    }
+  }
+
   function defineRoutes() {
     return [
       { method: "GET", path: "/company/overview", handler: (req, url) => view() },
@@ -1007,6 +1084,12 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
       { method: "GET", path: "/company/costs", handler: (req, url) => view().costs },
       { method: "GET", path: "/company/orders", handler: (req, url) => view().orders },
       { method: "POST", path: "/company/op", handler: handleCompanyOp },
+      // 公司大亨（内置小游戏）：只读状态 + 写操作，与公司数据隔离
+      { method: "GET", path: "/company/game", handler: async () => {
+        if (!runtime.game) await bootGame();
+        return runtime.game ? viewGame(runtime.game) : { ok: false, code: "E_GAME_UNAVAILABLE" };
+      } },
+      { method: "POST", path: "/company/game/op", handler: handleGameOp },
     ];
   }
 

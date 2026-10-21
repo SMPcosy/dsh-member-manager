@@ -399,6 +399,57 @@ test("company_hire 指向不存在部门返回 E_NOT_FOUND 且不写文件/员�
   await rt.shutdown();
 });
 
+function findGameRoutes(rt) {
+  return {
+    get: rt.routes.find((r) => r.method === "GET" && r.path === "/company/game"),
+    op: rt.routes.find((r) => r.method === "POST" && r.path === "/company/game/op"),
+  };
+}
+
+test("公司大亨：GET /company/game 开局快照 + POST op 操作 + 存档跨重启", async () => {
+  const dataDir = `/tmp/test-dsh-member-manager-game-${Date.now()}`;
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  const routes = findGameRoutes(rt);
+  assert.ok(routes.get && routes.op, "游戏路由应注册");
+  const url = new URL("http://localhost/company/game");
+
+  const snap = await routes.get.handler({}, url);
+  assert.equal(snap.version, 1);
+  assert.equal(snap.status, "playing");
+  assert.equal(snap.turn, 1);
+  assert.ok(snap.coins > 0);
+  assert.ok(Array.isArray(snap.departments) && snap.departments.length >= 1);
+  assert.ok(Array.isArray(snap.employees) && snap.employees.length >= 1);
+  assert.ok(snap.nextCosts && typeof snap.nextCosts.hire === "number");
+
+  const deptId = snap.departments[0].id;
+  const orderId = snap.orders[0].id;
+  const assigned = await routes.op.handler({}, url, { action: "assign", args: { orderId, departmentId: deptId } });
+  assert.equal(assigned.orders.find((o) => o.id === orderId).deptId, deptId);
+
+  const stepped = await routes.op.handler({}, url, { action: "step", args: {} });
+  assert.equal(stepped.turn, 2);
+  assert.ok(stepped.log.length >= 1);
+
+  const bad = await routes.op.handler({}, url, { action: "nope" });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.code, "E_UNKNOWN_ACTION");
+
+  const replayed = await routes.op.handler({}, url, { action: "new", args: { seed: 5 } });
+  assert.equal(replayed.turn, 1);
+  assert.equal(replayed.status, "playing");
+  await rt.shutdown();
+
+  // 存档：新运行时读同一数据目录，游戏应接着上一局（new 之后的回合 1）
+  const rt2 = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt2.boot();
+  const snap2 = await findGameRoutes(rt2).get.handler({}, url);
+  assert.equal(snap2.turn, 1, "重启后应读到已保存的存档");
+  assert.equal(snap2.version, 1);
+  await rt2.shutdown();
+});
+
 function findOpRoute(rt) {
   return rt.routes.find((r) => r.method === "POST" && r.path === "/company/op");
 }

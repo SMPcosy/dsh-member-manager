@@ -276,6 +276,8 @@ test("apply() 注册 HTTP 路由，content-type 为 utf-8 JSON", async () => {
     "/api/dsh-member-manager/backups",
     "/api/dsh-member-manager/company/board",
     "/api/dsh-member-manager/company/costs",
+    "/api/dsh-member-manager/company/game",
+    "/api/dsh-member-manager/company/game/op",
     "/api/dsh-member-manager/company/op",
     "/api/dsh-member-manager/company/orders",
     "/api/dsh-member-manager/company/org",
@@ -879,7 +881,7 @@ test("回归：ctx 访问未声明属性即抛错时，apply 仍能完整执行�
   // 早期实现写了 `ctx.config`，导致 apply 在第一行后中断、工具与路由全部注册不上。
   assert.doesNotThrow(() => PLUGIN.apply(ctx, {  dataDir: dir }));
   assert.equal(tools.size, 29, "29 个工具（16 名册 + 13 公司化）都应注册（真实故障时这里是 0）");
-  assert.equal(routes.size, 16, "16 条路由（10 名册 + 5 公司化只读 + 1 面板写接口）都应注册（真实故障时这里是 0）");
+  assert.equal(routes.size, 18, "18 条路由（10 名册 + 5 公司化只读 + 2 面板写接口 + 2 公司大亨）都应注册（真实故障时这里是 0）");
 });
 
 test("回归：不给 config 且 ctx 会抛错时，回退默认目录且不崩溃", () => {
@@ -901,7 +903,7 @@ test("回归：不给 config 且 ctx 会抛错时，回退默认目录且不崩�
   });
   assert.doesNotThrow(() => PLUGIN.apply(ctx)); // 无第二个参数
   assert.equal(tools.size, 29);
-  assert.equal(routes.size, 16);
+  assert.equal(routes.size, 18);
 });
 
 test("配置取自第二个参数（与官方 apply(ctx, config) 一致），优先于 ctx.config", async () => {
