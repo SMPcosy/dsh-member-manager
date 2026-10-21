@@ -280,15 +280,27 @@ test("Panel：点击「同步核心成员」发出 registerLive 请求", async (
   assert.equal(op.body.op, "registerLive");
 });
 
-test("Panel：标题栏「成员管理」后有公司名输入框，值来自 state.company.companyName", () => {
+test("Panel：标题后显示公司名文本，点击打开公司名编辑弹窗", () => {
   const view = sampleView();
   view.company = { companyName: "测试公司" };
   const { exports } = loadBundle(makeReact([view, null, false]));
   const tree = exports.__internals.Panel({ t: (k) => k });
-  const inputs = collectInputs(tree);
-  const input = inputs.find((i) => i.props && i.props.placeholder === "cpCompanyNamePh");
-  assert.ok(input, "应渲染公司名输入框（placeholder=cpCompanyNamePh）");
-  assert.equal(input.props.value, "测试公司", "输入框值应来自 state.company.companyName");
+  // 标题后是可点击的公司名（与标题同字号），不是输入框
+  const headerBtn = collectButtons(tree).find((b) => b.label === "测试公司");
+  assert.ok(headerBtn, "标题后应显示可点击的公司名文本");
+  assert.equal(typeof headerBtn.onClick, "function", "公司名应可点击打开编辑菜单");
+  assert.equal(
+    collectInputs(tree).some((i) => i.props && i.props.placeholder === "cpCompanyNamePh"),
+    false,
+    "未打开编辑菜单时不应有公司名输入框",
+  );
+
+  // companyOpen=true（hook 索引 7）时渲染编辑弹窗
+  const seeded = loadBundle(makeReact([view, null, false, "company", null, null, false, true]));
+  const dialogTree = seeded.exports.__internals.Panel({ t: (k) => k });
+  const input = collectInputs(dialogTree).find((i) => i.props && i.props.placeholder === "cpCompanyNamePh");
+  assert.ok(input, "点击后应渲染公司名编辑弹窗（placeholder=cpCompanyNamePh）");
+  assert.equal(input.props.value, "测试公司", "弹窗输入框值应来自 state.company.companyName");
 });
 
 test("Panel：默认落在「总架构」页，页签顺序总架构→员工中心→工作流→备份与更新", () => {

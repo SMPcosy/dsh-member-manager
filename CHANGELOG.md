@@ -123,7 +123,7 @@
 
 ### 新增：公司名称自定义 + 工作网竖向布局（v5.14）
 
-- 插件面板页头「成员管理」右侧新增**公司名称输入框**（1–40 字符，失焦/回车保存，写入 `company.json` 并审计 `company.renamed`），`GET /state` 与 `GET /orgmap` 均返回 `companyName`。
+- 插件面板页头「成员管理」标题后直接显示**公司名称**（与标题同字号），点击弹出编辑菜单保存（1–40 字符，写入 `company.json` 并审计 `company.renamed`），`GET /state` 与 `GET /orgmap` 均返回 `companyName`。
 - 工作网改为**竖向布置**：管理层在上，部门自上而下逐行堆叠，每行左侧部门色块、右侧员工卡片；连线改为竖向总线 + 部门到员工的小括号连接。
 - 工作网任务栏在无任务时显示**自定义公司名**（此前显示空文案）。
 - `POST /company/op` 新增 `setCompanyName`（`E_INVALID_COMPANY_NAME`）；新增 shared 导出 `COMPANY_NAME_DEFAULT`/`COMPANY_NAME_MAX`/`normalizeCompanyName`。
