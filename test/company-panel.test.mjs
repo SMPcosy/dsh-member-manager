@@ -369,7 +369,7 @@ function overviewFetch(calls = [], data = overviewFixture()) {
 /** CompanyOrgPanel 的 useState 顺序（v5.5：追加 15 rosterPicker / 16 modelProviders）：
  *  0 overview / 1 error / 2 busy / 3 updatedAt / 4 deptModal / 5 modalTab /
  *  6 newDeptOpen / 7 newDeptDraft / 8 opError / 9 newDeptError / 10 editor /
- *  11 syncResult / 12 syncError / 13 mgmtOpen / 14 saved / 15 rosterPicker / 16 modelProviders */
+ *  11 mgmtOpen / 12 saved / 13 rosterPicker / 14 modelProviders */
 function cpSeed(options = {}) {
   return [
     options.overview === undefined ? overviewFixture() : options.overview,
@@ -383,8 +383,6 @@ function cpSeed(options = {}) {
     options.opError || null,
     options.newDeptError || null,
     options.editor || null,
-    options.syncResult === undefined ? null : options.syncResult,
-    options.syncError === undefined ? null : options.syncError,
     options.mgmtOpen || false,
     options.saved === undefined ? null : options.saved,
     options.rosterPicker === undefined ? null : options.rosterPicker,
@@ -658,7 +656,6 @@ test("源码：v5 总架构结构——默认 company、管理层节点、/compa
   assert.match(src, /cpHr: "HR management"/);
   assert.match(src, /cpProfile: "公司化资料"/);
   assert.match(src, /cpSaveProfile: "保存公司化资料"/);
-  assert.match(src, /cpImportProfiles: "导入名册资料"/);
   assert.match(src, /cpHrActions: "人事操作"/);
   assert.match(src, /cpHrPolicy: "会话策略"/);
   assert.match(src, /cpMainChannel: "通道说明"/);
@@ -669,7 +666,10 @@ test("源码：v5 总架构结构——默认 company、管理层节点、/compa
   assert.equal(src.includes("registryMembers"), false, "CompanyOrgPanel 不再接收名册成员");
   assert.match(src, /setEditor\(hrEmployeeId != null \? \{ kind: "hr", employeeId: hrEmployeeId \} : null\)/);
   assert.match(src, /opPost\("updateEmployeeProfile"/);
-  assert.match(src, /opPost\("importRosterProfiles"/);
+  // v5.10：公司化资料 3 列布局——显示名/岗位名称第一行，技能/模型第二行，岗位职责占第 3 列两行
+  assert.match(src, /hrGrid: { display: "grid", gridTemplateColumns: "repeat\(3, minmax\(0, 1fr\)\)"/);
+  assert.match(src, /gridColumn: "3", gridRow: "1 \/ span 2"/);
+  assert.equal(src.includes('t("cpImportProfiles")'), false, "导入名册资料按钮应移除");
 
   // 轮询与写接口
   assert.match(src, /api\("\/company\/overview"\)/);
@@ -752,8 +752,6 @@ test("字典：v5 文案 zh/en 严格对称，中文与 docs/21 §4.3 一致", (
   assert.equal(zh.cpProfile, "公司化资料");
   assert.equal(en.cpProfile, "Company profile");
   assert.equal(zh.cpSaveProfile, "保存公司化资料");
-  assert.equal(zh.cpImportProfiles, "导入名册资料");
-  assert.ok(zh.cpImportDone.includes("{count}"));
   assert.equal(zh.cpHrTarget, "名册 target");
   assert.equal(zh.cpKindPermanent, "常驻成员 · 独立会话");
   assert.ok(zh.cpKindTemp.length > 0 && zh.cpKindShared.length > 0);
@@ -936,7 +934,7 @@ test("CompanyOrgPanel：管理层节点点击打开只读弹层（cpMgmtHint 标
   const mgmt = collectButtons(made.tree).find((button) => String(button.label).startsWith(made.t("cpManagement")));
   assert.ok(mgmt, "应有管理层节点");
   mgmt.onClick();
-  assert.equal(made.seed[13], true, "点管理层节点应打开只读弹层");
+  assert.equal(made.seed[11], true, "点管理层节点应打开只读弹层");
 
   made.react.reset();
   const tree = made.internals.CompanyOrgPanel(made.panelProps);
@@ -1636,7 +1634,7 @@ test("总架构页：打开拉一次、不注册自动轮询定时器，手动�
   assert.equal(timers.length, 0, "手动刷新也不应创建定时器");
 });
 
-test("总架构工具栏：标题 → 新建部门 → 导入名册资料 → 刷新 → 更新于（全部左对齐）", () => {
+test("总架构工具栏：标题 → 新建部门 → 刷新 → 更新于（全部左对齐）", () => {
   const react = makeReactLive([overviewFixture(), null, false, 1700000000000]);
   const { exports } = loadBundle(react, { fetch: companyFetch([]) });
   const t = translator("zh");
@@ -1647,9 +1645,9 @@ test("总架构工具栏：标题 → 新建部门 → 导入名册资料 → �
   const start = labels.indexOf(t("cpNewDept"));
   assert.ok(start >= 0, "工具栏应有新建部门按钮");
   assert.deepEqual(
-    labels.slice(start, start + 3),
-    [t("cpNewDept"), t("cpImportProfiles"), t("cpRefresh")],
-    "按钮顺序应为 新建部门 → 导入名册资料 → 刷新",
+    labels.slice(start, start + 2),
+    [t("cpNewDept"), t("cpRefresh")],
+    "按钮顺序应为 新建部门 → 刷新（v5.10 移除导入名册资料）",
   );
 
   const text = treeText(tree);
@@ -1805,26 +1803,26 @@ test("管理层只读弹层：关闭按钮 / 点遮罩 / ESC 关闭，卡片内�
   let stopped = false;
   card.props.onClick({ stopPropagation: () => { stopped = true; } });
   assert.equal(stopped, true);
-  assert.equal(react._states[13], true, "卡片内点击不关闭");
+  assert.equal(react._states[11], true, "卡片内点击不关闭");
 
   const self = {};
   overlay.props.onClick({ target: self, currentTarget: self });
-  assert.equal(react._states[13], false, "点遮罩应关闭");
+  assert.equal(react._states[11], false, "点遮罩应关闭");
 
-  react._states[13] = true;
+  react._states[11] = true;
   react.reset();
   const openTree = exports.__internals.CompanyOrgPanel({ t });
   buttonByLabel(findMgmtModal(openTree).card, t("cpClose"))[0].onClick();
-  assert.equal(react._states[13], false, "关闭按钮应关闭");
+  assert.equal(react._states[11], false, "关闭按钮应关闭");
 
-  react._states[13] = true;
+  react._states[11] = true;
   react.reset();
   exports.__internals.CompanyOrgPanel({ t });
   const cleanups = react.flushEffects();
   const escListeners = listeners.filter((fn) => typeof fn === "function");
   assert.ok(escListeners.length >= 1, "弹层打开时应注册 keydown 监听");
   escListeners[escListeners.length - 1]({ key: "Escape" });
-  assert.equal(react._states[13], false, "ESC 应关闭管理层弹层");
+  assert.equal(react._states[11], false, "ESC 应关闭管理层弹层");
   const cleanup = cleanups.filter((fn) => typeof fn === "function").pop();
   assert.ok(cleanup);
   cleanup();
@@ -1887,7 +1885,7 @@ test("写操作：通道编辑保存 POST setChannels（载荷含双通道），
   assert.ok(calls.some((c) => c.url.endsWith("/company/overview")), "保存成功后刷新 overview");
   assert.equal(made.seed[4], "dept-plugin", "部门弹层保持打开");
   assert.equal(String(made.seed[10].kind), "hr", "成功后回落到人事详情");
-  assert.equal(made.seed[14], made.t("cpSaved"), "成功提示已保存");
+  assert.equal(made.seed[12], made.t("cpSaved"), "成功提示已保存");
 });
 
 test("通道编辑：至少保留一个通道——全部取消时保存禁用并显示 cpChannelRequired", () => {
@@ -2082,7 +2080,7 @@ test("公司化资料：展示可编辑字段，保存单次 POST updateEmployee
   assert.ok(ops[0].args.duties.length <= 8, "职责最多 8 条");
   assert.ok(calls.some((c) => c.url.endsWith("/company/overview")), "保存后应刷新 overview");
   assert.equal(String(made.seed[10].kind), "hr", "保存后详情保持打开");
-  assert.equal(made.seed[14], made.t("cpSaved"), "保存成功提示");
+  assert.equal(made.seed[12], made.t("cpSaved"), "保存成功提示");
 });
 
 test("调岗表单：选择目标部门后 POST moveEmployee，不再写名册分组", async () => {
@@ -2151,8 +2149,8 @@ test("v5.5 人事详情：技能选择弹层——按钮带已选数量、勾选
   const skillsButton = buttonByLabel(tree, made.t("pickSkills"))[0];
   assert.ok(skillsButton, "公司化资料应有「选择技能」按钮");
   skillsButton.onClick();
-  assert.equal(String(made.seed[15].kind), "skills", "应打开技能选择弹层");
-  assert.deepEqual(made.seed[15].selected, ["react"], "弹层初值 = 员工公司化资料现有技能");
+  assert.equal(String(made.seed[13].kind), "skills", "应打开技能选择弹层");
+  assert.deepEqual(made.seed[13].selected, ["react"], "弹层初值 = 员工公司化资料现有技能");
 
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
@@ -2160,7 +2158,7 @@ test("v5.5 人事详情：技能选择弹层——按钮带已选数量、勾选
   assert.ok(picker, "应渲染 SkillPicker");
   picker.props.onToggle("node");
   assert.equal(seed10(made).skillsText, "react, node", "勾选应写回公司化资料草稿");
-  assert.deepEqual(made.seed[15].selected, ["react", "node"]);
+  assert.deepEqual(made.seed[13].selected, ["react", "node"]);
 
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
@@ -2170,7 +2168,7 @@ test("v5.5 人事详情：技能选择弹层——按钮带已选数量、勾选
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
   collectElements(tree, (n) => n.type === made.internals.SkillPicker)[0].props.onClose();
-  assert.equal(made.seed[15], null, "关闭弹层后草稿保留、弹层状态清空");
+  assert.equal(made.seed[13], null, "关闭弹层后草稿保留、弹层状态清空");
   assert.equal(seed10(made).skillsText, "node");
 });
 
@@ -2188,9 +2186,9 @@ test("v5.5 人事详情：模型选择弹层——打开拉 /models、选择写�
   assert.ok(modelButton, "公司化资料应有「选择模型」按钮");
   modelButton.onClick();
   await tick();
-  assert.equal(String(made.seed[15].kind), "model", "应打开模型选择弹层");
+  assert.equal(String(made.seed[13].kind), "model", "应打开模型选择弹层");
   assert.ok(calls.some((c) => c.url.endsWith("/models")), "打开模型弹层应拉取 /models 目录");
-  assert.equal(made.seed[16].length, 2, "目录应缓存到 modelProviders");
+  assert.equal(made.seed[14].length, 2, "目录应缓存到 modelProviders");
 
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);
@@ -2199,7 +2197,7 @@ test("v5.5 人事详情：模型选择弹层——打开拉 /models、选择写�
   picker.props.onPick("p-2", "m-2");
   assert.equal(seed10(made).provider, "p-2");
   assert.equal(seed10(made).model, "m-2");
-  assert.equal(made.seed[15], null, "选择后关闭弹层");
+  assert.equal(made.seed[13], null, "选择后关闭弹层");
 
   made.react.reset();
   tree = made.internals.CompanyOrgPanel(made.panelProps);

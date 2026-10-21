@@ -111,6 +111,12 @@
 - **host**：`syncRoster` action 保留（向后兼容，面板不再暴露）；`moveEmployee` 不再联动 `assignGroup`。
 - **测试**：`test/company-panel.test.mjs` 66→60 用例（删除名册同步与名册部门用例，新增「CompanyOrgPanel 只接收 t」）；全量 **459/459**，`node scripts/verify-company.mjs` **19/19**。
 
+
+### 变更：移除导入名册按钮 + 人事详情资料区 3 列布局（v5.10）
+
+- **面板**：总架构工具栏删除「导入名册资料」按钮（`cpImportProfiles`/`cpImportDone` 文案、`importRosterProfiles()` 调用、`syncResult`/`syncError` 状态一并删除；host 侧 action 保留）；「人事管理」详情页的「公司化资料」改为 3 列栅格——第 1 行「中文显示名 / 岗位名称」，第 2 行「技能选择 / 模型选择」，第 3 列（跨两行）整列留给「岗位职责」条目编辑。
+- **测试**：`test/company-panel.test.mjs` 同步（移除导入按钮断言与 sync 状态位，新增 3 列布局源码断言）；全量 **459/459**，`node scripts/verify-company.mjs` **19/19**。
+
 ### 调整：名册部门并入调岗、岗位职责条目化（v5.7）
 
 - **名册部门移入调岗**：人事详情页的名册资料不再包含「名册部门」下拉；调岗表单新增「名册部门」下拉（仅关联名册的员工显示），提交时先发公司化 `moveEmployee`，再发名册 `assignGroup`，成功后刷新名册与总架构概览并回到详情。
