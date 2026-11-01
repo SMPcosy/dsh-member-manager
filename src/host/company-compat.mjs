@@ -3,7 +3,21 @@
  * 宿主能力探测、版本兼容、wake/resume 封装、normalizeUsage、fake 服务。
  */
 
+import { randomUUID } from "node:crypto";
+
 export const SOURCE_KIND = "company-runtime";
+
+/**
+ * 收件箱消息必须带**唯一 id**。
+ * 内核的 inbox 投影（dsh-agent-loop）在插入后会把 next-turn + next-step 里所有 pending
+ * 消息的 id 收进 Set，撞了就抛 `message "undefined" is already pending`
+ * （消息没有 id 时，第二次插入必然撞，因为 Set 里已经有 undefined）。
+ * 以前本插件所有消息都不带 id，于是「已有排队消息的员工」在 shutdown 时 followup
+ * 必然报错，把这条错误留在崩溃日志里误导判读。
+ */
+export function newMessageId(prefix = "msg") {
+  return `${prefix}-${randomUUID()}`;
+}
 
 export const TOOL_LINES = {
   MANAGER: "manager",
@@ -14,13 +28,13 @@ export const TOOL_LINES = {
 
 export const LINE_TOOLS = {
   [TOOL_LINES.OWNER]: [
-    "company_order", "company_status", "company_ask", "company_cancel",
+    "company_order", "company_plan", "company_status", "company_ask", "company_cancel",
     "company_assign", "company_review", "company_borrow", "company_report",
     "company_escalate", "company_accept", "company_ask_help",
     "company_hire", "company_admin",
   ],
   [TOOL_LINES.MANAGER]: [
-    "company_order", "company_status", "company_ask", "company_cancel",
+    "company_order", "company_plan", "company_status", "company_ask", "company_cancel",
     "company_assign", "company_review", "company_borrow", "company_report",
     "company_escalate", "company_accept", "company_ask_help",
   ],
@@ -29,7 +43,7 @@ export const LINE_TOOLS = {
     "company_status", "company_ask",
   ],
   [TOOL_LINES.WINDOW]: [
-    "company_order", "company_status", "company_ask", "company_cancel",
+    "company_order", "company_plan", "company_status", "company_ask", "company_cancel",
   ],
 };
 
@@ -107,6 +121,7 @@ export function normalizeUsage(raw = {}) {
 
 export function buildUserMessage({ text, attemptId, orderId, sourceKind = SOURCE_KIND }) {
   return {
+    id: newMessageId(attemptId ? `order-${attemptId}` : "company"),
     role: "user",
     content: text || "",
     source: {
@@ -258,11 +273,22 @@ export function buildFakeServices({ runtime } = {}) {
   return { agents: fakeAgents, subagents: fakeSubagents, provider: fakeProvider };
 }
 
+/**
+ * 唤醒成员。
+ *
+ * v0.4 修复三件事：
+ * 1. `agents.get()` 在宿主里可能是 async，旧代码没 await，拿到的是 Promise（恒真），
+ *    于是 `followup` 静默不执行——成员压根没被叫醒，订单自然一直 running。
+ * 2. 拿不到 agent 时用 `agents.resume` 复用旧会话。
+ * 3. 仍然拿不到（子会话已随重启销毁）就退回 `subagents.startActivation` 起一个
+ *    新会话并把这单当首条消息投递，绝不静默丢单。
+ */
 export async function wakeAgent({ agents, subagents, sessionId, parentAgent, userMessage, provider, label = "company-staff", cwd }) {
   let agent = null;
   if (agents && typeof agents.get === "function") {
     try {
-      agent = agents.get(sessionId);
+      // 注意：这里必须 await——同步实现 await 也安全。
+      agent = await agents.get(sessionId);
     } catch {
       agent = null;
     }
@@ -277,17 +303,32 @@ export async function wakeAgent({ agents, subagents, sessionId, parentAgent, use
       agent = null;
     }
   }
-  if (!agent) {
-    throw new Error("E_NO_SESSION");
+  if (agent) {
+    if (typeof agent.followup === "function") {
+      await agent.followup(userMessage);
+    }
+    return { ok: true, agent, sessionId, resumed: true };
   }
-  if (typeof agent.followup === "function") {
-    await agent.followup(userMessage);
+
+  // 子会话已不存在：起一个新的 activation 直接吃这条消息。
+  if (subagents && typeof subagents.startActivation === "function") {
+    const activation = await subagents.startActivation({
+      agent: parentAgent?.agent || parentAgent,
+      label,
+      provider,
+      cwd,
+      prompt: userMessage?.content || [{ type: "text", text: String(userMessage?.text || "") }],
+      delivery: "parent",
+    });
+    return { ok: true, agent: activation?.agent || null, sessionId: activation?.childId || sessionId, restarted: true };
   }
-  return agent;
+
+  return { ok: false, code: "E_NO_SESSION", message: `无法唤醒会话 ${sessionId}` };
 }
 
-export function makeIdleMessage(reason = "shutdown") {
+export function makeIdleMessage(reason = "shutdown", sessionId = "") {
   return {
+    id: newMessageId(`idle-${sessionId || "anon"}`),
     role: "user",
     content: [{ type: "text", text: reason }],
     source: { kind: SOURCE_KIND, signal: "idle" },

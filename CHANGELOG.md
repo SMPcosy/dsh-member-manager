@@ -1,16 +1,198 @@
 # Changelog
 
+## 0.5.0（2026-11-01）· 任务图并行（DAG）
+
+一次提交一个任务图，而不是一张一张下单：无依赖的任务同层并行派出，下游等上游 `done` 自动放行。原来的并行只到「多张单各自派给不同的人」，缺的是「一张图里哪些能同时干」这层结构。
+
+### 新增
+
+- **`company_plan`**（窗口 / 经理 / OWNER 线）：`{group?, tasks:[{key?,type,title,deps?,priority?,dept?,detail?,project?,acceptance?}]}`。建单前先做图校验，失败即返回，一张单都不落：
+
+  | 错误码 | 触发条件 |
+  | --- | --- |
+  | `E_PLAN_EMPTY` | `tasks` 为空 |
+  | `E_PLAN_TOO_LARGE` | 超过 50 个任务 |
+  | `E_PLAN_TASK_INVALID` | 某个任务缺 `type` 或 `title` |
+  | `E_PLAN_DUP_KEY` | `key` 重复 |
+  | `E_PLAN_BAD_REF` | `deps` 引用了不存在的 `key` |
+  | `E_PLAN_CYCLE` | 自依赖或成环（回包带 `cycle` 数组） |
+
+- **Kahn 分层**（`src/shared/company-plan.mjs`，纯函数零依赖）：返回 `layers`，第 0 层就是当轮能一起派出去的那批；返回值的 `parallel` 直接告诉你这一批会同时起几个。
+- **依赖用 key 表达**：`deps` 写图内的 `key`（可留空，自动按 `t1/t2/…` 生成），建单时按拓扑层顺序替换成真实 `orderId`，订单上另存 `group` 与 `taskKey` 便于回溯。
+- **`company_status({group})`**：整批进度一次看完——`total/done/running/pending/failed/cancelled` 加每张单的 `{key,orderId,title,state,deps}`。
+- **看板标批次**：工作网卡片上多一个 `#批次·键` 徽章，一眼看出哪几张是一起下的。
+- **异常记录区 + 重启进度按钮**：「异常」泳道只显示当前卡住的失败单；历史异常（已取消 / 已丢失 / 已结束失败的单）挪到下方「异常记录」区，可一键清理；当异常泳道为空时，提供「重启进度」按钮立即触发一次调度。
+
+### 修复
+
+- **调度器轮询间隔被错设成 1 小时**：`src/host/company-runtime.mjs` 里 `createScheduler({ intervalMs: config.limits.staleAttemptMs })` 把「一个 attempt 多久没动静算僵死」的阈值（默认 `3600000`）当成了轮询间隔，于是调度器每小时才 `tick()` 一次。下单时的 `kick(0)` 能让第一层立刻派出，所以看图会以为「并行成功了」；但依赖解锁的第二层起、改派重试全都要等一小时——真实表现就是「DAG 下游永远停在排队」。现在拆出独立的 `limits.schedulerIntervalMs`（默认 `5000`），`view().health.scheduler.intervalMs` 改为从调度器实例读真值，面板不再显示 `3600000`。
+- **订单状态变化不推调度**：`company_report` / `company_review` / `company_cancel` 成功后原本直接返回，因此被解锁的下游单只能干等下一轮轮询。现在三处成功后都 `kick(0)`：一次验收通过，下游立刻开跑。
+- **同一个员工被连派两单，把上一个会话顶掉**：`withLedger()` 每次都从 store 重载公司状态，而派工路径只 `saveLedger` 不 `saveCompany`，于是刚被标成 `working` 的人在下一单看来又是 `idle`，`selectEmployee` 会再次挑中他。`per_task` 策略下第二单进 `ensureSession` 时执行 `end(employee.id, true)`，把第一单的会话直接结束——第一个 attempt 再也等不到 `company_report`，订单卡在「执行中」直到重启被当孤儿回收。现在 `assignAndWake` 成功后补 `await store.saveCompany(runtime.company)`，并新增忙碌门禁：员工已有别的单的活 attempt 时返回 `E_EMPLOYEE_BUSY`（排除本单自己的 attempt，改派本单不受影响），调度器下一轮自会换人。
+
+- **工作网详情面板自动折叠 + 点外部关闭**：`lib/client.js` 的详情原本只跟随卡片就地插入 DOM，面板刷新或切泳道时会被清掉，看起来像「自动折叠」；现在每次渲染末尾会重新把详情挂到被选中卡片后面，保持展开；同时新增点击详情外部任意位置关闭（点击详情内部不关闭），避免再次去找 × 按钮。
+
+### 没变的
+
+- 依赖门禁仍是 `isOrderReady`（`deps` 全部 `done` 才放行）；`company_plan` 只是把图展开成普通订单，不引入新的状态机。
+- 产能门禁不受影响：同层 5 个任务、部门产能 4，就会派出 4 个，剩下一个留在 `queued` 等下一轮（`E_CAPACITY` 退避 10s）。
+- 自动派工仍不自动借调临时工 / 共享员工。
+
+### 测试
+
+`test/company-plan.test.mjs` 13 项（空 / 缺字段 / 重 key / 坏引用 / 自依赖 / 二节点环 / 三节点环 / 无依赖同层 / 菱形三层 / 缺省 key / 超 50 / 建单后 `group`+`taskKey` 且无损 JSON / 同层同时 ready 且下游等上游），`test/company-scheduler-interval.test.mjs` 3 项（默认间隔、可覆盖、health 回报真实值），`test/company-employee-busy.test.mjs` 3 项（忙碌门禁 / 派工后状态落盘 / 两张单派给两个不同的人），`test/client-bundle.test.mjs` 增加异常记录区、重启进度按钮、详情外部关闭断言。全量 `node --test "test/*.test.mjs"` → 655 passed / 0 failed（原 634）。
+
+## 0.4.1（2026-10-30）· 修掉两条把 DSH 崩掉的停工路径
+
+起因是 2026-10-30 17:13 的启动弹窗：`Cannot read properties of null (reading 'kind')`，栈在 `@deepseek-ai/dsh-subagent/lib/index.js` 的 `subagentTiming` 投影。顺藤查回本插件，两条根因都在停工路径上。
+
+### 修复
+
+- **消息都带唯一 id**：内核 `dsh-agent-loop` 插消息前用 `ids.has(message.id)` 去重，而本插件构造的 user 消息**从来没有 id**，第二次插入必然撞 `undefined`，抛 `message "undefined" is already pending`。新增 `newMessageId(prefix)`（`node:crypto` 的 randomUUID），`buildUserMessage` / `makeIdleMessage` / escalation followup / 派单 `userMessage` 全部补 id。这条错误以前只在 `warn` 里出现，但它会让人误判崩溃原因。
+- **停工不再伪造一个 turn**：`shutdown()` 原来对每个活子进程 `followup(makeIdleMessage("shutdown"))` —— 这会把子代理**唤醒成一个真 turn**，紧接着 `cancel` 落在 step 边界，该 turn 没有 verdict，落盘 `turn/end {reason: null}`；rc.3 的 `subagentTiming` 投影读 `event.data.reason.kind` 时直接崩，下次启动就起不来（本次事故的 5 个 `_no-cwd` 会话全是这么来的）。现在改为：等子进程空闲（10s 超时）→ `cancel("shutdown", {keepInbox:true})`，不制造新 turn，并打一条 `[company] 停工：N 个活子进程，cancel M 个` 汇总日志。
+- **回归测试**：`test/inbox-message-id.test.mjs`（5 项）——同一 attempt 连续两次派单 id 必须不同；模拟内核 Set 去重，连插四条不抛错。
+
+### 已知边界
+
+- 内核若仍因**历史会话**里的 `reason:null` 崩，属于数据层，用 `C:\work\dsh-errors\工具\dsh-diag.mjs sessions --fix` 修（本插件不再产生新的）。
+
+## 0.4.0（未发布）· 工作网看板 + 真派工闭环 + 临时工
+
+v0.3 的工作网「看得见但用不了」：订单下得去、派不出来，看板上也没有任务流转。本版本把整条链路做实，并删除自动弹窗。
+
+### 修复（都是「下了任务没人接」的真实根因）
+
+- **路由五级回退**：新增 `resolveDepartment`（`explicit` → `rule` → 部门 `accepts` → 成员 `skills` → 产能兜底），`routingRules` 为空时不再直接 `E_NO_DEPT`；`routeTypeToDept` / `selectEmployee` 旧签名保留。
+- **订单不再粘死在 routed**：`STATE_MACHINE` 补 `routed→queued/failed`、`failed→cancelled`；新增 `requeueIfRouted()`，路由/产能/无人三类失败都退回 `queued` 并写 `routeError` + 10s 退避。
+- **调度器重写**：`createScheduler({runtime,dispatcher,logger,intervalMs=5000,maxPerTick=8})`，每轮 `recoverStranded()` → `sweepTemps()` → 依赖/退避过滤 → 优先级+创建时间排序 → 逐条派工；`company_order` 成功后 `kick(0)` 事件驱动。**满编部门只跳过自己，不再 break 整个调度轮**（原来一个满编部门会饿死全公司）。
+- **attempt 跨重启**：`activeAttempts` 改「内存 + 账本」双读；新增 `hydrate({recoverOrphans})` 冷恢复、`recoverStranded()` 搁浅回收、`markAttemptStale`；`report` 区分 `E_STALE_ATTEMPT`（被吊销）与 `E_DUPLICATE_REPORT`（已回报）。
+- **改派先吊销**：重派前把旧活 attempt 全部 `superseded`，两个 worker 不会同时改一份产物。
+- **唤醒不再静默失败**：`wakeAgent` 里 `agents.get()` 补 `await`（原来返回 Promise 恒真 → `followup()` 静默不执行，成员根本没被叫醒）；失败回退 `agents.resume` → `subagents.startActivation`，彻底失败返回 `E_NO_SESSION` 并回滚订单。
+- **成员属性不再被账本抹掉**：`normalizeCompany` 现在保留 `reasoningEffort / memberProvider / maxDepth / toolPolicy / currentOrderId / currentAttemptId / lastActiveAt / notes / tempHiredAt / tempMaxTasks / tempCompleted / tempExpiresAt`（漏这条 = 临时工计次第一次操作后就消失）。
+- **冷恢复后成员回到 idle**：`hydrate` 把卡在 `working` 且无活 attempt 的员工放回 `idle`，否则重启后永远选不到人。
+
+### 新增
+
+- **工作网看板**：右侧栏页签内五泳道（待派/已路由/执行中/已完成/异常）+ KPI + 调度器状态 + 部门产能条；卡片点开抽屉看订单全文/attempt 历史/依赖/验收标准，并按状态给派工、验收、驳回、升级、取消；顶栏可「跑一轮调度」「雇临时工」「+ 新任务」。
+- **面板动作**：`placeOrder / routeOrder / assignOrder / borrowOrder / reviewOrder / cancelOrder / escalateOrder / hireTemp / releaseTemp / runScheduler / startScheduler / stopScheduler`；调度器胶囊点一下即可暂停/恢复自动派工。
+- **订单上冗余当前 attempt**：`assignAttempt` 同时写 `order.employee / order.attemptId / order.attemptNo / order.attemptStartedAt`，看板与快照不必再翻 `attempts[]`（重启后也能直接显示「谁在做、第几次」）。
+- **数据面**：`/orgmap` 与 worknet 快照新增 `orders / pipeline / health / deptStats`；`view()` 新增 `board.running|byState`、`attempts`、`health{scheduler,pending,routeErrors,capacity}`。
+- **成员属性**：`reasoningEffort`、`memberProvider`(spawn/fork)、`maxDepth`、`toolPolicy{allow,deny}`、`sessionPolicy`；`toolPolicy.deny` 命中直接 `E_TOOL_POLICY`；`maxDepth=0` 写进员工身份提示。
+- **临时工**：`kind:"temp"` + `tempMaxTasks/tempCompleted/tempExpiresAt`，回报满额自动 `retired`，调度器每轮清扫到期临时工；`company_borrow` 支持 `shared|temp`。
+- **不自动弹窗**：删除 `orgmapAutoOpened` / `scheduleOrgMapAutoOpen`，工作网只在点 header「工作网」按钮时打开。
+- 脚本 `scripts/verify-v04.mjs`：真实 store + 真实账本跑 29 项端到端自检。
+- 脚本 `scripts/verify-panel-v04.mjs`：走**真实面板 op 通道**（`POST /company/op`）跑 24 项，覆盖下单→调度→派工→唤起消息→验收→临时工入职/退场→定时自动派工。
+
+### 测试
+
+- 609/609 通过（新增 `company-dispatch-v04` 10 + `company-attrs-v04` 4 + 看板用例 5 + `company-attrs-persist-v04` 2 + `company-panel-ops-v04` 1）。
+- `node scripts/verify-v04.mjs` → 29/29；`node scripts/verify-panel-v04.mjs` → 24/24。
+
+### 限制
+
+- 插件代码在 DSH 启动时载入内存，升级后需重启 DSH。
+- 面板可编辑 `toolPolicy.deny`；`allow` 仅保留原值，暂未提供编辑入口。
+
+## 0.3.3（未发布）· 新建部门后自动登记名册
+
+承接 0.3.2：公司员工已能登记名册，但新建部门（创建预览 → `createDepartment` + 逐员工 `createEmployee`）产生的员工仍停在「未登记」，要手动点「批量登记未关联」。本版本让创建动作自动完成登记。
+
+### 新增
+
+- 配置项 `company.autoLinkRoster`（默认 `true`，可写根层或 `company.org` 下；`false` 关闭）。非法值回退默认并返回 warning。
+- 自动登记路径：`company_hire`、`company_admin` 的 `createEmployee` / `createDepartment`、`POST /company/op` 的 `createEmployee` / `createDepartment`，成功落盘后 best-effort 登记：
+  - 只处理未关联员工（`onlyUnlinked`），沿用 0.3.2「只补空字段、绝不覆盖」；
+  - 名册不可用（无 roster 桥 / `registry.json` 读不到）或写失败：创建仍 `ok:true`，结果带 `roster:{ok:false,code,attempted,created,updated,message}`，面板继续显示「未登记」，可手动「登记到名册」补齐；
+  - 成功：`roster:{ok:true,attempted,created,updated}`；关闭：`roster:{ok:true,disabled:true,...}`。
+- 新建部门创建预览对话框加提示（中英）：创建后员工会自动登记进名册。
+- 审计：自动登记沿用 `roster.employees_linked`，`source` = `auto:hire` / `auto:admin:createEmployee` / `auto:admin:createDepartment` / `auto:panel:createEmployee` / `auto:panel:createDepartment`。
+
+### 测试
+
+- 新增 4 个用例（面板 op 路径自动登记 / `company_hire` 自动登记 / `autoLinkRoster:false` 关闭 / 名册不可用不阻塞创建）；`company-config` 默认值补 `autoLinkRoster:true`；`roster-link` 手动登记用例显式关闭自动登记以保持原语义。全量 611/611。
+
+### 限制
+
+- 自动登记只覆盖「新建」路径；历史未登记员工（当前为游戏部 7 人）仍需「批量登记未关联」或 `node scripts/roster-link.mjs --department 游戏开发`。
+- 隐式关联（员工 id 即 target）不提供解除入口；如需移除名册条目请用 `member_remove`。
+
+## 0.3.2（未发布）· 公司与名册双向关联（内容部员工接入名册）
+
+本版本补上「公司 → 名册」方向：公司员工（`company.json`，含 `emp-*` 生成 id）可以按「只补空字段、绝不覆盖」登记进名册（`registry.json`），员工中心显示「名册·已登记 / 未登记 / 已停用」并支持单个 / 批量登记；工具数量不变（仍 29），`company_admin` action 14 → 17。
+
+### 问题
+
+- v5.8 只有「名册 → 公司」的 `importRosterProfiles`，v5.9/v5.10 又按公司化路线移除了面板名册 UI；于是 `company_hire` 与部门预设批量生成的员工（如内容部 E0001/E0014/E0015/E0023）只在 `company.json` 里存在，名册无条目、面板无从显示「未登记」，也没有登记入口。
+- 附带修复：`member_diagnose` 的 `plugin.version` 原为硬编码 `0.1.1`，与实际包版本（0.3.0）不符；现读取 `package.json`。
+
+### 新增：关联共享内核（docs/26）
+
+- 新增 `src/shared/roster-link.mjs`（零 IO 纯函数）：`ROSTER_LINK_STATUS` `rosterTargetOf` `hasExplicitRosterTarget` `buildRosterIndex` `describeRosterLink` `summarizeRosterLinks` `buildRosterProfile` `planRosterLink` `planRosterBatch`。
+- 关联语义：缺省「员工 id 即名册 target」（员工 id 天然匹配 `TARGET_RE`，12 名历史员工零迁移）；需要别名时才在 employee 上写显式 `rosterTarget`（非法名抛 `OrgError`，空串删除该键）。
+- 写入原则沿用 docs/15 §17–20：名册无该 target → 新建；已有 → 只补空字段（displayName 为空或等于 target、title/duties/skills 空、model/provider 缺失、note 空）；仅显式 `refresh` 才覆盖档案字段；不删名册成员、不改 DSH 核心 team 层。
+- `registry-core.mjs` 新增 `patchMember(reg,target,patch,now)`（白名单字段，model/provider 空串清除）；`team-service.mjs` 新增 `patchMember(target,patch)` 与 `linkProfiles(items)`（单次读-改-写批量 create/update/noop，结果含 action/fields）。
+
+### 新增：宿主运行时与 CLI
+
+- `company-runtime` 接收宿主注入的 roster 桥（`{service,members}`），`view()` 顶层加 `roster:{available,total,linked,retired,unlinked}`，每个员工加 `roster:{target,explicit,status,available,member}`；名册读不到 → 员工 `roster:null`、汇总 `available:false`（不得推断全员未登记）。
+- `company_admin` 新增 `linkEmployeeRoster` / `syncEmployeesRoster` / `unlinkEmployeeRoster`（14→17 action）；`POST /company/op` 同名 case；错误码 `E_NO_ROSTER` / `E_NOT_FOUND` / `E_INVALID_TARGET` / `E_INVALID_INPUT`；支持 `dryRun`；审计 `roster.employees_linked` / `roster.employee_unlinked`。
+- 锁约束：文件锁不可重入，`applyRosterLinks` / `unlinkEmployeeRoster` 自身不加锁，由 `company_admin`（已持 `store.withLock`）或 `handleCompanyOp`（`withCompanyRefresh`）持锁调用。
+- `lib/index.js`：`teamServiceRef` 上移到公司运行时创建之前并注入 roster 桥（名册读取走 `readRegistryCached`，读不到返回 null）。
+- 新增 `scripts/roster-link.mjs`：`--list` / `--department <id|编号|名称>` / `--employee <id>…` / `--all` / `--refresh` / `--dry-run` / `--data-dir` / `--json`；无范围参数等价 `--list`（只读）；退出码 0/2/1；写名册走 `TeamService.linkProfiles` 并追加公司审计（source `cli`）。
+
+### 名册工具输出扩展
+
+- `member_list`：每个成员多 `company:{employeeId,code,displayName,departmentId,departmentCode,role,state,explicit,linkStatus}|null`；顶层多 `company:{enabled,rosterAvailable,employees,linked,unlinked}`。
+- `member_diagnose`：多 `rosterLinks:{available,companyEmployees,rosterMembers,linked,unlinkedEmployees}`；`plugin.version` 改为 `package.json` 版本。
+
+### 新增：面板「名册关联」（员工中心）
+
+- 页头汇总「名册：已登记 N · 未登记 M（· 已停用 K）」，名册不可读 → 「名册不可用（读不到 registry.json）」；筛选下拉新增「已关联名册 / 未关联名册」；员工行名册徽章（`title` 提示生效 target）；未登记行「登记到名册」、显式关联行「解除关联」（隐式关联不提供，避免误删名册条目）；页头「批量登记未关联」按当前部门筛选限定范围，busy 防重复。
+- i18n 中英各 11 个新键；全部动态文本走文本节点（无 innerHTML）；写操作走既有 `companyPost` 桥，成功后刷新 overview。
+
+### 真实数据回填（内容部）
+
+- `node scripts/roster-link.mjs --department 内容`：名册 13 → 17 名成员，新建 D01 四人（`emp-mvhzc6kr-13qh` 平面设计 / `emp-mvhzc6ky-auni` 文案 / `emp-mvhzc6l5-auve` 数据分析 / `emp-mvij5g5f-rzjk` 内容负责人），字段含显示名/岗位/职责/技能/模型覆盖与来源备注；审计 `roster.employees_linked{count:4,source:"cli"}`；旧文件保留 `registry.json.bak`。可用 `--list` 复核、`--refresh` 回填档案。
+
+### 测试与自检
+
+- 新增 `test/roster-link.test.mjs` 15 用例（纯函数 / patchMember / linkProfiles / company-org rosterTarget / view 与 3 个 action 含 dry-run、显式 target、解除、`E_NO_ROSTER`）；`test/host-plugin.test.mjs` +2（`member_list.company`、`member_diagnose.rosterLinks` 与版本号一致）；`test/company-panel.test.mjs` 筛选项断言随 UI 更新。
+- 全量 **607 tests / 607 pass / 0 fail**（基线 590）；`node scripts/verify-company.mjs` **22/22**（基线 21；新增「公司与名册关联」检查：8 个导出 + 隐式/显式 target + 只补空字段 + CLI/文档存在）。
+- 文档：新增 `docs/26-公司与名册关联契约.md`；`docs/15` §7.3.17 真机验收表（CLI 回填已回填，重启后面板/工具项待用户重启后确认）；README 中英能力表、`company_admin` action 数、测试数更新。
+
+## 0.3.1（未发布）· 游戏开发模式预设（v7）
+
+本版本给部门加一层「流程预设」：一个部门可以套用内置的「游戏开发模式」（game-dev），获得 7 个岗位槽位与 7 阶段流水线；套用是纯声明式快照，不改员工档案、不新增工具、不改工具数量（仍 29）。
+
+### 新增：部门流程预设共享内核（docs/24）
+
+- 新增 `src/shared/company-presets.mjs`（零 IO 纯函数，12 个导出）：`PRESET_SCHEMA_VERSION` `DEFAULT_PRESET_ID` `GAME_DEV_PRESET` `PRESETS` `listPresets` `getPreset` `normalizePresetRef` `validatePresetRef` `applyPresetToDepartment` `clearPresetFromDepartment` `matchPresetRoles` `resolveDepartmentPreset`。
+- 注册表 game-dev：7 岗位槽位 `director`（游戏制作人）`lead-planner`（主策划）`system-planner`（系统策划）`client-dev`（客户端）`server-dev`（服务端）`artist`（美术 UI）`qa`（测试）；7 阶段 `init` `prototype` `develop` `art` `test` `accept` `iterate`，每阶段含 goal / ownerRole / participantRoles / deliverables / 验收门禁（G1–G7）。
+- 部门字段 `department.preset = {id,version,appliedAt,appliedBy}`；apply/clear 为深拷贝纯函数（`E_NO_DEPARTMENT` / `E_UNKNOWN_PRESET` / `E_INVALID_PRESET`）；无 preset 或未知 id 的部门解析为 `null`（老数据零迁移）。
+- 岗位匹配 v1.1 确定性算法：强字段（`title`/`displayName`）命中 2 分、弱字段（`duties`/`skills`）命中 1 分；按 roles 声明顺序逐槽、每员工最多一槽；同分排序 → 仅 M 槽 manager 优先 → 通道等级降序 → code 升序 → 原序。真实 D04 七人夹具实测 7/7 命中。
+- `company-org.mjs`：`createDepartment` 支持可选 `preset`；`updateDepartment` 的 `allowed` 加 `preset`（`undefined` 不动、`null`/`""` 清除、其余套用/切换）。
+
+### 新增：宿主运行时与 CLI
+
+- `view()` 顶层加 `presets`（注册表摘要），`org.departments[i].preset` 为已解析结构（角色槽位映射到在职员工、阶段/交付物/门禁、`outdated` 版本判定）；`outdated` 来自快照 version 与注册表 version 比较。
+- `company_admin` 新增 `applyDepartmentPreset` / `clearDepartmentPreset`（12→14 action）；`POST /company/op` 同两 case（与工具同语义）；`createDepartment` / `updateDepartment` 两处 op case 透传 `preset`。
+- 新增只读路由 `GET /company/presets`（路由 18→19）；审计类型 `department.preset.applied` / `department.preset.cleared`。
+- 新增 `scripts/apply-preset.mjs`：`--department <id|code> --preset <id> [--data-dir] [--clear] [--dry-run] [--json]`，在 `withLock` 内落库 + 写审计，未知部门/未知预设退出码 2；`--dry-run` 不落盘。
+
+### 新增：总架构面板「开发模式」
+
+- 部门卡显示预设徽章（`游戏开发模式`，快照版本落后时追加「· 可更新」）。
+- 部门弹层新增第三个页签「开发模式」：未套用 → 空态 + 预设下拉 + 「套用模式」；已套用 → 名称/版本/套用时间/角色槽位（未分配占位）/7 阶段流水线（负责人、参与、交付物、验收门禁）+ 切换 + 清除；写操作走既有 `companyPost` 桥，成功后刷新，busy 防重复提交。
+- i18n 中英各 14 个 `cpPreset*` 键；全部动态文本走文本节点（无 innerHTML）。
+
+### 测试与自检
+
+- 新增 `test/company-presets.test.mjs` 33 用例；追加 company-org +8、company-runtime +11、host-plugin +3、company-panel +9、client-bundle +3（只追加，不改既有断言；host-plugin 既有「路由清单」断言随新路由 18→19 调整）。
+- 全量 **590 tests / 590 pass / 0 fail**（基线 523）；`node scripts/verify-company.mjs` **21/21**（基线 20；新增「游戏开发模式预设」检查：注册表 7 岗位 × 7 阶段 + D04 夹具 7/7 命中）。
+- 文档：新增 `docs/24-游戏开发模式预设契约.md`、`docs/25-游戏开发模式-独立审阅.md`；README 中英使用/HTTP/工具表/测试数更新；`docs/14` 计数与 `docs/15` §7.3.16 真机验收同步。
+
 ## 0.3.0（2026-10-20）· 公司化运行时 + 品牌重命名
 
 本版本把插件从「名册管理覆盖层」升级为「单包公司化运行时」：不再依赖 DSH 原生团队层（`ctx.agentTeams`），只用 `ctx.agents` / `ctx.subagents` 承载两级组织（部门经理 → 员工）的派工闭环。
-
-### 新增：公司大亨内置小游戏（v6，2026-10-22）
-
-- 面板新增「大亨 / Tycoon」页签（5 个页签：总架构 → 大亨 → 员工中心 → 工作流 → 备份与更新），回合制公司经营 demo：用当前公司数据的部门/员工做开局种子，30 回合内冲评级 S/A/B/C。
-- 纯逻辑引擎 `src/host/company-game.mjs`（无 I/O、确定性 xorshift32 RNG、版本化存档）＋ host 2 条新路由（`GET /company/game`、`POST /company/game/op`，路由总数 18）；存档独立于公司数据：`<dataDir>/game/state.json`，懒加载，boot 不写盘；`new`/终局 `step` 记入审计（`company.game_new`/`company.game_finished`）。
-- 操作：派单、招聘（300 金币）、员工晋升、部门升级、推进回合；回合流程＝生产→工资与部门开销→补订单→结算（破产 `lost`，满 30 回合 `won`）。游戏与真实公司/账本完全隔离。
-- 测试：新增 `test/company-game.test.mjs` 17 用例，company-runtime 55（含重启读档）、company-panel 78、client-bundle 41、host-plugin 71（路由 18）；全量 **523/523**；`node scripts/verify-company.mjs` **20/20**（新增「公司大亨引擎与路由」检查）。
-- 文档：`docs/16` §5.9 契约与实现回填、`docs/15` §7.3.15 真机验收表、`docs/14` 计数与验收命令同步；README 中英功能表与测试数更新。
 
 ### 发布：npm 正式发布 `dsh-member-manager@0.3.0`（v5.30）
 

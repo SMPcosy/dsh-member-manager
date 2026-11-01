@@ -13,6 +13,7 @@
 
 import { RegistryError, buildTree, renderTreeText } from "./registry-core.mjs";
 import * as core from "./registry-core.mjs";
+import { planRosterLink } from "./roster-link.mjs";
 
 export class TeamService {
   /**
@@ -160,6 +161,58 @@ export class TeamService {
   setModel(target, patch) {
     const now = this.now();
     return this.#run((reg) => core.setModel(reg, target, patch, now));
+  }
+
+  /** 按补丁修改档案字段（displayName/title/duties/skills/note/model/provider，v0.3.2） */
+  patchMember(target, patch) {
+    const now = this.now();
+    return this.#run((reg) => core.patchMember(reg, target, patch, now));
+  }
+
+  /**
+   * 批量把公司员工档案登记/回填进名册（v0.3.2「公司→名册」唯一写入口）。
+   * @param {Array<{profile: object, refresh?: boolean, create?: boolean}>} items
+   *  - 名册没有该 target：create !== false 时新建成员（默认创建）
+   *  - 名册已有：只补空字段；refresh=true 时才用公司档案覆盖档案字段
+   * @returns {{ok: boolean, data?: {registry: object, results: Array<{target: string, action: string, fields?: string[], reason?: string}>}, code?: string, message?: string}}
+   */
+  linkProfiles(items) {
+    const list = Array.isArray(items) ? items : [];
+    if (list.length === 0) {
+      return { ok: true, data: { registry: this.store.load().registry, results: [] } };
+    }
+    const now = this.now();
+    const results = [];
+    const res = this.#run((reg) => {
+      let next = reg;
+      for (const item of list) {
+        const profile = item && typeof item.profile === "object" && item.profile ? item.profile : null;
+        const target = profile && typeof profile.target === "string" ? profile.target.trim() : "";
+        if (!target) {
+          results.push({ target: "", action: "skip", reason: "MISSING_TARGET" });
+          continue;
+        }
+        const existing = next.members.find((m) => m.target === target);
+        if (!existing) {
+          if (item && item.create === false) {
+            results.push({ target, action: "skip", reason: "MEMBER_NOT_FOUND" });
+            continue;
+          }
+          next = core.addMember(next, profile, now);
+          results.push({ target, action: "create" });
+          continue;
+        }
+        const plan = planRosterLink(existing, profile, { refresh: Boolean(item && item.refresh) });
+        if (plan.action === "noop") {
+          results.push({ target, action: "noop" });
+          continue;
+        }
+        next = core.patchMember(next, target, plan.patch, now);
+        results.push({ target, action: "update", fields: Object.keys(plan.patch) });
+      }
+      return next;
+    });
+    return res.ok ? { ok: true, data: { registry: res.data, results } } : res;
   }
 
   assignGroup(target, groupId) {

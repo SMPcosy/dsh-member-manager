@@ -204,7 +204,7 @@ test("宿主插件导出合法的 Cordis 插件形状", () => {
   assert.equal(typeof PLUGIN.apply, "function");
 });
 
-test("apply() 注册 29 个工具（16 名册 + 13 公司化），且参数 schema 结构合法", () => {
+test("apply() 注册 30 个工具（16 名册 + 14 公司化），且参数 schema 结构合法", () => {
   const { ctx, tools } = mockCtx();
   PLUGIN.apply(ctx);
 
@@ -220,6 +220,7 @@ test("apply() 注册 29 个工具（16 名册 + 13 公司化），且参数 sche
     "company_escalate",
     "company_hire",
     "company_order",
+    "company_plan",
     "company_report",
     "company_review",
     "company_status",
@@ -276,12 +277,11 @@ test("apply() 注册 HTTP 路由，content-type 为 utf-8 JSON", async () => {
     "/api/dsh-member-manager/backups",
     "/api/dsh-member-manager/company/board",
     "/api/dsh-member-manager/company/costs",
-    "/api/dsh-member-manager/company/game",
-    "/api/dsh-member-manager/company/game/op",
     "/api/dsh-member-manager/company/op",
     "/api/dsh-member-manager/company/orders",
     "/api/dsh-member-manager/company/org",
     "/api/dsh-member-manager/company/overview",
+    "/api/dsh-member-manager/company/presets",
     "/api/dsh-member-manager/health",
     "/api/dsh-member-manager/models",
     "/api/dsh-member-manager/op",
@@ -473,6 +473,33 @@ test("tool 的 output.render 产出模型可读的文本块", async () => {
   assert.equal(blocks.length, 1);
   assert.equal(blocks[0].type, "text");
   assert.doesNotThrow(() => JSON.parse(blocks[0].text));
+});
+
+/* ================== v0.3.2 公司 ↔ 名册 ================== */
+
+test("member_list 标注员工的公司关联；无关联时 company=null", async () => {
+  const { ctx, tools } = mockCtx();
+  PLUGIN.apply(ctx);
+  await tools.get("member_add").execute({ target: "doc-writer", displayName: "文档制作" });
+  const list = await tools.get("member_list").execute({});
+  assert.equal(typeof list.company.enabled, "boolean");
+  assert.equal(typeof list.company.rosterAvailable, "boolean");
+  assert.equal(typeof list.company.linked, "number");
+  const all = [...list.groups.flatMap((g) => g.members), ...list.ungrouped];
+  const member = all.find((m) => m.target === "doc-writer");
+  assert.ok(member, "刚登记的成员应出现在列表里");
+  assert.equal(member.company, null, "公司里没有 doc-writer 员工时应为 null");
+});
+
+test("member_diagnose 报告 rosterLinks，且 plugin.version 跟 package.json 一致", async () => {
+  const { ctx, tools } = mockCtx();
+  PLUGIN.apply(ctx);
+  const diag = await tools.get("member_diagnose").execute({});
+  const pkg = JSON.parse(fs.readFileSync(path.join(HERE, "..", "package.json"), "utf8"));
+  assert.equal(diag.plugin.version, pkg.version);
+  assert.equal(typeof diag.rosterLinks.available, "boolean");
+  assert.equal(typeof diag.rosterLinks.companyEmployees, "number");
+  assert.equal(typeof diag.rosterLinks.unlinkedEmployees, "number");
 });
 
 /* ================== HTTP 端到端 ================== */
@@ -719,17 +746,17 @@ test("核心集成：agent/created 事件路径也能刷新缓存", async () => 
 
 /* ================== 装载韧性 ================== */
 
-test("韧性：webServer 服务缺失时，29 个工具仍全部注册", () => {
+test("韧性：webServer 服务缺失时，30 个工具仍全部注册", () => {
   const { ctx, tools, routes } = mockCtx({ webServer: null });
   assert.doesNotThrow(() => PLUGIN.apply(ctx));
-  assert.equal(tools.size, 29);
+  assert.equal(tools.size, 30);
   assert.equal(routes.size, 0, "没有 webServer 就不该有路由");
 });
 
 test("韧性：webServer.register 抛错时，插件仍加载且工具可用", async () => {
   const { ctx, tools } = mockCtx({ webServerThrows: true });
   assert.doesNotThrow(() => PLUGIN.apply(ctx));
-  assert.equal(tools.size, 29);
+  assert.equal(tools.size, 30);
   const add = await tools.get("member_add").execute({ target: "still-works" });
   assert.equal(add.ok, true, "面板路由挂了也不该影响工具");
 });
@@ -739,7 +766,7 @@ test("韧性：缺少 ctx.config 时使用默认数据目录且不抛错", () =>
   const m = mockCtx({ dir });
   delete m.ctx.config;
   assert.doesNotThrow(() => PLUGIN.apply(m.ctx));
-  assert.equal(m.tools.size, 29);
+  assert.equal(m.tools.size, 30);
 });
 
 test("group_manage：assign 传空字符串表示移出小组", async () => {
@@ -880,8 +907,8 @@ test("回归：ctx 访问未声明属性即抛错时，apply 仍能完整执行�
   // 关键：这里连 ctx.config 都会抛错（config 不在 inject 列表里）。
   // 早期实现写了 `ctx.config`，导致 apply 在第一行后中断、工具与路由全部注册不上。
   assert.doesNotThrow(() => PLUGIN.apply(ctx, {  dataDir: dir }));
-  assert.equal(tools.size, 29, "29 个工具（16 名册 + 13 公司化）都应注册（真实故障时这里是 0）");
-  assert.equal(routes.size, 18, "18 条路由（10 名册 + 5 公司化只读 + 2 面板写接口 + 2 公司大亨）都应注册（真实故障时这里是 0）");
+  assert.equal(tools.size, 30, "30 个工具（16 名册 + 14 公司化）都应注册（真实故障时这里是 0）");
+  assert.equal(routes.size, 17, "17 条路由（10 名册 + 6 公司化只读 + 1 面板写接口）都应注册（真实故障时这里是 0）");
 });
 
 test("回归：不给 config 且 ctx 会抛错时，回退默认目录且不崩溃", () => {
@@ -902,8 +929,8 @@ test("回归：不给 config 且 ctx 会抛错时，回退默认目录且不崩�
     },
   });
   assert.doesNotThrow(() => PLUGIN.apply(ctx)); // 无第二个参数
-  assert.equal(tools.size, 29);
-  assert.equal(routes.size, 18);
+  assert.equal(tools.size, 30);
+  assert.equal(routes.size, 17);
 });
 
 test("配置取自第二个参数（与官方 apply(ctx, config) 一致），优先于 ctx.config", async () => {
@@ -1664,4 +1691,71 @@ test("0.2.0 一句话建组：默认只预览，confirm 才真正写名册", asy
   assert.equal(state.json.data.groups[0].name, "质检组");
   const targets = state.json.data.groups[0].members.map((m) => m.target);
   assert.deepEqual(targets.sort(), ["recorder", "reviewer"]);
+});
+
+/* ================== 部门流程预设（docs/24） ================== */
+
+test("company_admin action 枚举包含 applyDepartmentPreset / clearDepartmentPreset", () => {
+  const { ctx, tools } = mockCtx();
+  PLUGIN.apply(ctx);
+  const actions = tools.get("company_admin").parameters.properties.action.enum;
+  assert.ok(actions.includes("applyDepartmentPreset"), "缺少 applyDepartmentPreset");
+  assert.ok(actions.includes("clearDepartmentPreset"), "缺少 clearDepartmentPreset");
+  // 既有 12 个动作不受影响
+  assert.ok(actions.includes("createDepartment"));
+  assert.ok(actions.includes("importRosterProfiles"));
+});
+
+test("GET /company/presets 返回预设注册表（game-dev：7 阶段 / 7 岗位）", async () => {
+  const { ctx, routes } = mockCtx();
+  PLUGIN.apply(ctx);
+  const r = await call(routes.get("/api/dsh-member-manager/company/presets"), "GET");
+  assert.equal(r.status, 200);
+  assert.equal(r.json.ok, true);
+  assert.ok(Array.isArray(r.json.data));
+  const gameDev = r.json.data.find((p) => p.id === "game-dev");
+  assert.ok(gameDev, "注册表应含 game-dev");
+  assert.equal(gameDev.stageCount, 7);
+  assert.equal(gameDev.roleCount, 7);
+});
+
+test("HTTP 套用/清除部门预设：overview 的 departments[].preset 全链路可用", async () => {
+  const { ctx, routes } = mockCtx();
+  PLUGIN.apply(ctx);
+  const op = routes.get("/api/dsh-member-manager/company/op");
+  const created = await call(op, "POST", JSON.stringify({ action: "createDepartment", args: { name: "游戏开发", preset: "game-dev" } }));
+  assert.equal(created.status, 200);
+  assert.equal(created.json.data.ok, true);
+  const departmentId = created.json.data.departmentId;
+
+  let overview = await call(routes.get("/api/dsh-member-manager/company/overview"), "GET");
+  let dept = overview.json.data.org.departments.find((d) => d.id === departmentId);
+  assert.ok(dept.preset, "createDepartment 应透传 preset");
+  assert.equal(dept.preset.id, "game-dev");
+  assert.equal(dept.preset.roles.length, 7);
+  assert.equal(dept.preset.stages.length, 7);
+  assert.ok(Array.isArray(overview.json.data.presets));
+  assert.ok(overview.json.data.presets.some((p) => p.id === "game-dev"));
+
+  const cleared = await call(op, "POST", JSON.stringify({ action: "clearDepartmentPreset", args: { departmentId } }));
+  assert.equal(cleared.json.data.ok, true);
+  overview = await call(routes.get("/api/dsh-member-manager/company/overview"), "GET");
+  dept = overview.json.data.org.departments.find((d) => d.id === departmentId);
+  assert.equal(dept.preset, null);
+
+  const applied = await call(op, "POST", JSON.stringify({ action: "applyDepartmentPreset", args: { departmentId, presetId: "game-dev" } }));
+  assert.equal(applied.json.data.ok, true);
+  assert.equal(applied.json.data.preset.id, "game-dev");
+  overview = await call(routes.get("/api/dsh-member-manager/company/overview"), "GET");
+  dept = overview.json.data.org.departments.find((d) => d.id === departmentId);
+  assert.equal(dept.preset.id, "game-dev");
+
+  const unknown = await call(op, "POST", JSON.stringify({ action: "applyDepartmentPreset", args: { departmentId, presetId: "nope" } }));
+  assert.equal(unknown.status, 200);
+  assert.equal(unknown.json.data.ok, false);
+  assert.equal(unknown.json.data.code, "E_UNKNOWN_PRESET");
+
+  const missing = await call(op, "POST", JSON.stringify({ action: "applyDepartmentPreset", args: { presetId: "game-dev" } }));
+  assert.equal(missing.json.data.ok, false);
+  assert.equal(missing.json.data.code, "E_INVALID_INPUT");
 });

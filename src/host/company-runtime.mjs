@@ -3,35 +3,35 @@
  * 公司运行时统一入口：组装 compat / employees / dispatcher / scheduler，注册工具与路由。
  */
 
-import { detectCap, isFakeMode, normalizeUsage, buildUserMessage, SOURCE_KIND, makeIdleMessage, buildFakeServices, TOOL_LINES, LINE_TOOLS, safeCtxGet, safeCtxProp, resolveDefaultLlmOptions } from "./company-compat.mjs";
+import { detectCap, isFakeMode, normalizeUsage, buildUserMessage, SOURCE_KIND, newMessageId, buildFakeServices, TOOL_LINES, LINE_TOOLS, safeCtxGet, safeCtxProp, resolveDefaultLlmOptions } from "./company-compat.mjs";
 import { createEmployeeSessionManager } from "./company-employees.mjs";
 import { createDispatcher } from "./company-dispatcher.mjs";
 import { createScheduler } from "./company-scheduler.mjs";
 import { CompanyStore } from "../shared/company-store.mjs";
 import { resolveCompanyConfig } from "../shared/company-config.mjs";
 import { emptyCompany, createDepartment, createEmployee, updateDepartment, updateEmployee, promoteEmployee, fireEmployee, ensureCompanyCodes, describeEmployeeLevel, describeEmployeeChannels, setEmployeeChannels, primaryChannelOf, EMPLOYEE_ROLE, EMPLOYEE_STATE, EMPLOYEE_KIND, SESSION_POLICY, DEFAULT_LEVELS, DEFAULT_NUMBERING, normalizeManagementName, normalizeLevelsOverride, validateLevelsDirectory, MANAGEMENT_NAME_DEFAULT, normalizeCompanyName, COMPANY_NAME_DEFAULT } from "../shared/company-org.mjs";
-import { emptyLedger, transitionOrder, ORDER_STATES } from "../shared/company-ledger.mjs";
+import { emptyLedger, transitionOrder, ORDER_STATES, listLiveAttempts } from "../shared/company-ledger.mjs";
+import { listPresets, validatePresetRef, resolveDepartmentPreset } from "../shared/company-presets.mjs";
+import { ROSTER_LINK_STATUS, buildRosterIndex, buildRosterProfile, describeRosterLink, planRosterLink, rosterTargetOf, summarizeRosterLinks } from "../shared/roster-link.mjs";
+import { isValidMemberName } from "../shared/registry-core.mjs";
 import path from "node:path";
 import { readFile, writeFile, rm, mkdir, rename } from "node:fs/promises";
-import { createGame, seedFromCompanyView, viewGame, serializeGame, deserializeGame, assignOrder, hireEmployee, upgradeEmployee, upgradeDepartment, stepGame } from "./company-game.mjs";
 import crypto from "node:crypto";
 
 export const TOOL_NAMES = [
-  "company_order", "company_status", "company_ask", "company_cancel",
+  "company_order", "company_plan", "company_status", "company_ask", "company_cancel",
   "company_assign", "company_review", "company_borrow", "company_report", "company_escalate",
   "company_accept", "company_ask_help",
   "company_hire", "company_admin",
 ];
 
-export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, logger = console }) {
+export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, logger = console, roster = null }) {
   const warnings = [];
   const PENDING_MIGRATION_FILE = "pending-migration.json";
   const fake = isFakeMode({ fake: rawConfig.fake });
   const { config } = resolveCompanyConfig(rawConfig);
   const workspaceDir = path.resolve(dataDir || process.env.DSH_DATA_DIR || ".", "workspace");
   const store = new CompanyStore(dataDir, { now: () => new Date().toISOString() });
-  // 公司大亨：游戏存档独立于 company.json，放 <dataDir>/game/state.json
-  const gamePath = path.join(dataDir, "game", "state.json");
 
   let fakeServices = null;
   // fake 模式注入 fake agents/subagents/provider，同时保留原 ctx 的其它能力
@@ -61,7 +61,6 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     sessionTools: new Map(),
     sessionAborts: new Map(),
     company: emptyCompany(),
-    game: null,
     ledger: emptyLedger(),
     ownerAgent: null,
     ownerHandle: null,
@@ -78,18 +77,20 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
   const employeeManager = createEmployeeSessionManager({ runtime, logger });
   const dispatcher = createDispatcher({ runtime, store, employeeManager, logger });
   runtime.dispatcher = dispatcher;
-  const scheduler = createScheduler({ runtime, dispatcher, logger, intervalMs: config.limits.staleAttemptMs });
+  // 轮询间隔必须用 schedulerIntervalMs（默认 5s），不能用 staleAttemptMs（1 小时，那是僵死判定阈值）。
+  const scheduler = createScheduler({ runtime, dispatcher, logger, intervalMs: config.limits.schedulerIntervalMs });
+  runtime.scheduler = scheduler;
 
   async function followupManagersAndOwner(text) {
     const owner = runtime.ownerAgent;
     if (owner && typeof owner.followup === "function") {
-      try { await owner.followup({ role: "user", content: text, source: { kind: SOURCE_KIND, signal: "escalation" } }); } catch {}
+      try { await owner.followup({ id: newMessageId("escalation-owner"), role: "user", content: text, source: { kind: SOURCE_KIND, signal: "escalation" } }); } catch {}
     }
     for (const s of employeeManager.sessions.values()) {
       if (s.endedAt) continue;
       const emp = runtime.company.employees.find((e) => e.id === s.employeeId);
       if (emp && emp.role === EMPLOYEE_ROLE.MANAGER && s.handle && typeof s.handle.followup === "function") {
-        try { await s.handle.followup({ role: "user", content: text, source: { kind: SOURCE_KIND, signal: "escalation" } }); } catch {}
+        try { await s.handle.followup({ id: newMessageId(`escalation-${s.sessionId || emp.id}`), role: "user", content: text, source: { kind: SOURCE_KIND, signal: "escalation" } }); } catch {}
       }
     }
   }
@@ -102,6 +103,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
 
   const toolDescriptions = {
     company_order: "提交一条新的公司工单，触发后续路由、派单、执行与验收流程。",
+    company_plan: "一次提交一个任务图：多个任务用 key 互相声明依赖，无依赖的同一层并行派发，下游等上游完成后自动放行。",
     company_status: "查询公司组织结构、工单看板、成本统计与订单列表的当前状态。",
     company_ask: "针对某个工单向责任员工或经理发起追问，要求补充信息或澄清需求。",
     company_cancel: "取消一个尚未完成的公司工单，释放相关员工与资源。",
@@ -144,7 +146,32 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         },
         required: ["type", "title"],
       }, company_order),
-      mkTool("company_status", { type: "object", properties: { orderId: { type: "string" } } }, company_status),
+      mkTool("company_status", { type: "object", properties: { orderId: { type: "string" }, group: { type: "string" } } }, company_status),
+      mkTool("company_plan", {
+        type: "object",
+        properties: {
+          group: { type: "string", description: "批次名，可留空自动生成" },
+          tasks: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                key: { type: "string", description: "图内唯一键，deps 用它引用；留空按 t1/t2 生成" },
+                type: { type: "string" },
+                title: { type: "string" },
+                deps: { type: "array", items: { type: "string" }, description: "依赖的任务 key" },
+                priority: { type: "string" },
+                dept: { type: "string" },
+                detail: { type: "string" },
+                project: { type: "string" },
+                acceptance: { type: "array", items: { type: "string" } },
+              },
+              required: ["type", "title"],
+            },
+          },
+        },
+        required: ["tasks"],
+      }, company_plan),
       mkTool("company_ask", { type: "object", properties: { orderId: { type: "string" }, question: { type: "string" } }, required: ["orderId", "question"] }, company_ask),
       mkTool("company_cancel", { type: "object", properties: { orderId: { type: "string" } }, required: ["orderId"] }, company_cancel),
       mkTool("company_assign", { type: "object", properties: { orderId: { type: "string" }, employeeId: { type: "string" } }, required: ["orderId", "employeeId"] }, company_assign),
@@ -189,7 +216,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         properties: {
           action: {
             type: "string",
-            enum: ["createDepartment", "createEmployee", "setRoutingRules", "updateDepartment", "promoteEmployee", "setNumbering", "setManagementName", "setCompanyName", "setLevels", "setChannels", "updateEmployeeProfile", "importRosterProfiles"],
+            enum: ["createDepartment", "createEmployee", "setRoutingRules", "updateDepartment", "promoteEmployee", "setNumbering", "setManagementName", "setCompanyName", "setLevels", "setChannels", "updateEmployeeProfile", "importRosterProfiles", "linkEmployeeRoster", "syncEmployeesRoster", "unlinkEmployeeRoster", "applyDepartmentPreset", "clearDepartmentPreset"],
             description: "管理动作",
           },
           args: { type: "object" },
@@ -231,11 +258,55 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
   }
 
   async function company_order(args, { exec }) {
-    return await dispatcher.placeOrder(args);
+    const res = await dispatcher.placeOrder(args);
+    // 下完单立刻推一次调度，不等 interval（「下达任务后真的能分到人」的体感来源）
+    if (res?.ok && res.orderId) {
+      try { scheduler.kick(0); } catch {}
+    }
+    return res;
   }
 
-  async function company_status(args) {
-    return { ok: true, view: view() };
+  async function company_plan(args, { exec }) {
+    const res = await dispatcher.placePlan(args);
+    // 建完图立刻推一次调度：第一层没有依赖，当轮就能并行派出去。
+    if (res?.ok && res.count) {
+      try { scheduler.kick(0); } catch {}
+    }
+    return res;
+  }
+
+  async function company_status(args = {}) {
+    const out = { ok: true, view: view() };
+    const group = typeof args?.group === "string" ? args.group.trim() : "";
+    if (group) {
+      const orders = (runtime.ledger.orders || []).filter((o) => o.group === group);
+      if (!orders.length) {
+        return { ok: false, code: "E_NO_GROUP", message: `没有找到批次 ${group}` };
+      }
+      const count = (state) => orders.filter((o) => o.state === state).length;
+      out.group = {
+        name: group,
+        total: orders.length,
+        done: count("done"),
+        running: count("running"),
+        pending: count("queued") + count("routed"),
+        failed: count("failed"),
+        cancelled: count("cancelled"),
+        orders: orders.map((o) => ({
+          key: o.taskKey || null,
+          orderId: o.id,
+          title: o.title || null,
+          state: o.state || null,
+          deps: (o.deps || []).length,
+        })),
+      };
+    }
+    return out;
+  }
+
+  /** 订单状态一变就立刻推一轮调度：依赖解锁、产能释放都不该等下一次轮询。 */
+  function kickScheduler() {
+    try { scheduler.kick(0); } catch { /* 调度器已停，忽略 */ }
   }
 
   async function company_ask(args) {
@@ -243,7 +314,9 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
   }
 
   async function company_cancel(args) {
-    return await dispatcher.cancelOrder(args.orderId);
+    const res = await dispatcher.cancelOrder(args.orderId);
+    if (res?.ok) kickScheduler();
+    return res;
   }
 
   async function company_assign(args) {
@@ -256,7 +329,10 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
   }
 
   async function company_review(args) {
-    return await dispatcher.review(args);
+    const res = await dispatcher.review(args);
+    // 验收通过会让订单进 done，可能立刻解锁依赖它的下游单。
+    if (res?.ok) kickScheduler();
+    return res;
   }
 
   async function company_borrow(args) {
@@ -273,7 +349,10 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     const meta = Array.from(dispatcher.activeAttempts.values()).find((m) => m.sessionId === sid);
     if (!meta) return { ok: false, code: "E_STALE_ATTEMPT" };
     if (args.attemptId && args.attemptId !== meta.attemptId) return { ok: false, code: "E_STALE_ATTEMPT" };
-    return await dispatcher.report({ ...args, attemptId: meta.attemptId });
+    const res = await dispatcher.report({ ...args, attemptId: meta.attemptId });
+    // 回报常让订单进终态，依赖它的下游单不该等到下一次轮询。
+    if (res?.ok) kickScheduler();
+    return res;
   }
 
   async function company_escalate(args) {
@@ -339,6 +418,18 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
       skills: emp.skills ?? [],
       model: emp.model ?? "",
       provider: emp.provider ?? "",
+      // v0.4：成员属性（参照 agent-teams 的 provider/model/effort + toolPolicies + 派生方式）
+      kind: emp.kind ?? "permanent",
+      state: emp.state ?? "idle",
+      sessionPolicy: emp.sessionPolicy ?? "",
+      reasoningEffort: emp.reasoningEffort ?? "",
+      memberProvider: emp.memberProvider ?? "",
+      maxDepth: emp.maxDepth ?? null,
+      toolPolicy: { allow: emp.toolPolicy?.allow ?? [], deny: emp.toolPolicy?.deny ?? [] },
+      tempMaxTasks: emp.tempMaxTasks ?? 0,
+      tempCompleted: emp.tempCompleted ?? 0,
+      tempExpiresAt: emp.tempExpiresAt ?? null,
+      currentOrderId: emp.currentOrderId ?? null,
     };
   }
 
@@ -368,7 +459,9 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         await store.appendAudit({ type: "employee_hired", employeeId: args.id });
         const emp = runtime.company.employees.find((e) => e.id === args.id);
         const levelInfo = describeEmployeeLevel(emp, runtime.config.levels);
-        return { ok: true, employeeId: args.id, code: emp.code, channel: levelInfo.channel, level: levelInfo.level, levelName: levelInfo.levelName, channels: emp.channels };
+        // v0.3.3：新建员工自动登记名册（best-effort，失败不影响雇佣结果）
+        const roster = await autoLinkRosterFor([args.id], "auto:hire");
+        return { ok: true, employeeId: args.id, code: emp.code, channel: levelInfo.channel, level: levelInfo.level, levelName: levelInfo.levelName, channels: emp.channels, roster };
       } catch (err) {
         return { ok: false, code: err.code || "E_INVALID_INPUT", message: err.message };
       }
@@ -380,11 +473,13 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
       try {
         switch (args.action) {
           case "createDepartment": {
-            runtime.company = createDepartment(runtime.company, { id: args.args.id, name: args.args.name, code: args.args.code });
+            runtime.company = createDepartment(runtime.company, { id: args.args.id, name: args.args.name, code: args.args.code, preset: args.args.preset });
             await store.saveCompany(runtime.company);
             await store.appendAudit({ type: "department_created", departmentId: args.args.id });
             const newDept = runtime.company.departments.find((d) => d.id === args.args.id);
-            return { ok: true, departmentId: args.args.id, code: newDept?.code };
+            // v0.3.3：新部门此时通常还没有员工；已挂员工（如先建员工后建部门不会发生）一并补登
+            const roster = await autoLinkRosterFor(employeeIdsOfDepartment(args.args.id), "auto:admin:createDepartment");
+            return { ok: true, departmentId: args.args.id, code: newDept?.code, roster };
           }
           case "updateDepartment": {
             runtime.company = updateDepartment(runtime.company, args.args.id, {
@@ -393,11 +488,34 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
               accepts: args.args.accepts,
               capacity: args.args.capacity,
               charter: args.args.charter,
+              preset: args.args.preset,
             });
             await store.saveCompany(runtime.company);
             await store.appendAudit({ type: "department_updated", departmentId: args.args.id });
             const updatedDept = runtime.company.departments.find((d) => d.id === args.args.id);
             return { ok: true, departmentId: args.args.id, code: updatedDept?.code };
+          }
+          // docs/24 §5.2：套用/清除部门流程预设（game-dev）。
+          case "applyDepartmentPreset": {
+            const presetArgs = args.args || {};
+            const departmentId = presetArgs.departmentId || presetArgs.id;
+            assertDepartmentExists(departmentId);
+            const checked = validatePresetRef(presetArgs.presetId ?? presetArgs.preset);
+            if (!checked.ok) return { ok: false, code: checked.code, message: checked.message };
+            runtime.company = updateDepartment(runtime.company, departmentId, { preset: checked.preset.id });
+            await store.saveCompany(runtime.company);
+            const appliedDept = runtime.company.departments.find((d) => d.id === departmentId);
+            await store.appendAudit({ type: "department.preset.applied", departmentId, presetId: appliedDept?.preset?.id, version: appliedDept?.preset?.version });
+            return { ok: true, departmentId, preset: appliedDept?.preset ?? null };
+          }
+          case "clearDepartmentPreset": {
+            const presetArgs = args.args || {};
+            const departmentId = presetArgs.departmentId || presetArgs.id;
+            assertDepartmentExists(departmentId);
+            runtime.company = updateDepartment(runtime.company, departmentId, { preset: null });
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "department.preset.cleared", departmentId });
+            return { ok: true, departmentId };
           }
           case "createEmployee": {
             assertDepartmentExists(args.args.department);
@@ -421,7 +539,9 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
             await store.appendAudit({ type: "employee_created", employeeId: args.args.id });
             const createdEmp = runtime.company.employees.find((e) => e.id === args.args.id);
             const createdLevelInfo = describeEmployeeLevel(createdEmp, runtime.config.levels);
-            return { ok: true, employeeId: args.args.id, code: createdEmp.code, channel: createdLevelInfo.channel, level: createdLevelInfo.level, levelName: createdLevelInfo.levelName, channels: createdEmp.channels };
+            // v0.3.3：新建员工自动登记名册（best-effort，失败不影响创建结果）
+            const roster = await autoLinkRosterFor([args.args.id], "auto:admin:createEmployee");
+            return { ok: true, employeeId: args.args.id, code: createdEmp.code, channel: createdLevelInfo.channel, level: createdLevelInfo.level, levelName: createdLevelInfo.levelName, channels: createdEmp.channels, roster };
           }
           case "setRoutingRules": {
             runtime.config.routingRules = args.args.rules || [];
@@ -476,6 +596,34 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
             await store.saveCompany(runtime.company);
             await store.appendAudit({ type: "company.levels_set" });
             return { ok: true, levels: result.levels };
+          }
+          // v0.3.2 · 公司员工 → 名册（工具入口；与 handleCompanyOp 同一套语义，锁已在最外层持有）
+          case "linkEmployeeRoster": {
+            const rosterArgs = args.args || {};
+            const employeeId = rosterArgs.employeeId || rosterArgs.id;
+            if (!employeeId) return { ok: false, code: "E_INVALID_INPUT", message: "employeeId 必填" };
+            return await applyRosterLinks({
+              employeeIds: [String(employeeId)],
+              explicitTarget: typeof rosterArgs.target === "string" ? rosterArgs.target : null,
+              refresh: Boolean(rosterArgs.refresh),
+              onlyUnlinked: false,
+              dryRun: Boolean(rosterArgs.dryRun),
+              source: "tool",
+            });
+          }
+          case "syncEmployeesRoster": {
+            const rosterArgs = args.args || {};
+            return await applyRosterLinks({
+              departmentId: rosterArgs.departmentId || rosterArgs.department || null,
+              refresh: Boolean(rosterArgs.refresh),
+              onlyUnlinked: rosterArgs.onlyUnlinked !== false,
+              dryRun: Boolean(rosterArgs.dryRun),
+              source: "tool",
+            });
+          }
+          case "unlinkEmployeeRoster": {
+            const rosterArgs = args.args || {};
+            return await unlinkEmployeeRoster({ employeeId: rosterArgs.employeeId || rosterArgs.id, source: "tool" });
           }
           default:
             return { ok: false, code: "E_UNKNOWN_ACTION" };
@@ -603,11 +751,14 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
               charter: args.charter,
               capacity: args.capacity,
               accepts: args.accepts,
+              preset: args.preset,
             });
             await store.saveCompany(runtime.company);
             const dept = runtime.company.departments.find((d) => d.id === id);
             await store.appendAudit({ type: "department_created", departmentId: id, code: dept?.code });
-            return { ok: true, departmentId: id, code: dept?.code };
+            // v0.3.3：新部门员工自动登记名册（面板随后逐个 createEmployee，各自也会自动登记）
+            const roster = await autoLinkRosterFor(employeeIdsOfDepartment(id), "auto:panel:createDepartment");
+            return { ok: true, departmentId: id, code: dept?.code, roster };
           });
         }
         case "updateDepartment": {
@@ -623,11 +774,42 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
               capacity: args.capacity,
               accepts: args.accepts,
               borrowPolicy: args.borrowPolicy,
+              preset: args.preset,
             });
             await store.saveCompany(runtime.company);
             const dept = runtime.company.departments.find((d) => d.id === departmentId);
             await store.appendAudit({ type: "department_updated", departmentId, code: dept?.code });
             return { ok: true, departmentId, code: dept?.code };
+          });
+        }
+        // docs/24 §5.3：套用/清除部门流程预设（与 company_admin 同语义）。
+        case "applyDepartmentPreset": {
+          const departmentId = args.departmentId || args.id;
+          if (!departmentId) {
+            return { ok: false, code: "E_INVALID_INPUT", message: "departmentId 必填" };
+          }
+          const checked = validatePresetRef(args.presetId ?? args.preset);
+          if (!checked.ok) return { ok: false, code: checked.code, message: checked.message };
+          return await withCompanyRefresh(async () => {
+            assertDepartmentExists(departmentId);
+            runtime.company = updateDepartment(runtime.company, departmentId, { preset: checked.preset.id });
+            await store.saveCompany(runtime.company);
+            const dept = runtime.company.departments.find((d) => d.id === departmentId);
+            await store.appendAudit({ type: "department.preset.applied", departmentId, presetId: dept?.preset?.id, version: dept?.preset?.version });
+            return { ok: true, departmentId, preset: dept?.preset ?? null };
+          });
+        }
+        case "clearDepartmentPreset": {
+          const departmentId = args.departmentId || args.id;
+          if (!departmentId) {
+            return { ok: false, code: "E_INVALID_INPUT", message: "departmentId 必填" };
+          }
+          return await withCompanyRefresh(async () => {
+            assertDepartmentExists(departmentId);
+            runtime.company = updateDepartment(runtime.company, departmentId, { preset: null });
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "department.preset.cleared", departmentId });
+            return { ok: true, departmentId };
           });
         }
         case "createEmployee": {
@@ -657,10 +839,12 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
             const emp = runtime.company.employees.find((e) => e.id === id);
             const levelInfo = describeEmployeeLevel(emp, runtime.config.levels);
             await store.appendAudit({ type: "employee_hired", employeeId: id, code: emp?.code });
-            return { ok: true, employeeId: id, code: emp?.code, channel: levelInfo.channel, level: levelInfo.level, levelName: levelInfo.levelName };
+            // v0.3.3：新建员工自动登记名册（面板「新建部门」逐员工创建时也走这里）
+            const roster = await autoLinkRosterFor([id], "auto:panel:createEmployee");
+            return { ok: true, employeeId: id, code: emp?.code, channel: levelInfo.channel, level: levelInfo.level, levelName: levelInfo.levelName, roster };
           });
         }
-                case "updateEmployeeProfile": {
+        case "updateEmployeeProfile": {
           const employeeId = args.employeeId;
           if (!employeeId) {
             return { ok: false, code: "E_INVALID_INPUT", message: "employeeId 必填" };
@@ -695,6 +879,57 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
             if (args.provider !== undefined) {
               patch.provider = cleanProfileText(args.provider);
               fields.push("provider");
+            }
+            // v0.4 成员属性：推理强度 / 派生方式 / 子代理深度 / 工具策略 / 会话策略 / 临时工计次
+            if (args.reasoningEffort !== undefined) {
+              const effort = cleanProfileText(args.reasoningEffort);
+              if (effort && !["minimal", "low", "medium", "high", "xhigh"].includes(effort)) {
+                return { ok: false, code: "E_INVALID_INPUT", message: "reasoningEffort 只能是 minimal/low/medium/high/xhigh 或空" };
+              }
+              patch.reasoningEffort = effort;
+              fields.push("reasoningEffort");
+            }
+            if (args.memberProvider !== undefined) {
+              const mp = cleanProfileText(args.memberProvider);
+              if (mp && mp !== "spawn" && mp !== "fork") {
+                return { ok: false, code: "E_INVALID_INPUT", message: "memberProvider 只能是 spawn/fork 或空" };
+              }
+              patch.memberProvider = mp;
+              fields.push("memberProvider");
+            }
+            if (args.maxDepth !== undefined) {
+              const depth = args.maxDepth === null || args.maxDepth === "" ? null : Number(args.maxDepth);
+              if (depth !== null && (!Number.isInteger(depth) || depth < 0 || depth > 3)) {
+                return { ok: false, code: "E_INVALID_INPUT", message: "maxDepth 只能是 0–3 的整数或空" };
+              }
+              patch.maxDepth = depth;
+              fields.push("maxDepth");
+            }
+            if (args.toolPolicy !== undefined) {
+              const raw = args.toolPolicy || {};
+              const norm = (list) => (Array.isArray(list) ? list.map((x) => String(x).trim()).filter(Boolean).slice(0, 40) : []);
+              patch.toolPolicy = { allow: norm(raw.allow), deny: norm(raw.deny) };
+              fields.push("toolPolicy");
+            }
+            if (args.sessionPolicy !== undefined) {
+              const sp = cleanProfileText(args.sessionPolicy);
+              if (sp && sp !== "resident" && sp !== "per_task") {
+                return { ok: false, code: "E_INVALID_INPUT", message: "sessionPolicy 只能是 resident/per_task 或空" };
+              }
+              patch.sessionPolicy = sp || undefined;
+              fields.push("sessionPolicy");
+            }
+            if (args.tempMaxTasks !== undefined) {
+              const cap = Number(args.tempMaxTasks) || 0;
+              if (cap < 0 || !Number.isFinite(cap)) {
+                return { ok: false, code: "E_INVALID_INPUT", message: "tempMaxTasks 必须是非负整数" };
+              }
+              patch.tempMaxTasks = Math.floor(cap);
+              fields.push("tempMaxTasks");
+            }
+            if (args.tempExpiresAt !== undefined) {
+              patch.tempExpiresAt = args.tempExpiresAt === null || args.tempExpiresAt === "" ? null : args.tempExpiresAt;
+              fields.push("tempExpiresAt");
             }
             if (fields.length === 0) {
               return { ok: true, employeeId, employee: employeeProfileSummary(target) };
@@ -995,84 +1230,144 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
             return { ok: true, departmentId, code: dept.code };
           });
         }
+        // v0.3.2 · 公司员工 → 名册登记/回填/解除关联
+        case "linkEmployeeRoster": {
+          const employeeId = args.employeeId || args.id;
+          if (!employeeId) {
+            return { ok: false, code: "E_INVALID_INPUT", message: "employeeId 必填" };
+          }
+          return await withCompanyRefresh(async () =>
+            applyRosterLinks({
+              employeeIds: [String(employeeId)],
+              explicitTarget: typeof args.target === "string" ? args.target : null,
+              refresh: Boolean(args.refresh),
+              onlyUnlinked: false,
+              dryRun: Boolean(args.dryRun),
+              source: args.source || "panel",
+            }),
+          );
+        }
+        case "syncEmployeesRoster": {
+          return await withCompanyRefresh(async () =>
+            applyRosterLinks({
+              departmentId: args.departmentId || args.department || null,
+              refresh: Boolean(args.refresh),
+              onlyUnlinked: args.onlyUnlinked !== false,
+              dryRun: Boolean(args.dryRun),
+              source: args.source || "panel",
+            }),
+          );
+        }
+        case "unlinkEmployeeRoster": {
+          return await withCompanyRefresh(async () =>
+            unlinkEmployeeRoster({ employeeId: args.employeeId || args.id, source: args.source || "panel" }),
+          );
+        }
+        // ---- v0.4 工作网看板：订单操作（面板直接驱动派工链路）----
+        case "placeOrder": {
+          const res = await dispatcher.placeOrder(args);
+          if (res?.ok) scheduler.kick(0);
+          return res;
+        }
+        case "routeOrder": {
+          const res = await dispatcher.routeOrder(args.orderId);
+          scheduler.kick(0);
+          return res;
+        }
+        case "assignOrder": {
+          // 带 employeeId = 手动指定；不带 = 交给调度器按路由规则挑人
+          const res = await dispatcher.dispatchOrder(args.orderId, args.employeeId || null);
+          if (!res?.ok && res?.code) scheduler.kick(0);
+          return res;
+        }
+        case "borrowOrder": {
+          const res = await dispatcher.borrow(args.orderId, args.employeeId || args.sharedEmployeeId);
+          if (!res?.ok && res?.code) scheduler.kick(0);
+          return res;
+        }
+        case "reviewOrder": {
+          const res = await dispatcher.review({ orderId: args.orderId, pass: args.pass !== false });
+          if (res?.state === "queued") scheduler.kick(0);
+          return res;
+        }
+        case "cancelOrder": {
+          return await dispatcher.cancelOrder(args.orderId);
+        }
+        case "escalateOrder": {
+          return await dispatcher.escalate(args.orderId, args.reason || "");
+        }
+        case "hireTemp": {
+          // 临时工：按次/按时到期自动退场（kind=temp）
+          const id = args.id || makeOpId("temp");
+          return await withCompanyRefresh(async () => {
+            runtime.company = createEmployee(runtime.company, {
+              id,
+              displayName: args.displayName || id,
+              kind: "temp",
+              role: args.role || "staff",
+              department: args.department || args.departmentId,
+              skills: args.skills || [],
+              title: args.title || "临时工",
+              model: args.model,
+              provider: args.provider,
+              reasoningEffort: args.reasoningEffort,
+              tempMaxTasks: args.tempMaxTasks,
+              tempExpiresAt: args.tempExpiresAt,
+            });
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "temp_hired", employeeId: id, department: args.department || args.departmentId || null });
+            return { ok: true, employeeId: id };
+          });
+        }
+        case "releaseTemp": {
+          return await withCompanyRefresh(async () => {
+            runtime.company = updateEmployee(runtime.company, args.employeeId, { state: "retired" });
+            await store.saveCompany(runtime.company);
+            await store.appendAudit({ type: "temp_released", employeeId: args.employeeId, reason: "manual" });
+            return { ok: true, employeeId: args.employeeId };
+          });
+        }
+        case "runScheduler": {
+          const res = await scheduler.tick();
+          return { ok: true, ...res };
+        }
+        case "restartProgress": {
+          // 与 runScheduler 等价，但在「异常」泳道空时作为显式入口：点一下立刻推进所有可派/可恢复的单。
+          const tickRes = await scheduler.tick();
+          return { ok: true, ...tickRes };
+        }
+        case "clearExceptionHistory": {
+          // 清理已关闭的异常订单（cancelled / lost / failed），从活账本移除并写入审计。
+          return await withLedger(async () => {
+            const removed = [];
+            runtime.ledger = {
+              ...runtime.ledger,
+              orders: runtime.ledger.orders.filter((o) => {
+                if (o.state === "cancelled" || o.state === "lost" || o.state === "failed") {
+                  removed.push(o.id);
+                  return false;
+                }
+                return true;
+              }),
+            };
+            await persist();
+            await append("exception_history_cleared", { count: removed.length, orderIds: removed });
+            return { ok: true, count: removed.length };
+          });
+        }
+        case "startScheduler": {
+          scheduler.start();
+          return { ok: true, running: typeof scheduler.isRunning === "function" ? scheduler.isRunning() : true };
+        }
+        case "stopScheduler": {
+          scheduler.stop();
+          return { ok: true, running: false };
+        }
         default:
           return { ok: false, code: "E_UNKNOWN_ACTION", message: `未知 action: ${action}` };
       }
     } catch (err) {
       return { ok: false, code: err.code || "E_INTERNAL", message: err.message };
-    }
-  }
-
-  /* --------------------------- 公司大亨（小游戏） --------------------------- */
-  // 游戏是 demo 定位：状态独立存档、不影响公司/账本；失败只影响游戏页签。
-  async function saveGameToDisk(game) {
-    const dir = path.dirname(gamePath);
-    await mkdir(dir, { recursive: true });
-    const tmp = `${gamePath}.tmp-${process.pid}-${Date.now()}`;
-    await writeFile(tmp, serializeGame(game), "utf8");
-    await rename(tmp, gamePath);
-  }
-
-  // 懒加载：首次请求 /company/game 时才读档/开局，避免启动阶段写盘。
-  async function bootGame() {
-    if (runtime.game) return runtime.game;
-    try {
-      const raw = await readFile(gamePath, "utf8");
-      const loaded = deserializeGame(raw);
-      if (loaded) {
-        runtime.game = loaded;
-        return loaded;
-      }
-      bootWarnings.push("游戏存档版本不兼容，已忽略并重新开局");
-    } catch {
-      // 首次进入：没有存档，正常走开局
-    }
-    runtime.game = createGame(seedFromCompanyView(view()));
-    try {
-      await saveGameToDisk(runtime.game);
-    } catch (err) {
-      bootWarnings.push(`游戏存档写入失败: ${err.message}`);
-    }
-    return runtime.game;
-  }
-
-  async function handleGameOp(req, url, body) {
-    const action = String(body?.action || "");
-    const args = body?.args && typeof body.args === "object" ? body.args : {};
-    try {
-      if (action === "new") {
-        runtime.game = createGame(seedFromCompanyView(view()), {
-          seed: Number.isFinite(Number(args.seed)) ? Number(args.seed) : undefined,
-          turnLimit: args.turnLimit,
-        });
-        await saveGameToDisk(runtime.game);
-        await store.appendAudit({ type: "company.game_new", turnLimit: runtime.game.turnLimit });
-        return viewGame(runtime.game);
-      }
-      if (!runtime.game) await bootGame();
-      if (!runtime.game) return { ok: false, code: "E_GAME_UNAVAILABLE", message: "游戏状态不可用" };
-      let res = null;
-      if (action === "step") res = stepGame(runtime.game);
-      else if (action === "assign") res = assignOrder(runtime.game, args);
-      else if (action === "hire") res = hireEmployee(runtime.game, args);
-      else if (action === "upgradeEmployee") res = upgradeEmployee(runtime.game, args);
-      else if (action === "upgradeDepartment") res = upgradeDepartment(runtime.game, args);
-      else return { ok: false, code: "E_UNKNOWN_ACTION", message: `未知操作: ${action || "(空)"}` };
-      if (!res || res.ok !== true) return res || { ok: false, code: "E_INTERNAL" };
-      runtime.game = res.game;
-      await saveGameToDisk(runtime.game);
-      if (action === "step" && runtime.game.status !== "playing") {
-        await store.appendAudit({
-          type: "company.game_finished",
-          status: runtime.game.status,
-          rating: runtime.game.rating,
-          coins: runtime.game.coins,
-          turn: runtime.game.turn,
-        });
-      }
-      return viewGame(runtime.game);
-    } catch (err) {
-      return { ok: false, code: "E_INTERNAL", message: err?.message || String(err) };
     }
   }
 
@@ -1083,13 +1378,9 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
       { method: "GET", path: "/company/board", handler: (req, url) => view().board },
       { method: "GET", path: "/company/costs", handler: (req, url) => view().costs },
       { method: "GET", path: "/company/orders", handler: (req, url) => view().orders },
+      // docs/24 §5.4：预设注册表（只读；面板「套用流程预设」弹窗数据源）
+      { method: "GET", path: "/company/presets", handler: () => view().presets },
       { method: "POST", path: "/company/op", handler: handleCompanyOp },
-      // 公司大亨（内置小游戏）：只读状态 + 写操作，与公司数据隔离
-      { method: "GET", path: "/company/game", handler: async () => {
-        if (!runtime.game) await bootGame();
-        return runtime.game ? viewGame(runtime.game) : { ok: false, code: "E_GAME_UNAVAILABLE" };
-      } },
-      { method: "POST", path: "/company/game/op", handler: handleGameOp },
     ];
   }
 
@@ -1267,8 +1558,8 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
       scheduleBootRetry();
     }
 
-    // 回收旧进程遗留的 attempt
-    await recycleStaleAttempts(runtime, store, bootWarnings);
+    // 冷启动恢复：running 的 attempt 都是上一进程的孤儿，判 stale 并把订单放回队列
+    await recycleStaleAttempts(runtime, store, bootWarnings, dispatcher);
 
     await store.appendAudit({ type: "runtime.startup", ownerSessionId: runtime.ownerSessionId });
 
@@ -1296,28 +1587,32 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     // 1. 停派工：调度器不再派发新单
     try { scheduler.dispose(); } catch (e) { bootWarnings.push(e.message); }
 
-    // 2. 给每个 live child followup 一条「停工」信号
+    // 2. 不再 followup 一条假用户消息去「通知停工」。
+    //    旧实现：对每个活子进程 followup(makeIdleMessage("shutdown"))。
+    //    代价有两笔：① 内核 inbox 去重会抛 `message "undefined" is already pending`
+    //    （消息没 id，Set 里已有 undefined）；② 这会把子代理唤醒成一个真 turn，
+    //    随后 cancel 落在 step 边界 → 该 turn 没有 verdict → 落盘 `turn/end {reason:null}`，
+    //    而 rc.3 的 subagentTiming 投影读 `event.data.reason.kind` 时直接崩，下次启动起不来。
+    //    停工只需要：等它自己空闲（超时就算了）→ cancel，不再制造新 turn。
     const children = Array.from(employeeManager.sessions.values()).filter((s) => !s.endedAt);
-    for (const s of children) {
-      try {
-        if (s.handle && typeof s.handle.followup === "function") {
-          await s.handle.followup(makeIdleMessage("shutdown"));
-        }
-      } catch (err) {
-        logger?.warn?.(`followup 停工失败: ${err.message}`);
-      }
-    }
+    let cancelled = 0;
 
     // 3. await whenIdle (超时)
     await Promise.all(children.map((s) => whenIdleOrTimeout(s, 10000)));
 
-    // 4. 逐个 cancel
+    // 4. 逐个 cancel（带上明确的停机原因，让 turn/end 有合法 verdict）
     for (const s of children) {
       try {
-        if (s.handle && typeof s.handle.cancel === "function") await Promise.resolve(s.handle.cancel("shutdown", { keepInbox: true })).catch(() => {});
+        if (s.handle && typeof s.handle.cancel === "function") {
+          await Promise.resolve(s.handle.cancel("shutdown", { keepInbox: true })).catch(() => {});
+          cancelled += 1;
+        }
       } catch (err) {
         logger?.warn?.(`cancel 失败: ${err.message}`);
       }
+    }
+    if (children.length > 0) {
+      logger?.info?.(`[company] 停工：${children.length} 个活子进程，cancel ${cancelled} 个`);
     }
 
     // 4.5 结束会话并释放资源
@@ -1355,8 +1650,230 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     booted = false;
   }
 
+  /* ------------------------------------------------------------------ */
+  /* v0.3.2 · 公司员工 ↔ 名册关联                                         */
+  /* ------------------------------------------------------------------ */
+
+  // 名册桥由宿主注入：company runtime 先于 TeamService 构造（lib/index.js 装配顺序），
+  // 所以这里只持有惰性函数，调用时才解析；名册读不到时返回 null，绝不抛给面板。
+  const rosterBridge = roster && typeof roster === "object" ? roster : null;
+
+  /** 名册成员数组；null = 读不到名册（不能把「读不到」当成「全都未登记」）。 */
+  function readRosterMembers() {
+    if (!rosterBridge || typeof rosterBridge.members !== "function") return null;
+    try {
+      const list = rosterBridge.members();
+      return Array.isArray(list) ? list : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** 名册写服务（TeamService，需要 linkProfiles）；null = 不可用。 */
+  function readRosterService() {
+    if (!rosterBridge || typeof rosterBridge.service !== "function") return null;
+    try {
+      const service = rosterBridge.service();
+      return service && typeof service.linkProfiles === "function" ? service : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function rosterIndexOrNull() {
+    const members = readRosterMembers();
+    return members ? buildRosterIndex(members) : null;
+  }
+
+  function departmentOfEmployee(employee) {
+    return (runtime.company.departments || []).find((d) => d.id === employee?.department) || null;
+  }
+
+  /**
+   * 公司员工登记/回填进名册（「公司→名册」唯一写入口）。
+   *
+   * 规则（沿用 docs/15 §17–20 的「绝不覆盖」原则）：
+   *  - 名册没有该 target → 新建成员（displayName/title/duties/skills/model/provider/note 来自公司档案）
+   *  - 名册已有 → 只补空字段；refresh=true 才用公司档案覆盖档案字段
+   *  - 显式 target（args.target）只允许单员工场景，避免批量时把一个 target 套给多人
+   * @param {{employeeIds?: string[]|null, departmentId?: string|null, explicitTarget?: string|null, refresh?: boolean, onlyUnlinked?: boolean, dryRun?: boolean, source?: string}} options
+   */
+  async function applyRosterLinks(options = {}) {
+    const svc = readRosterService();
+    if (!svc) return { ok: false, code: "E_NO_ROSTER", message: "名册服务不可用：宿主未注入 TeamService" };
+    const index = rosterIndexOrNull();
+    if (!index) return { ok: false, code: "E_NO_ROSTER", message: "读不到名册（registry.json）" };
+    const { employeeIds = null, departmentId = null, explicitTarget = null, refresh = false, onlyUnlinked = true, dryRun = false, source = "company" } = options;
+    const idSet = Array.isArray(employeeIds) && employeeIds.length ? new Set(employeeIds.map((id) => String(id))) : null;
+    const employees = (runtime.company.employees || []).filter((e) => {
+      if (idSet && !idSet.has(String(e.id))) return false;
+      if (departmentId != null && String(departmentId) !== "" && String(e.department || "") !== String(departmentId)) return false;
+      return true;
+    });
+    if (employees.length === 0) return { ok: false, code: "E_NOT_FOUND", message: "没有匹配的员工" };
+    const single = employees.length === 1;
+    const explicit = typeof explicitTarget === "string" ? explicitTarget.trim() : "";
+    if (explicit && !single) {
+      return { ok: false, code: "E_INVALID_INPUT", message: "显式 target 只能在单员工时使用（批量请用各员工的 id / rosterTarget）" };
+    }
+    if (explicit && !isValidMemberName(explicit)) {
+      return { ok: false, code: "E_INVALID_TARGET", message: `名册成员名不合法：${explicit}（小写字母/数字/连字符，1-64 位）` };
+    }
+    const plans = [];
+    for (const employee of employees) {
+      const target = explicit || rosterTargetOf(employee);
+      if (!isValidMemberName(target)) {
+        return { ok: false, code: "E_INVALID_TARGET", message: `员工 ${employee.id} 的关联名不合法：${target}` };
+      }
+      const profile = buildRosterProfile(employee, { department: departmentOfEmployee(employee) });
+      profile.target = target;
+      const member = index.get(target);
+      if (!member) {
+        plans.push({ employee, target, action: "create", profile });
+        continue;
+      }
+      // 不做档案回填时（批量「只登记未关联」语义）跳过已有成员
+      if (onlyUnlinked) continue;
+      const plan = planRosterLink(member, profile, { refresh: Boolean(refresh) });
+      if (plan.action === "noop") continue;
+      plans.push({ employee, target, action: "update", profile });
+    }
+    // 显式 target 与员工 id 不同时才落 rosterTarget 字段；否则保持隐式约定、不留冗余字段
+    const linkUpdates = [];
+    for (const plan of plans) {
+      const explicitForEmployee = explicit && explicit !== plan.employee.id ? explicit : "";
+      if (explicitForEmployee && plan.employee.rosterTarget !== explicitForEmployee) {
+        linkUpdates.push([plan.employee.id, explicitForEmployee]);
+      } else if (!explicitForEmployee && plan.employee.rosterTarget) {
+        linkUpdates.push([plan.employee.id, ""]);
+      }
+    }
+    if (dryRun) {
+      return {
+        ok: true,
+        dryRun: true,
+        total: employees.length,
+        results: plans.map((p) => ({ employeeId: p.employee.id, target: p.target, action: p.action, profile: p.profile })),
+      };
+    }
+    if (plans.length === 0 && linkUpdates.length === 0) {
+      return { ok: true, total: employees.length, linked: 0, skipped: employees.length, results: [], message: "全部已关联，无需写入" };
+    }
+    let registryResult = { ok: true, data: { results: [] } };
+    if (plans.length > 0) {
+      registryResult = svc.linkProfiles(plans.map((p) => ({ profile: p.profile, refresh: Boolean(refresh), create: true })));
+      if (!registryResult.ok) return registryResult;
+    }
+    if (linkUpdates.length > 0) {
+      let next = runtime.company;
+      for (const [employeeId, value] of linkUpdates) next = updateEmployee(next, employeeId, { rosterTarget: value });
+      runtime.company = next;
+      await store.saveCompany(runtime.company);
+    }
+    const results = registryResult.data.results || [];
+    const created = results.filter((r) => r.action === "create").length;
+    const updated = results.filter((r) => r.action === "update").length;
+    if (plans.length > 0 || linkUpdates.length > 0) {
+      await store.appendAudit({
+        type: "roster.employees_linked",
+        count: plans.length,
+        created,
+        updated,
+        employeeIds: plans.map((p) => p.employee.id),
+        source,
+      });
+    }
+    return { ok: true, total: employees.length, linked: plans.length, created, updated, results };
+  }
+
+  /**
+   * 解除员工的显式名册关联（隐式关联：员工 id 即 target，返回 cleared:false）。
+   * 调用方必须已持有公司锁并完成 refresh —— 本函数不再自己加锁（文件锁不可重入）。
+   */
+  async function unlinkEmployeeRoster(options = {}) {
+    const employeeId = options.employeeId;
+    const target = String(employeeId == null ? "" : employeeId).trim();
+    if (!target) return { ok: false, code: "E_INVALID_INPUT", message: "employeeId 必填" };
+    const employee = (runtime.company.employees || []).find((e) => String(e.id) === target);
+    if (!employee) return { ok: false, code: "E_NOT_FOUND", message: `员工 ${target} 不存在` };
+    const explicit = typeof employee.rosterTarget === "string" ? employee.rosterTarget.trim() : "";
+    if (!explicit) {
+      return {
+        ok: true,
+        employeeId: employee.id,
+        cleared: false,
+        message: "该员工使用隐式关联（员工 id 即名册 target），无需解除；如需删除名册条目请用 member 工具",
+      };
+    }
+    runtime.company = updateEmployee(runtime.company, employee.id, { rosterTarget: "" });
+    await store.saveCompany(runtime.company);
+    await store.appendAudit({ type: "roster.employee_unlinked", employeeId: employee.id, target: explicit, source: options.source || "company" });
+    return { ok: true, employeeId: employee.id, cleared: true, target: explicit };
+  }
+
+  /** 自动登记名册的开关（配置 company.autoLinkRoster，默认开）。 */
+  function autoLinkEnabled() {
+    return runtime.config.autoLinkRoster !== false;
+  }
+
+  /** 某部门当前全部员工 id（新建部门后自动登记用；新部门此时通常还没有员工）。 */
+  function employeeIdsOfDepartment(departmentId) {
+    const dept = String(departmentId == null ? "" : departmentId).trim();
+    if (!dept) return [];
+    return (runtime.company.employees || [])
+      .filter((e) => String(e.department || "") === dept)
+      .map((e) => e.id);
+  }
+
+  /**
+   * v0.3.3：创建员工/创建部门后自动把员工登记进名册（best-effort）。
+   * 名册不可用、写入失败都只回 { ok:false, code }，绝不让创建动作失败 —— 名册是覆盖层，
+   * 不能反向卡住公司（此时面板仍显示「未登记」，可手动点「登记到名册」补齐）。
+   * 调用方必须已持有公司锁并完成 refresh（文件锁不可重入）。
+   */
+  async function autoLinkRosterFor(employeeIds, source) {
+    const ids = (Array.isArray(employeeIds) ? employeeIds : [employeeIds])
+      .map((id) => String(id == null ? "" : id).trim())
+      .filter(Boolean);
+    if (ids.length === 0) return { ok: true, attempted: 0, created: 0, updated: 0 };
+    if (!autoLinkEnabled()) {
+      return { ok: true, disabled: true, attempted: ids.length, created: 0, updated: 0 };
+    }
+    try {
+      const res = await applyRosterLinks({ employeeIds: ids, onlyUnlinked: true, source });
+      if (!res || res.ok === false) {
+        return {
+          ok: false,
+          code: (res && res.code) || "E_AUTO_LINK_FAILED",
+          attempted: ids.length,
+          created: 0,
+          updated: 0,
+          message: (res && res.message) || "自动登记名册失败",
+        };
+      }
+      return {
+        ok: true,
+        attempted: ids.length,
+        created: res.created || 0,
+        updated: res.updated || 0,
+        linked: res.linked || 0,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        code: "E_AUTO_LINK_FAILED",
+        attempted: ids.length,
+        created: 0,
+        updated: 0,
+        message: err?.message ?? String(err),
+      };
+    }
+  }
+
   function view() {
     const deptMap = new Map((runtime.company.departments || []).map((d) => [d.id, d]));
+    // v0.3.2：名册关联状态（名册读不到时逐员工 roster=null，汇总 available=false）
+    const rosterIndex = rosterIndexOrNull();
     const employees = (runtime.company.employees || []).map((e) => {
       const dept = deptMap.get(e.department);
       const levelInfo = describeEmployeeLevel(e, runtime.config.levels);
@@ -1365,14 +1882,20 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         departmentCode: dept?.code ?? null,
         levelName: levelInfo.levelName,
         channels: describeEmployeeChannels(e, runtime.config.levels),
+        roster: rosterIndex ? describeRosterLink(e, rosterIndex) : null,
       };
     });
+    const rosterSummary = rosterIndex
+      ? summarizeRosterLinks(runtime.company.employees, rosterIndex)
+      : { available: false, total: employees.length, linked: 0, retired: 0, unlinked: 0 };
     const departments = (runtime.company.departments || []).map((d) => {
       const manager = employees.find((e) => e.department === d.id && e.role === EMPLOYEE_ROLE.MANAGER);
       return {
         ...d,
         employeeCount: employees.filter((e) => e.department === d.id).length,
         managerId: manager?.id ?? null,
+        // docs/24 §5.1：每个部门附带已解析的流程预设（无预设/未知预设 → null）。
+        preset: resolveDepartmentPreset(d, employees.filter((e) => e.department === d.id)),
       };
     });
 
@@ -1410,11 +1933,24 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         };
       });
 
+    const liveAttempts = listLiveAttempts(runtime.ledger);
+    const orderRows = runtime.ledger.orders || [];
+    const byState = {};
+    for (const o of orderRows) byState[o.state] = (byState[o.state] || 0) + 1;
+    // 派工健康度：面板顶部要能一眼看出「为什么没有任务在跑」
+    const routeErrors = orderRows
+      .filter((o) => o.routeError && (o.state === ORDER_STATES.QUEUED || o.state === ORDER_STATES.ROUTED))
+      .map((o) => ({ orderId: o.id, subject: o.subject, state: o.state, reason: o.routeError, at: o.routeErrorAt || null, retryAfter: o.retryAfter || null }));
+
     return {
       enabled: config.enabled,
       status: booted ? "running" : "stopped",
       warnings: bootWarnings,
+      // docs/24 §5.1：预设注册表摘要（供面板列出可套用预设），不在每个部门里重复嵌入。
+      presets: listPresets(),
       org: { departments, employees },
+      // v0.3.2：员工中心页头「名册：已关联 x / 未登记 y」
+      roster: rosterSummary,
       companyName: runtime.company.companyName || COMPANY_NAME_DEFAULT,
       management: {
         channel: "M",
@@ -1422,8 +1958,42 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         employees: managementEmployees,
       },
       board: {
-        orders: (runtime.ledger.orders || []).length,
-        done: (runtime.ledger.orders || []).filter((o) => o.state === "done").length,
+        orders: orderRows.length,
+        done: orderRows.filter((o) => o.state === "done").length,
+        running: liveAttempts.length,
+        byState,
+      },
+      // v0.4：正在跑的 attempt（工作网任务泳道 + 成员卡状态都靠它）
+      attempts: liveAttempts.map((a) => ({
+        attemptId: a.id,
+        attemptNo: a.attemptNo ?? null,
+        orderId: a.orderId,
+        employee: a.employee,
+        sessionId: a.sessionId ?? null,
+        startedAt: a.startedAt ?? null,
+        lastSeenAt: a.lastSeenAt ?? null,
+        orderState: a.orderState ?? null,
+      })),
+      health: {
+        status: booted ? "running" : "stopped",
+        scheduler: {
+          running: Boolean(runtime.scheduler?.isRunning?.()),
+          intervalMs: runtime.scheduler?.intervalMs?.() ?? config.limits.schedulerIntervalMs,
+        },
+        pending: {
+          queued: byState[ORDER_STATES.QUEUED] || 0,
+          routed: byState[ORDER_STATES.ROUTED] || 0,
+          running: byState[ORDER_STATES.RUNNING] || 0,
+        },
+        routeErrors,
+        capacity: departments.map((d) => ({
+          deptId: d.id,
+          code: d.code,
+          name: d.name,
+          capacity: d.capacity ?? null,
+          busy: liveAttempts.filter((a) => employees.find((e) => e.id === a.employee)?.department === d.id).length,
+          idle: employees.filter((e) => e.department === d.id && e.state === EMPLOYEE_STATE.IDLE).length,
+        })),
       },
       levels: runtime.config.levels,
       numbering: runtime.config.numbering,
@@ -1509,7 +2079,24 @@ async function createOwnerAgent(runtime) {
   return ownerSessionId;
 }
 
-async function recycleStaleAttempts(runtime, store, warnings) {
+async function recycleStaleAttempts(runtime, store, warnings, dispatcher = null) {
+  // 统一走 dispatcher.hydrate：把 running 孤儿 attempt 判 stale（带 reason），
+  // 订单经 failed 回到 queued，并重建内存里的 attempt 索引。
+  if (dispatcher && typeof dispatcher.hydrate === "function") {
+    try {
+      const res = await dispatcher.hydrate({ recoverOrphans: true });
+      if (res?.recovered?.length) {
+        warnings.push(`回收 ${res.recovered.length} 条搁浅订单`);
+      }
+      if (res?.orphaned?.length) {
+        warnings.push(`回收 ${res.orphaned.length} 条终态订单下的孤儿 attempt`);
+      }
+      return res;
+    } catch (err) {
+      warnings.push(`回收 stale attempts 失败: ${err.message}`);
+      return null;
+    }
+  }
   try {
     await store.withLock(async () => {
       const loaded = await store.load();

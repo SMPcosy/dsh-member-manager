@@ -281,6 +281,32 @@ export function setModel(reg, target, { model, provider } = {}, now = new Date()
   return touch(next, now);
 }
 
+/**
+ * 按补丁修改成员的可编辑档案字段（v0.3.2：公司员工登记回填用）。
+ *
+ * 只接受档案类字段 displayName/title/duties/skills/note/model/provider；
+ * target/status/groupId/aliases 等身份与分组字段一律忽略（它们是 registerLive /
+ * renameMember / assignGroup 的职责，混在一起会让「谁改了什么」无法追溯）。
+ * 值为 undefined 表示不改；model/provider 传空串表示清除覆盖。
+ */
+export function patchMember(reg, target, patch = {}, now = new Date().toISOString()) {
+  const t = requireTarget(target);
+  const next = clone(reg);
+  const m = next.members[findIndex(next, t)];
+  if (patch.displayName !== undefined) m.displayName = requireText(patch.displayName, "displayName");
+  if (patch.title !== undefined) m.title = patch.title === "" ? "" : requireText(patch.title, "title");
+  if (patch.duties !== undefined) m.duties = requireStringList(patch.duties, "duties");
+  if (patch.skills !== undefined) m.skills = requireStringList(patch.skills, "skills");
+  if (patch.note !== undefined) m.note = typeof patch.note === "string" ? patch.note.trim() : "";
+  if (patch.model !== undefined || patch.provider !== undefined) {
+    const nextModel = patch.model !== undefined ? patch.model : m.model;
+    const nextProvider = patch.provider !== undefined ? patch.provider : m.provider;
+    applyModelFields(m, { model: nextModel, provider: nextProvider });
+  }
+  m.updatedAt = now;
+  return touch(next, now);
+}
+
 /** 软删除（用户说的「删除成员」）；restore=true 时恢复 */
 export function removeMember(reg, target, { restore = false } = {}, now = new Date().toISOString()) {
   const t = requireTarget(target);

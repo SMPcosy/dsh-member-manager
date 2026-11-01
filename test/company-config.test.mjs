@@ -6,6 +6,7 @@ import { DEFAULT_LEVELS, DEFAULT_NUMBERING } from "../src/shared/company-org.mjs
 const DEFAULTS = {
   enabled: true,
   autoBoot: true,
+  autoLinkRoster: true,
   defaultSessionPolicy: "per_task",
   managerActsAsStaff: false,
   defaultOrderMode: "async",
@@ -17,6 +18,7 @@ const DEFAULTS = {
     budgetTokensPerDay: 5000000,
     attemptTimeoutMs: 1800000,
     lostReportGraceMs: 120000,
+    schedulerIntervalMs: 5000,
     staleAttemptMs: 3600000,
   },
   departments: [],

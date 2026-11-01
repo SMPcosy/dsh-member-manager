@@ -149,3 +149,77 @@ test("createEmployee 拒绝重复 id", () => {
   c = createEmployee(c, { id: "A1", displayName: "张工", department: "A" });
   assert.throws(() => createEmployee(c, { id: "A1", displayName: "同名", department: "A" }), OrgError);
 });
+
+/* ------------------------------------------------------------------ */
+/* 部门流程预设（docs/24 §4）                                           */
+/* ------------------------------------------------------------------ */
+
+test("createDepartment 不带 preset 时不写入 preset 字段", () => {
+  let c = makeCompany();
+  c = createDepartment(c, { id: "A", name: "工程部" });
+  assert.equal(c.departments[0].preset, undefined);
+});
+
+test("createDepartment 支持创建即套用 game-dev 预设", () => {
+  let c = makeCompany();
+  c = createDepartment(c, { id: "D04", name: "游戏开发", preset: "game-dev" });
+  const preset = c.departments[0].preset;
+  assert.ok(preset, "应写入 preset 快照");
+  assert.equal(preset.id, "game-dev");
+  assert.equal(preset.version, 1);
+  assert.equal(preset.appliedBy, "owner");
+  assert.match(preset.appliedAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("createDepartment 套用未知/非法预设抛 E_UNKNOWN_PRESET / E_INVALID_PRESET", () => {
+  assert.throws(
+    () => createDepartment(makeCompany(), { id: "D04", name: "游戏开发", preset: "nope" }),
+    (err) => err.code === "E_UNKNOWN_PRESET",
+  );
+  assert.throws(
+    () => createDepartment(makeCompany(), { id: "D04", name: "游戏开发", preset: 123 }),
+    (err) => err.code === "E_INVALID_PRESET",
+  );
+});
+
+test("createDepartment 传 preset:null 视为不套用", () => {
+  const c = createDepartment(makeCompany(), { id: "A", name: "工程部", preset: null });
+  assert.equal(c.departments[0].preset, undefined);
+});
+
+test("updateDepartment 通过 preset 字段套用/切换预设", () => {
+  let c = makeCompany();
+  c = createDepartment(c, { id: "D04", name: "游戏开发" });
+  c = updateDepartment(c, "D04", { preset: "game-dev" });
+  assert.equal(c.departments[0].preset.id, "game-dev");
+  const firstAppliedAt = c.departments[0].preset.appliedAt;
+  c = updateDepartment(c, "D04", { preset: { id: "game-dev" } });
+  assert.equal(c.departments[0].preset.id, "game-dev");
+  // 再次套用会刷新 appliedAt（时间可能相同，至少结构完整）
+  assert.ok(c.departments[0].preset.appliedAt);
+  assert.equal(typeof firstAppliedAt, "string");
+});
+
+test("updateDepartment 传 preset:null 或空串清除预设，undefined 不动", () => {
+  let c = makeCompany();
+  c = createDepartment(c, { id: "D04", name: "游戏开发", preset: "game-dev" });
+  c = updateDepartment(c, "D04", { preset: undefined, name: "游戏开发二部" });
+  assert.equal(c.departments[0].preset.id, "game-dev", "undefined 不应清除预设");
+  assert.equal(c.departments[0].name, "游戏开发二部");
+  c = updateDepartment(c, "D04", { preset: null });
+  assert.equal(c.departments[0].preset, undefined);
+  c = updateDepartment(c, "D04", { preset: "game-dev" });
+  c = updateDepartment(c, "D04", { preset: "" });
+  assert.equal(c.departments[0].preset, undefined);
+});
+
+test("updateDepartment 套用未知预设抛 E_UNKNOWN_PRESET 且不破坏原部门", () => {
+  let c = makeCompany();
+  c = createDepartment(c, { id: "D04", name: "游戏开发", preset: "game-dev" });
+  assert.throws(() => updateDepartment(c, "D04", { preset: "nope" }), (err) => err.code === "E_UNKNOWN_PRESET");
+  assert.equal(c.departments[0].preset.id, "game-dev");
+});
+
+test("updateDepartment 不存在部门时 preset 套用抛 OrgError（部门不存在）", () => {
+  assert.throws(() => updateDepartment(makeCompany(), "Z", { preset: "game-dev" }), /部门 Z 不存在/);
+});

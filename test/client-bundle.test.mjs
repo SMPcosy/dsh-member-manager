@@ -780,10 +780,10 @@ test("MemberRow：成员设了模型时显示模型徽标", () => {
   const props = { groups: [], t: (k) => k, busy: false, onEdit: () => {}, onRetire: () => {}, onRestore: () => {}, onAssign: () => {} };
 
   const without = treeText(exports.__internals.MemberRow(Object.assign({}, props, { m: base })));
-  assert.ok(!/模型:/.test(without), "没设模型时不应显示模型徽标");
+  assert.ok(!/mtModelPrefix/.test(without), "没设模型时不应显示模型徽标");
 
   const withModel = treeText(exports.__internals.MemberRow(Object.assign({}, props, { m: Object.assign({}, base, { model: "deepseek-pro" }) })));
-  assert.match(withModel, /模型: deepseek-pro/, "设了模型就应显示出来");
+  assert.match(withModel, /mtModelPrefix\s*deepseek-pro/, "设了模型就应显示出来");
 });
 
 test("EditForm：模型与 provider 输入框带出当前值", () => {
@@ -930,6 +930,17 @@ function makeFakeDom() {
         c.parentNode = null;
         return c;
       },
+      // 真 DOM 的核心能力：详情「就地展开」要把节点插到被点卡片后面，
+      // 替身少了这个方法，生产代码在测试里会直接抛 TypeError。
+      insertBefore(c, ref) {
+        if (c.parentNode) c.parentNode.removeChild(c);
+        const i = ref ? this.children.indexOf(ref) : this.children.length;
+        if (i < 0) throw new Error("insertBefore: 参考节点不是本节点的子节点");
+        this.children.splice(i, 0, c);
+        c.parentNode = this;
+        if (c.id) byId.set(c.id, c);
+        return c;
+      },
       setAttribute(k, v) {
         this.attributes[k] = String(v);
       },
@@ -951,7 +962,11 @@ function makeFakeDom() {
         if (i >= 0) list.splice(i, 1);
       },
       dispatchEvent(evt) {
-        for (const fn of this._listeners[(evt && evt.type) || ""] || []) fn(evt);
+        const wrapped = {
+          type: (evt && evt.type) || "",
+          stopPropagation() {},
+        };
+        for (const fn of this._listeners[(evt && evt.type) || ""] || []) fn(wrapped);
         return true;
       },
       getBoundingClientRect() {
@@ -962,21 +977,49 @@ function makeFakeDom() {
       },
       setPointerCapture() {},
       releasePointerCapture() {},
+      focus() {},
+      blur() {},
+      scrollIntoView() {},
+      select() {},
     };
     return el;
   }
   const body = mkEl("body");
   const head = mkEl("head");
+  const docListeners = Object.create(null);
   const doc = {
     body,
     head,
     createElement: mkEl,
     createElementNS: (_ns, tag) => mkEl(tag),
     getElementById: (id) => byId.get(id) || null,
+    addEventListener(type, fn) {
+      (docListeners[type] || (docListeners[type] = [])).push(fn);
+    },
+    removeEventListener(type, fn) {
+      const list = docListeners[type];
+      if (!list) return;
+      const i = list.indexOf(fn);
+      if (i >= 0) list.splice(i, 1);
+    },
+    dispatchEvent(evt) {
+      for (const fn of docListeners[(evt && evt.type) || ""] || []) fn(evt);
+      return true;
+    },
   };
   const win = { innerWidth: 1440, innerHeight: 900, addEventListener() {}, removeEventListener() {} };
   doc.defaultView = win;
   return { doc, win, body, head };
+}
+
+function hasAncestorClass(node, cls) {
+  let cur = node && node.parentNode;
+  while (cur) {
+    const name = String(cur.className || "");
+    if (name.split(/\s+/).includes(cls)) return true;
+    cur = cur.parentNode;
+  }
+  return false;
 }
 
 const ORGMAP_FIXTURE = {
@@ -1071,24 +1114,40 @@ test("组织架构图：无窗口框、无位置按钮的层级视图（并联�
   assert.ok(overlay.root.parentNode, "root 应挂到 body");
   assert.ok(doc.getElementById("mm-orgchart-style"), "样式应注入一次");
 
-  // 无窗口框：root = 任务下拉行 / 错误行 / 画布 / 页脚，没有任何窗口按钮（无折叠、无 ⇤⇥、无刷新）
+  // 无窗口框：root = 任务下拉行 / 错误行 / 画布 / 页脚 / 泳道看板（v0.4 追加，排在末尾用 CSS order 提前）
   const rootTags = overlay.root.children.map((c) => c.tagName);
-  assert.deepEqual(rootTags, ["DIV", "DIV", "DIV", "DIV"]);
+  assert.deepEqual(rootTags, ["DIV", "DIV", "DIV", "DIV", "DIV"]);
   assert.equal(overlay.root.children[0].className, "mmo-toolbar");
+  // 工具栏 / 画布 / 页脚不得出现任何窗口装饰按钮（折叠、⇤⇥、刷新）；
+  // 泳道看板上的操作按钮（推进调度、下达任务）属于业务操作，不算窗口框。
   const buttons = [];
   (function walk(n) {
     if (!n || !n.children) return;
     for (const c of n.children) {
-      if (c.tagName === "BUTTON") buttons.push(c);
+      if (c.tagName === "BUTTON" && !hasAncestorClass(c, "mmo-board")) buttons.push(c);
       walk(c);
     }
   })(overlay.root);
   assert.equal(buttons.length, 0, "不应有任何窗口按钮：" + buttons.length);
+  assert.equal(overlay.root.children[4].className, "mmo-board", "泳道看板挂在根节点末尾");
+
+  // S3 锚点：五条泳道必须带自己的身份（data-lane），否则 CSS order 与表头配色全部失锚，
+  // 而且「按泳道取空态文案」会静默退化成同一句。
+  const boardEl = overlay.root.children[4];
+  const lanesEl = (boardEl.children || []).find((c) => c.className === "mmo-lanes");
+  assert.ok(lanesEl, "泳道容器 .mmo-lanes 必须存在");
+  const laneEls = (lanesEl.children || []).filter((c) => c.className === "mmo-lane");
+  assert.equal(laneEls.length, 5, "应有 5 条泳道，实际 " + laneEls.length);
+  assert.deepEqual(
+    laneEls.map((l) => l.getAttribute("data-lane")).sort(),
+    ["abnormal", "done", "queued", "routed", "running"],
+    "五条泳道的 data-lane 必须齐全"
+  );
 
   for (let i = 0; i < 40 && !overlay.getData(); i++) await new Promise((r) => setTimeout(r, 10));
   assert.ok(overlay.getData(), "应拿到 /orgmap 数据");
   assert.ok(calls[0].endsWith("/orgmap"), "请求路径：" + calls[0]);
-  assert.equal(errors.length, 0);
+  assert.equal(errors.length, 0, "渲染不应报错：" + errors.join(" | "));
   assert.equal(overlay.getData().lead.target, "lead");
 
   // 层级视图：第 1 层 lead 行、第 2/3 层分组簇（chip + 成员横向一行）
@@ -1241,7 +1300,7 @@ test("工作网：公司化数据渲染管理层→部门→员工，卡片带�
   const groupsRow = stage.children[2];
   assert.equal(groupsRow.children.length, 2, "两个部门两簇");
   const chip = groupsRow.children[0].children[0];
-  assert.equal(chip.getAttribute("title"), "负责人：插件架构", "部门色块 tooltip 应带负责人");
+  assert.equal(chip.getAttribute("title"), "ocLeadTitle插件架构", "部门色块 tooltip 应带负责人");
 
   const membersBox = groupsRow.children[0].children[1];
   assert.equal(membersBox.children[0].getAttribute("data-target"), "plugin-builder", "运行中员工排在最前");
@@ -1397,7 +1456,7 @@ test("组织架构图：/orgmap 失败时展示错误行，并只上报一次（
   overlay.destroy();
 });
 
-test("组织架构图：注册为右侧边栏 tab（类型 / 正文 / header 入口）并自动打开一次", () => {
+test("组织架构图：注册为右侧边栏 tab（类型 / 正文 / header 入口），且绝不自动打开", () => {
   const { exports } = loadBundle(makeReact());
   const { ctx, slots } = mockClientCtx();
   const tabs = [];
@@ -1428,7 +1487,13 @@ test("组织架构图：注册为右侧边栏 tab（类型 / 正文 / header 入
   assert.equal(body.options.locale, "dsh-member-manager");
   assert.equal(typeof body.Component, "function");
 
-  assert.deepEqual(opened, ["member-orgmap"], "首次接线应自动打开一次右栏 tab");
+  // v0.4 契约变更：工作网页签只在用户点击 header 入口时打开，插件不得自行弹窗。
+  assert.deepEqual(opened, [], "接线阶段不得自动打开右栏 tab");
+  const header = slots.find((s) => s.options.name === "conversation.session.header.actions");
+  const injected = header.options.inject();
+  assert.equal(typeof injected.open, "function", "header 入口必须提供 open()");
+  injected.open();
+  assert.deepEqual(opened, ["member-orgmap"], "用户点击入口才打开一次右栏 tab");
 });
 
 test("组织架构图：右栏服务缺失时静默降级，不影响插件其余部分", () => {
@@ -1473,3 +1538,481 @@ test("组织架构图：内嵌进右栏宿主容器，不产生浮动层与拖�
   assert.equal(overlay.root.parentNode, null);
 });
 
+/* ==================== 开发模式预设（docs/24 §6） ==================== */
+
+/** 契约 §6.4 要求面板可用的 cp* 文案键 */
+const PRESET_I18N_KEYS = [
+  "cpModalPreset",
+  "cpPresetTitle",
+  "cpPresetApply",
+  "cpPresetClear",
+  "cpPresetEmpty",
+  "cpPresetOutdated",
+  "cpPresetAppliedAt",
+  "cpPresetOwner",
+  "cpPresetParticipants",
+  "cpPresetDeliverables",
+  "cpPresetGates",
+  "cpPresetUnassigned",
+  "cpPresetStage",
+  "cpPresetHint",
+];
+
+/** 用真实字典做 t（支持 {name} 插值），断言用户看到的中文而非 key */
+function dictTranslator(lang = "zh") {
+  const { exports } = loadBundle(makeReact());
+  const { ctx, locales } = mockClientCtx();
+  exports.apply(ctx);
+  const dict = locales.get("dsh-member-manager");
+  assert.ok(dict && dict[lang], "未注册 " + lang + " 字典");
+  return (key, vars) =>
+    String(dict[lang][key] == null ? key : dict[lang][key]).replace(/\{(\w+)\}/g, (m, name) =>
+      vars && vars[name] != null ? String(vars[name]) : m,
+    );
+}
+
+/** 带预设目录 + 已套用部门预设的 overview（docs/24 §3.2/§5 形状） */
+const PRESET_OVERVIEW = {
+  enabled: true,
+  status: "running",
+  warnings: [],
+  presets: [{ id: "game-dev", name: "游戏开发模式", version: 2, description: "七阶段游戏开发流程", stageCount: 7, roleCount: 2 }],
+  org: {
+    departments: [
+      {
+        id: "dept-plugin",
+        code: "D01",
+        name: "插件组",
+        capacity: 4,
+        employeeCount: 1,
+        managerId: "emp-lead",
+        accepts: true,
+        preset: { id: "game-dev", name: "游戏开发模式", version: 1, currentVersion: 2, roles: [], stages: [] },
+      },
+    ],
+    employees: [{ id: "emp-lead", code: "E0001", displayName: "插件组负责人", department: "dept-plugin", departmentCode: "D01", channel: "M", level: "M2", kind: "permanent", state: "idle" }],
+  },
+};
+
+test("apply()：开发模式预设的 cp* 键在 zh/en 中齐全且文案非空（docs/24 §6.4）", () => {
+  const { exports } = loadBundle(makeReact());
+  const { ctx, locales } = mockClientCtx();
+  exports.apply(ctx);
+  const dict = locales.get("dsh-member-manager");
+  for (const key of PRESET_I18N_KEYS) {
+    assert.ok(Object.prototype.hasOwnProperty.call(dict.zh, key), "zh 缺 key：" + key);
+    assert.ok(Object.prototype.hasOwnProperty.call(dict.en, key), "en 缺 key：" + key);
+    assert.ok(String(dict.zh[key]).length > 0, "zh 文案不能为空：" + key);
+    assert.ok(String(dict.en[key]).length > 0, "en 文案不能为空：" + key);
+  }
+  assert.equal(dict.zh.cpModalPreset, "开发模式");
+  assert.equal(dict.zh.cpPresetOutdated, "可更新");
+  assert.equal(dict.en.cpPresetUnassigned, "Unassigned");
+});
+
+test("CompanyOrgPanel：带 preset overview 时渲染预设徽章与「开发模式」页签入口", () => {
+  const t = dictTranslator("zh");
+  const react = makeReact([PRESET_OVERVIEW, null, false, null, "dept-plugin", "preset"]);
+  const { exports } = loadBundle(react);
+  const tree = exports.__internals.CompanyOrgPanel({ t });
+  const text = treeText(tree);
+  assert.ok(text.includes("游戏开发模式"), "应显示预设名");
+  assert.ok(text.includes("游戏开发模式 · " + t("cpPresetOutdated")), "版本落后应显示 · 可更新徽章");
+  assert.ok(text.includes(t("cpModalPreset")), "弹层应有「开发模式」页签");
+  assert.ok(text.includes(t("cpPresetApply")), "预设页签应渲染套用按钮");
+});
+
+test("CompanyOrgPanel：无 preset 的 overview 渲染空态而不抛错", () => {
+  const t = dictTranslator("zh");
+  const react = makeReact([
+    { enabled: true, status: "running", warnings: [], org: { departments: [{ id: "dept-a", code: "D01", name: "空部门", accepts: true }], employees: [] } },
+    null,
+    false,
+    null,
+    "dept-a",
+    "preset",
+  ]);
+  const { exports } = loadBundle(react);
+  const tree = exports.__internals.CompanyOrgPanel({ t });
+  const text = treeText(tree);
+  assert.ok(text.includes(t("cpPresetEmpty")), "老数据无 preset 应显示空态文案");
+  assert.ok(text.includes(t("cpPresetHint")), "应显示套用提示");
+});
+
+
+
+/* ---------------- v0.4 工作网泳道看板：渲染 / 详情 / 操作 / 雇临时工 ---------------- */
+
+const BOARD_FIXTURE = Object.assign({}, COMPANY_ORGMAP_FIXTURE, {
+  orders: [
+    {
+      id: "o-queued",
+      title: "实现导出功能",
+      state: "queued",
+      type: "code_impl",
+      priority: "high",
+      dept: "plugin-dept",
+      deptName: "D02 插件部",
+      attempts: [],
+      deps: ["o-done"],
+      createdAt: "2026-10-21T08:00:00.000Z",
+      routeError: "no_capacity",
+    },
+    {
+      id: "o-running",
+      title: "修复登录闪退",
+      state: "running",
+      type: "bugfix",
+      priority: "urgent",
+      dept: "plugin-dept",
+      deptName: "D02 插件部",
+      employee: "plugin-builder",
+      employeeName: "插件编写",
+      attemptNo: 2,
+      attemptCount: 2,
+      elapsedMs: 65000,
+      createdAt: "2026-10-21T08:05:00.000Z",
+      acceptance: ["点击登录不再闪退"],
+      attempts: [
+        { attemptNo: 1, employee: "plugin-arch", employeeName: "插件架构", state: "stale", invalidated: true, staleReason: "superseded" },
+        { attemptNo: 2, employee: "plugin-builder", employeeName: "插件编写", state: "running" },
+      ],
+    },
+    {
+      id: "o-done",
+      title: "搭好骨架",
+      state: "done",
+      type: "code_impl",
+      priority: "normal",
+      deptName: "D02 插件部",
+      employee: "plugin-arch",
+      employeeName: "插件架构",
+      createdAt: "2026-10-21T07:00:00.000Z",
+      attempts: [{ attemptNo: 1, employee: "plugin-arch", employeeName: "插件架构", state: "done", summary: "骨架完成" }],
+    },
+  ],
+  pipeline: { queued: ["o-queued"], routed: [], running: ["o-running"], done: ["o-done"], abnormal: [] },
+  health: {
+    status: "ok",
+    scheduler: { running: true, intervalMs: 5000 },
+    pending: { queued: 1, routed: 0, running: 1 },
+    routeErrors: [{ orderId: "o-queued", subject: "实现导出功能", reason: "no_capacity", at: "2026-10-21T08:00:05.000Z", retryAfter: 0 }],
+    capacity: [{ deptId: "plugin-dept", code: "D02", name: "D02 插件部", capacity: 4, busy: 1, idle: 2 }],
+  },
+  deptStats: [{ id: "plugin-dept", name: "D02 插件部", capacity: 4, busy: 1, idle: 2, total: 3 }],
+  members: [
+    { target: "plugin-arch", displayName: "插件架构", kind: "permanent", state: "idle" },
+    { target: "plugin-builder", displayName: "插件编写", kind: "permanent", state: "working" },
+    { target: "temp-1", displayName: "临时工甲", kind: "temp", state: "idle" },
+  ],
+});
+
+function plainText(node) {
+  if (node == null) return "";
+  if (typeof node === "string") return node;
+  if (!node.children || !node.children.length) return String(node.textContent || "");
+  return node.children.map(plainText).join("");
+}
+
+async function waitFor(fn, ms = 400) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (fn()) return true;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  return !!fn();
+}
+
+async function mountBoardV04(fixture) {
+  const calls = [];
+  const { doc, win } = makeFakeDom();
+  const { exports } = loadBundle(makeReact(), {
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), init: init || null });
+      if (String(url).includes("/company/op")) {
+        return { ok: true, status: 200, json: async () => ({ ok: true, data: { ok: true, orderId: "o-new", employeeId: "e-new" } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ ok: true, data: fixture }) };
+    },
+    setInterval,
+    clearInterval,
+  });
+  const overlay = exports.__internals.OrgChartOverlay({
+    document: doc,
+    window: win,
+    apiBase: "/api/dsh-member-manager",
+    t: (k) => k,
+    pollMs: 60000,
+    reportError: () => {},
+  });
+  await waitFor(() => !!overlay.getData(), 800);
+  const board = overlay.root.children[4];
+  return { overlay, board, calls, doc };
+}
+
+const mmoHead = (board) => board.children[0];
+const mmoLanes = (board) => board.children[1];
+const mmoHealth = (board) => board.children.find((c) => String(c.className).includes("mmo-health"));
+const mmoDetail = (board) => {
+  // 详情已从「看板末尾的绝对定位抽屉」改成「跟着被点卡片就地展开」，位置不再固定，
+  // 因此按 class 深搜定位（实在找不到才退回旧的末位约定）。
+  let found = null;
+  (function walk(n) {
+    if (!n || found) return;
+    if (String(n.className || "").split(" ").indexOf("mmo-detail") >= 0) { found = n; return; }
+    for (const c of n.children || []) walk(c);
+  })(board);
+  return found || board.children[4];
+};
+function findBtnByText(node, text, out = []) {
+  if (!node) return out;
+  if (node.tagName === "BUTTON" && String(node.textContent) === text) out.push(node);
+  for (const c of node.children || []) findBtnByText(c, text, out);
+  return out;
+}
+const posts = (calls) => calls.filter((c) => c.url.includes("/company/op"));
+
+test("工作网看板：五条泳道按 pipeline 分桶，卡片落在对应泳道并带执行人信息", async () => {
+  const { overlay, board } = await mountBoardV04(BOARD_FIXTURE);
+  const lanes = mmoLanes(board);
+  assert.equal(lanes.children.length, 5, "应有 5 条泳道");
+  const laneBody = (i) => lanes.children[i].children[1];
+  assert.equal(laneBody(0).children.length, 1, "queued 泳道 1 张卡");
+  assert.equal(laneBody(0).children[0].getAttribute("data-order"), "o-queued");
+  assert.ok(String(laneBody(1).children[0].className).includes("mmo-order-err"), "空泳道渲染占位");
+  assert.equal(laneBody(2).children.length, 1, "running 泳道 1 张卡");
+  const runningCard = laneBody(2).children[0];
+  assert.equal(runningCard.getAttribute("data-state"), "running");
+  assert.equal(runningCard.getAttribute("data-order"), "o-running");
+  assert.ok(plainText(runningCard).includes("插件编写"), "运行中卡片应显示执行人：" + plainText(runningCard));
+  assert.equal(laneBody(3).children.length, 1, "done 泳道 1 张卡");
+  assert.equal(lanes.children[0].children[0].children[1].textContent, "1", "泳道头计数");
+
+  const kpi = mmoHead(board).children.filter((c) => String(c.className).includes("mmo-kpi"));
+  const kpiText = kpi.map((c) => String(c.textContent));
+  assert.deepEqual(kpiText, ["wbLaneQueued 1", "wbLaneRouted 0", "wbLaneRunning 1", "wbLaneDone 1", "wbLaneAbnormal 0"]);
+
+  const sched = mmoHead(board).children.find((c) => String(c.className).includes("mmo-sched"));
+  assert.equal(sched.getAttribute("data-state"), "running");
+  assert.ok(String(sched.textContent).includes("wbSchedRunning"));
+  assert.ok(String(sched.textContent).includes("5s"), "应显示调度周期：" + sched.textContent);
+  assert.ok(String(sched.title).includes("no_capacity"), "调度 chip 应汇总路由失败原因：" + sched.title);
+
+  const health = mmoHealth(board);
+  assert.ok(health, "应渲染部门产能条");
+  assert.ok(health.children.length >= 1, "产能条应有内容");
+  assert.ok(plainText(health).includes("1/4"), "产能条应显示 busy/capacity：" + plainText(health));
+  overlay.destroy();
+});
+
+test("工作网看板：点卡片打开详情抽屉，列出 attempt 历史并标记被吊销的那次", async () => {
+  const { overlay, board } = await mountBoardV04(BOARD_FIXTURE);
+  mmoLanes(board).children[2].children[1].children[0].dispatchEvent({ type: "click" });
+  const detail = mmoDetail(board);
+  assert.equal(detail.getAttribute("data-open"), "1", "详情应展开");
+  const text = plainText(detail);
+  assert.ok(text.includes("修复登录闪退"), "详情应显示标题：" + text);
+  assert.ok(text.includes("#1") && text.includes("#2"), "应列出两次 attempt：" + text);
+  assert.ok(text.includes("superseded"), "吊销原因要可见：" + text);
+  assert.ok(text.includes("点击登录不再闪退"), "验收标准要可见：" + text);
+  const rows = [];
+  (function walk(n) {
+    if (!n) return;
+    if (String(n.className || "").includes("mmo-attempt")) rows.push(n);
+    for (const c of n.children || []) walk(c);
+  })(detail);
+  const stale = rows.filter((r) => r.getAttribute("data-stale") === "1");
+  assert.equal(stale.length, 1, "只有被吊销的那次 attempt 标 stale");
+
+  const head = detail.children[0];
+  head.children[head.children.length - 1].dispatchEvent({ type: "click" });
+  assert.equal(detail.getAttribute("data-open"), "0", "关闭后应收起");
+  assert.equal(detail.children.length, 0, "关闭后应清空内容");
+  overlay.destroy();
+});
+
+test("工作网看板：执行中订单「验收通过」POST reviewOrder 并刷新数据", async () => {
+  const { overlay, board, calls } = await mountBoardV04(BOARD_FIXTURE);
+  mmoLanes(board).children[2].children[1].children[0].dispatchEvent({ type: "click" });
+  const passBtn = findBtnByText(mmoDetail(board), "wbReviewPass")[0];
+  assert.ok(passBtn, "执行中订单应提供验收按钮");
+  assert.ok(findBtnByText(mmoDetail(board), "wbReviewReject").length === 1, "还应提供驳回按钮");
+  passBtn.dispatchEvent({ type: "click" });
+  assert.ok(await waitFor(() => posts(calls).length === 1), "应发一次 POST");
+  const body = JSON.parse(posts(calls)[0].init.body);
+  assert.equal(body.action, "reviewOrder");
+  assert.equal(body.args.orderId, "o-running");
+  assert.equal(body.args.pass, true);
+  assert.ok(await waitFor(() => calls.filter((c) => c.url.includes("/orgmap")).length >= 2), "操作后应重新拉取数据");
+  overlay.destroy();
+});
+
+test("工作网看板：排队订单可手动派工（assignOrder 带成员），空标题不提交新建", async () => {
+  const { overlay, board, calls } = await mountBoardV04(BOARD_FIXTURE);
+  mmoLanes(board).children[0].children[1].children[0].dispatchEvent({ type: "click" });
+  const detail = mmoDetail(board);
+  const pick = detail.children.find((c) => String(c.className).includes("mmo-select"));
+  assert.ok(pick, "详情应有成员下拉");
+  assert.equal(pick.children[0].value, "", "首个选项为自动派工");
+  pick.value = "plugin-arch";
+  findBtnByText(detail, "wbAssign")[0].dispatchEvent({ type: "click" });
+  assert.ok(await waitFor(() => posts(calls).length === 1));
+  const assignBody = JSON.parse(posts(calls)[0].init.body);
+  assert.equal(assignBody.action, "assignOrder");
+  assert.equal(assignBody.args.employeeId, "plugin-arch");
+
+  const newBtn = findBtnByText(mmoHead(board), "wbNewOrder")[0];
+  assert.ok(newBtn, "看板头应有新建订单按钮");
+  newBtn.dispatchEvent({ type: "click" });
+  const form = mmoDetail(board).children[1];
+  const submit = form.children[form.children.length - 1];
+  submit.dispatchEvent({ type: "click" });
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(posts(calls).length, 1, "空标题不应再发 POST");
+  form.children[0].value = "实现导出功能";
+  form.children[1].value = "code_impl";
+  submit.dispatchEvent({ type: "click" });
+  assert.ok(await waitFor(() => posts(calls).length === 2));
+  const placeBody = JSON.parse(posts(calls)[1].init.body);
+  assert.equal(placeBody.action, "placeOrder");
+  assert.equal(placeBody.args.title, "实现导出功能");
+  assert.equal(placeBody.args.type, "code_impl");
+  overlay.destroy();
+});
+
+test("工作网看板：雇临时工表单部门来自 deptStats，提交 hireTemp 带任务上限", async () => {
+  const { overlay, board, calls } = await mountBoardV04(BOARD_FIXTURE);
+  const tempBtn = findBtnByText(mmoHead(board), "wbHireTemp")[0];
+  assert.ok(tempBtn, "看板头应有雇临时工按钮");
+  tempBtn.dispatchEvent({ type: "click" });
+  const form = mmoDetail(board).children[1];
+  const deptSelect = form.children[1];
+  assert.equal(deptSelect.children.length, 1, "部门下拉应来自 deptStats");
+  assert.equal(deptSelect.children[0].value, "plugin-dept");
+  deptSelect.value = "plugin-dept";
+  form.children[0].value = "临时工甲";
+  form.children[2].value = "2";
+  form.children[form.children.length - 1].dispatchEvent({ type: "click" });
+  assert.ok(await waitFor(() => posts(calls).length === 1));
+  const body = JSON.parse(posts(calls)[0].init.body);
+  assert.equal(body.action, "hireTemp");
+  assert.equal(body.args.department, "plugin-dept");
+  assert.equal(body.args.tempMaxTasks, 2);
+  assert.equal(body.args.displayName, "临时工甲");
+  overlay.destroy();
+});
+
+/**
+ * 「异常」泳道只显示当前卡住的失败单；已取消/已丢失的历史异常移到下方「异常记录」区，可手动清理。
+ */
+const BOARD_FIXTURE_ABNORMAL = {
+  orders: [
+    { id: "o-failed", title: "出图任务失败", state: "failed", type: "design", employeeName: "员工1", attempts: [{ attemptNo: 1, employee: "e1", employeeName: "员工1", state: "failed", summary: "超时" }] },
+    { id: "o-cancelled", title: "计算 2+3", state: "cancelled", type: "test", attempts: [] },
+    { id: "o-lost", title: "真实宿主闭环", state: "lost", type: "test", attempts: [] },
+  ],
+  pipeline: { queued: [], routed: [], running: [], done: [], abnormal: ["o-failed", "o-cancelled", "o-lost"] },
+  health: { status: "ok", scheduler: { running: true, intervalMs: 5000 }, pending: {}, routeErrors: [], capacity: [] },
+  deptStats: [],
+  members: [{ target: "e1", displayName: "员工1", kind: "permanent", state: "idle" }],
+};
+
+test("工作网看板：异常泳道只显示当前卡住的失败单，历史异常放到异常记录区", async () => {
+  const { overlay, board } = await mountBoardV04(BOARD_FIXTURE_ABNORMAL);
+  const lanes = mmoLanes(board).children;
+  const lane = lanes[4];
+  assert.equal(lane.getAttribute("data-lane"), "abnormal");
+  assert.equal(lane.children[0].children[1].textContent, "1", "计数只算 failed，不含已取消/已丢失");
+
+  // 泳道正文只有活着的失败单
+  const laneCards = lane.children[1].children.filter((c) => String(c.className).includes("mmo-order"));
+  assert.deepEqual(laneCards.map((c) => c.getAttribute("data-order")), ["o-failed"], "活着的失败单留在泳道正文");
+
+  // 不再有折叠分组
+  const fold = lane.children[1].children.find((c) => String(c.className).includes("mmo-lane-fold"));
+  assert.equal(fold, undefined, "已取消/已丢失应改到异常记录区，不再折叠在泳道里");
+
+  // 异常记录区在泳道下方
+  const history = board.children.find((c) => String(c.className).includes("mmo-exception-history"));
+  assert.ok(history, "应存在异常记录区");
+  const historyBody = history.children.find((c) => String(c.className).includes("mmo-exception-history-body"));
+  const archived = historyBody.children.filter((c) => String(c.className).includes("mmo-order"));
+  assert.deepEqual(archived.map((c) => c.getAttribute("data-order")), ["o-cancelled", "o-lost"], "历史异常放进异常记录区");
+
+  // 清理按钮可用
+  const clearBtn = history.children[0].children.find((c) => c.tagName === "BUTTON");
+  assert.ok(clearBtn, "异常记录区应有清理按钮");
+  assert.equal(clearBtn.disabled, false, "有历史异常时清理按钮应可用");
+
+  overlay.destroy();
+});
+
+test("工作网看板：异常泳道为空时显示「重启进度」按钮", async () => {
+  const fixture = {
+    ...BOARD_FIXTURE_ABNORMAL,
+    orders: [
+      { id: "o-cancelled", title: "计算 2+3", state: "cancelled", type: "test", attempts: [] },
+      { id: "o-lost", title: "真实宿主闭环", state: "lost", type: "test", attempts: [] },
+    ],
+    pipeline: { queued: [], routed: [], running: [], done: [], abnormal: ["o-cancelled", "o-lost"] },
+  };
+  const { overlay, board } = await mountBoardV04(fixture);
+  const lanes = mmoLanes(board).children;
+  const lane = lanes[4];
+  assert.equal(lane.getAttribute("data-lane"), "abnormal");
+  assert.equal(lane.children[0].children[1].textContent, "0", "没有当前卡住的异常单");
+
+  const restartBtn = lane.children[1].children.find((c) => String(c.className).includes("mmo-restart-progress"));
+  assert.ok(restartBtn, "异常泳道为空时应显示「重启进度」按钮");
+  assert.ok(String(restartBtn.textContent).includes("wbRestartProgress"));
+
+  overlay.destroy();
+});
+
+test("工作网看板：失败单在卡面就写清失败原因，且人名徽标换成红色", async () => {
+  const { overlay, board } = await mountBoardV04(BOARD_FIXTURE_ABNORMAL);
+  const lane = mmoLanes(board).children[4];
+  const card = lane.children[1].children.find((c) => String(c.className).includes("mmo-order"));
+  const badges = card.children[1].children.filter((c) => String(c.className).includes("mmo-badge"));
+  assert.ok(badges.length >= 1, "失败卡应有人名徽标");
+  assert.ok(String(badges[0].className).includes("mmo-bad"), "失败卡的人名徽标不能还是绿的：" + badges[0].className);
+  const err = card.children.find((c) => String(c.className).includes("mmo-order-err"));
+  assert.ok(err, "失败卡应显示失败原因");
+  assert.equal(err.textContent, "超时", "失败原因取最后一次 attempt 的 summary");
+  overlay.destroy();
+});
+
+test("工作网看板：失败单的详情给「派工 + 验收通过 + 取消」，不再给点了会报错的升级", async () => {
+  const { overlay, board } = await mountBoardV04(BOARD_FIXTURE_ABNORMAL);
+  const lane = mmoLanes(board).children[4];
+  lane.children[1].children.find((c) => String(c.className).includes("mmo-order")).dispatchEvent({ type: "click" });
+  const detail = mmoDetail(board);
+  assert.ok(findBtnByText(detail, "wbAssign").length === 1, "失败单要能重派");
+  assert.ok(findBtnByText(detail, "wbReviewPass").length === 1, "失败单要能人工验收通过");
+  assert.ok(findBtnByText(detail, "wbCancel").length === 1, "失败单要能取消");
+  assert.equal(findBtnByText(detail, "wbEscalate").length, 0, "终态单不该给升级按钮");
+  overlay.destroy();
+});
+
+test("工作网看板：点击卡片展开详情，点击详情外部关闭详情", async () => {
+  const { overlay, board, doc } = await mountBoardV04(BOARD_FIXTURE);
+  const lanes = mmoLanes(board).children;
+  const runningCard = lanes[2].children[1].children.find((c) => String(c.className).includes("mmo-order"));
+  runningCard.dispatchEvent({ type: "click" });
+  const detail = mmoDetail(board);
+  assert.equal(detail.getAttribute("data-open"), "1", "点击卡片后详情应展开");
+  assert.equal(runningCard.getAttribute("data-sel"), "1", "被点卡片应被标记选中");
+
+  // 模拟点击详情外部（doc 上的 click 事件）
+  await new Promise((r) => setTimeout(r, 100));
+  doc.dispatchEvent({ type: "click" });
+  assert.equal(detail.getAttribute("data-open"), "0", "点击外部后详情应关闭");
+
+  // 再次展开，点击详情内部不应关闭
+  runningCard.dispatchEvent({ type: "click" });
+  assert.equal(detail.getAttribute("data-open"), "1");
+  detail.dispatchEvent({ type: "click" });
+  assert.equal(detail.getAttribute("data-open"), "1", "点击详情内部不应关闭");
+
+  overlay.destroy();
+});

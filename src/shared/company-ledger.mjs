@@ -30,6 +30,28 @@ function clone(v) {
   return JSON.parse(JSON.stringify(v));
 }
 
+/**
+ * 剥掉值为 undefined 的自有键，递归清洗并返回新对象。
+ *
+ * 为什么必须有：插件把 order 对象原样返回给宿主当工具结果，宿主的
+ * isJsonValue（@deepseek-ai/dsh-util-values）遇到 undefined 就判「非无损 JSON」，
+ * 整个工具结果被丢弃并抛 `value is not lossless JSON`。而落盘走 JSON 序列化时
+ * undefined 键本来就会被丢掉，于是出现「工具报错、账本其实已经建单」的割裂。
+ * 清洗后内存对象与落盘形状一致，同一份数据不再有两种真相。
+ */
+export function stripUndefined(obj) {
+  if (Array.isArray(obj)) {
+    return obj.map((item) => (item === undefined ? null : stripUndefined(item)));
+  }
+  if (!obj || typeof obj !== "object") return obj;
+  const out = {};
+  for (const key of Object.keys(obj)) {
+    if (obj[key] === undefined) continue;
+    out[key] = stripUndefined(obj[key]);
+  }
+  return out;
+}
+
 export function emptyLedger(now = new Date().toISOString()) {
   return {
     version: LEDGER_VERSION,
@@ -53,7 +75,9 @@ export function createOrder(ledger, { type, title, priority = "normal", deps = [
     }
   }
   const id = nanoid();
-  const order = {
+  // stripUndefined：rest 里可能带着显式 undefined 的可选字段（project/dept/mode/timeoutMs），
+  // 不清洗的话 order 会带 4 个值为 undefined 的自有键，宿主侧工具结果直接被判非无损 JSON。
+  const order = stripUndefined({
     id,
     type,
     title,
@@ -64,7 +88,7 @@ export function createOrder(ledger, { type, title, priority = "normal", deps = [
     state: ORDER_STATES.QUEUED,
     createdAt: now,
     ...rest,
-  };
+  });
   l.orders.push(order);
   if (clientOrderId) l.clientMap[clientOrderId] = id;
   return { ledger: l, order };
@@ -85,13 +109,16 @@ function isTerminal(state) {
 }
 
 const STATE_MACHINE = {
-  [ORDER_STATES.QUEUED]: [ORDER_STATES.ROUTED, ORDER_STATES.RUNNING, ORDER_STATES.CANCELLED],
-  [ORDER_STATES.ROUTED]: [ORDER_STATES.RUNNING, ORDER_STATES.CANCELLED],
+  [ORDER_STATES.QUEUED]: [ORDER_STATES.ROUTED, ORDER_STATES.RUNNING, ORDER_STATES.CANCELLED, ORDER_STATES.LOST],
+  // routed -> queued：路由失败/领取失败要能退回队列重试，否则订单会永久粘在 routed。
+  [ORDER_STATES.ROUTED]: [ORDER_STATES.RUNNING, ORDER_STATES.QUEUED, ORDER_STATES.FAILED, ORDER_STATES.CANCELLED],
   [ORDER_STATES.RUNNING]: [ORDER_STATES.DONE, ORDER_STATES.FAILED, ORDER_STATES.LOST, ORDER_STATES.ROUTED],
   [ORDER_STATES.DONE]: [],
   [ORDER_STATES.CANCELLED]: [],
   [ORDER_STATES.LOST]: [],
-  [ORDER_STATES.FAILED]: [ORDER_STATES.QUEUED],
+  // failed -> done：经理人工验收「这个失败的活其实改好了」，直接结单；
+  // failed -> queued：重新排队重跑（派工走这条路）。两者都得允许，否则失败单是死路。
+  [ORDER_STATES.FAILED]: [ORDER_STATES.QUEUED, ORDER_STATES.DONE, ORDER_STATES.CANCELLED],
 };
 
 export function transitionOrder(ledger, id, newState) {
@@ -129,11 +156,52 @@ export function assignAttempt(ledger, orderId, employee, sessionId, now = new Da
     employee,
     sessionId,
     startedAt: now,
+    // attemptNo：该订单第几次派工，面板用它显示「第 2 次尝试」
+    attemptNo: (order.attempts || []).length + 1,
     state: "running",
+    status: "running",
     invalidated: false,
+    lastSeenAt: now,
   };
   order.attempts.push(attempt);
+  // 订单上冗余一份当前执行人 + 当前 attempt：面板/工作网按订单直接取人取 attempt，
+  // 不用再翻 attempts 数组（重启后 view 也能直接显示「谁在做、第几次」）。
+  order.employee = employee;
+  order.attemptId = attempt.id;
+  order.attemptNo = attempt.attemptNo;
+  order.attemptStartedAt = now;
   return { ledger: l, attempt };
+}
+
+/** 所有「还活着」的 attempt（订单未终态、attempt 未吊销未结束）。 */
+export function listLiveAttempts(ledger) {
+  const out = [];
+  for (const order of ledger?.orders || []) {
+    if (order.state === ORDER_STATES.DONE || order.state === ORDER_STATES.CANCELLED || order.state === ORDER_STATES.LOST) continue;
+    for (const attempt of order.attempts || []) {
+      if (attempt.invalidated || attempt.endedAt) continue;
+      out.push({ ...attempt, orderId: order.id, orderState: order.state });
+    }
+  }
+  return out;
+}
+
+/**
+ * 把 attempt 标记为 stale（不删除历史）。reason 落盘，供面板与审计解释。
+ * 与 invalidateAttempt 的差别：这里不抛错，找不到就返回原账本。
+ */
+export function markAttemptStale(ledger, orderId, attemptId, reason, now = new Date().toISOString()) {
+  const l = clone(ledger);
+  const order = l.orders.find((o) => o.id === orderId);
+  if (!order) return l;
+  const attempt = (order.attempts || []).find((a) => a.id === attemptId);
+  if (!attempt) return l;
+  attempt.invalidated = true;
+  attempt.state = "stale";
+  attempt.status = attempt.status && attempt.status !== "running" ? attempt.status : "stale";
+  attempt.staleReason = reason || "unknown";
+  attempt.endedAt = attempt.endedAt || now;
+  return l;
 }
 
 export function findAttempt(ledger, orderId, attemptId) {
@@ -161,6 +229,9 @@ export function reportAttempt(ledger, orderId, attemptId, status, payload, now =
   if (!attempt) throw new LedgerError(`attempt ${attemptId} 不存在`, "E_NOT_FOUND");
   if (attempt.invalidated) {
     throw new LedgerError(`STALE stale attempt ${attemptId}`, "E_STALE_ATTEMPT");
+  }
+  if (attempt.endedAt) {
+    throw new LedgerError(`attempt ${attemptId} 已回报过`, "E_DUPLICATE_REPORT");
   }
   attempt.status = status;
   attempt.state = status === "done" ? "done" : "failed";

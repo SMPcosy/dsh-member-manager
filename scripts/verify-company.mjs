@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * verify-company.mjs —— dsh-member-manager 0.3.0 交付自检
+ * verify-company.mjs —— dsh-member-manager 交付自检（0.5.x）
  *
  * 用法：
  *   node scripts/verify-company.mjs                # 全量（语法 + 元数据 + 全量测试）
@@ -48,7 +48,7 @@ await check("package.json 可解析", () => {
 });
 await check("包名/版本/入口", () => {
   must(pkg.name === "dsh-member-manager", `name 应为 dsh-member-manager，实际 ${pkg.name}`);
-  must(pkg.version === "0.3.0", `version 应为 0.3.0，实际 ${pkg.version}`);
+  must(/^0\.(3|4|5)\.\d+$/.test(pkg.version), `version 应形如 0.3.x / 0.4.x / 0.5.x，实际 ${pkg.version}`);
   must(pkg.main === "lib/index.js", `main 应为 lib/index.js，实际 ${pkg.main}`);
   must(pkg.type === "module", "type 应为 module");
   return `${pkg.name}@${pkg.version}`;
@@ -73,8 +73,8 @@ await check("入口与挂载声明", () => {
   }
   return "4 个";
 });
-await check("共享内核 5 模块", () => {
-  const files = ["company-config", "company-org", "company-ledger", "company-router", "company-store"];
+await check("共享内核 6 模块", () => {
+  const files = ["company-config", "company-org", "company-ledger", "company-router", "company-store", "company-presets"];
   for (const f of files) must(existsSync(path.join(REPO, "src/shared", `${f}.mjs`)), `缺少 src/shared/${f}.mjs`);
   return files.join(",");
 });
@@ -96,38 +96,108 @@ await check("设计/审阅/交付文档", () => {
     "14-验证与安装.md",
     "15-交付说明与回滚.md",
     "16-MP双通道等级与编号契约.md",
+    "24-游戏开发模式预设契约.md",
+    "26-公司与名册关联契约.md",
   ];
   for (const d of docs) must(existsSync(path.join(REPO, "docs", d)), `缺少 docs/${d}`);
   return `${docs.length} 篇`;
 });
 await check("脚本与兼容包", () => {
-  for (const f of ["verify-company.mjs", "switch-to-dsh-member-manager.mjs", "rollback-to-dsh-plugin-member-manager.mjs", "migrate-old-plugin.mjs"]) {
+  for (const f of ["verify-company.mjs", "switch-to-dsh-member-manager.mjs", "rollback-to-dsh-plugin-member-manager.mjs", "migrate-old-plugin.mjs", "apply-preset.mjs", "roster-link.mjs"]) {
     must(existsSync(path.join(REPO, "scripts", f)), `缺少 scripts/${f}`);
   }
   for (const f of ["package.json", "lib/index.js", "lib/client.js", "cordis.patch.yml"]) {
     must(existsSync(path.join(REPO, "compat", "dsh-plugin-member-manager", f)), `缺少 compat/dsh-plugin-member-manager/${f}`);
   }
-  return "4 脚本 + 兼容包";
+  return "6 脚本 + 兼容包";
 });
 await check("关键测试文件", () => {
-  for (const f of ["company-levels.test.mjs", "company-panel.test.mjs", "migrate-plugin.test.mjs", "compat-package.test.mjs", "company-game.test.mjs"]) {
+  for (const f of ["company-levels.test.mjs", "company-panel.test.mjs", "migrate-plugin.test.mjs", "compat-package.test.mjs", "company-presets.test.mjs", "roster-link.test.mjs"]) {
     must(existsSync(path.join(REPO, "test", f)), `缺少 test/${f}`);
   }
-  return "5 个";
+  return "6 个";
 });
-await check("公司大亨（游戏）引擎与路由", async () => {
-  must(existsSync(path.join(REPO, "src", "host", "company-game.mjs")), "缺少 src/host/company-game.mjs");
-  const g = await import(pathToFileURL(path.join(REPO, "src", "host", "company-game.mjs")).href);
-  for (const fn of ["createGame", "seedFromCompanyView", "viewGame", "serializeGame", "deserializeGame", "assignOrder", "hireEmployee", "upgradeEmployee", "upgradeDepartment", "stepGame"]) {
-    must(typeof g[fn] === "function", `company-game 缺少导出 ${fn}`);
+await check("游戏开发模式预设", async () => {
+  const p = await import(pathToFileURL(path.join(REPO, "src/shared/company-presets.mjs")).href);
+  must(p.PRESET_SCHEMA_VERSION === 1, "PRESET_SCHEMA_VERSION 应为 1");
+  must(p.DEFAULT_PRESET_ID === "game-dev", `DEFAULT_PRESET_ID 应为 game-dev，实际 ${p.DEFAULT_PRESET_ID}`);
+  must(Array.isArray(p.PRESETS) && p.PRESETS.length >= 1, "PRESETS 至少要有 1 个预设");
+  const preset = p.getPreset("game-dev");
+  must(preset, "getPreset('game-dev') 应返回预设对象");
+  must(preset.roles.length === 7, `game-dev 应有 7 个岗位，实际 ${preset.roles.length}`);
+  must(preset.stages.length === 7, `game-dev 应有 7 个阶段，实际 ${preset.stages.length}`);
+  const summary = p.listPresets();
+  must(
+    summary.some((x) => x.id === "game-dev" && x.stageCount === 7 && x.roleCount === 7),
+    "listPresets 应包含 game-dev（7 阶段/7 岗位）摘要",
+  );
+  // D04 真实 fixture（7 员工，2026-10 生产数据副本）
+  const employees = [
+    { id: "emp-mviizjij-ak7r", code: "E0016", displayName: "主策划", title: "主策划（玩法与数值）", duties: ["玩法与关卡设计", "数值与经济系统设计", "需求文档与验收标准", "版本内容规划与节奏"], skills: ["domain-modeling", "writing-shape", "prototype", "research"], role: "staff", channel: "P", level: "P4", channels: [{ channel: "P", level: "P4" }], department: "dept-mviizjib-q10k" },
+    { id: "emp-mviizjiq-t60k", code: "E0017", displayName: "系统策划", title: "系统策划", duties: ["系统规则与数据结构设计", "交互流程与原型", "与程序/美术对齐实现", "需求变更与版本记录"], skills: ["domain-modeling", "writing-fragments", "codebase-design"], role: "staff", channel: "P", level: "P3", channels: [{ channel: "P", level: "P3" }], department: "dept-mviizjib-q10k" },
+    { id: "emp-mviizjiy-s743", code: "E0018", displayName: "客户端工程师", title: "Unity 客户端工程师", duties: ["Unity 客户端功能开发", "UI 与交互实现", "性能与包体优化", "联调与问题修复"], skills: ["implement", "tdd", "code-review"], role: "staff", channel: "P", level: "P3", channels: [{ channel: "P", level: "P3" }], department: "dept-mviizjib-q10k" },
+    { id: "emp-mviizjj4-3ctr", code: "E0019", displayName: "服务端工程师", title: "服务端工程师", duties: ["服务端逻辑与接口开发", "存档与数据一致性", "联机与同步机制", "压测与可观测性"], skills: ["implement", "diagnosing-bugs", "tdd"], role: "staff", channel: "P", level: "P3", channels: [{ channel: "P", level: "P3" }], department: "dept-mviizjib-q10k" },
+    { id: "emp-mviizjj9-e432", code: "E0020", displayName: "美术设计师", title: "游戏美术与 UI 设计师", duties: ["UI 视觉与界面规范", "图标与游戏资源制作", "动效与体验打磨", "资源命名与归档"], skills: ["prototype", "file-processing-master", "office-render"], role: "staff", channel: "P", level: "P3", channels: [{ channel: "P", level: "P3" }], department: "dept-mviizjib-q10k" },
+    { id: "emp-mviizjje-crrl", code: "E0021", displayName: "测试工程师", title: "游戏测试工程师", duties: ["测试计划与用例设计", "功能与回归测试", "缺陷跟踪与复现", "版本验收与发版检查"], skills: ["tdd", "diagnosing-bugs", "code-review"], role: "staff", channel: "P", level: "P2", channels: [{ channel: "P", level: "P2" }], department: "dept-mviizjib-q10k" },
+    { id: "emp-mvij1z3n-k1qe", code: "E0022", displayName: "游戏制作人", title: "制作人（项目负责人）", duties: ["版本目标与里程碑管理", "跨职能协作与资源协调", "质量与进度把控", "对外汇报与风险升级"], skills: ["chief-of-staff", "research", "code-review"], role: "manager", channel: "M", level: "M2", channels: [{ channel: "M", level: "M2" }], department: "dept-mviizjib-q10k" },
+  ];
+  const department = { id: "dept-mviizjib-q10k", code: "D04", name: "游戏开发", preset: { id: "game-dev", version: 1, appliedAt: "2026-10-21T00:00:00.000Z", appliedBy: "cli" } };
+  const resolved = p.resolveDepartmentPreset(department, employees);
+  must(resolved, "resolveDepartmentPreset 应返回已解析预设对象");
+  const expected = {
+    director: "E0022",
+    "lead-planner": "E0016",
+    "system-planner": "E0017",
+    "client-dev": "E0018",
+    "server-dev": "E0019",
+    artist: "E0020",
+    qa: "E0021",
+  };
+  for (const role of resolved.roles) {
+    must(role.employee, `岗位 ${role.key}（${role.name}）未匹配到员工`);
+    must(
+      role.employee.code === expected[role.key],
+      `岗位 ${role.key} 期望 ${expected[role.key]}，实际 ${role.employee.code}`,
+    );
   }
-  must(g.GAME_VERSION === 1, "GAME_VERSION 应为 1");
-  must(g.TURN_LIMIT === 30 && g.ORDER_SLOTS === 3 && g.START_COINS === 800, "游戏常量（回合/订单/金币）不符");
-  const rt = readFileSync(path.join(REPO, "src", "host", "company-runtime.mjs"), "utf8");
-  for (const s of ["/company/game", "/company/game/op", "company.game_new", "company.game_finished"]) {
-    must(rt.includes(s), `company-runtime 缺少游戏路由/审计 ${s}`);
+  return "7 岗位 × 7 阶段 + D04 7/7 命中";
+});
+await check("公司与名册关联（v0.3.2）", async () => {
+  const r = await import(pathToFileURL(path.join(REPO, "src", "shared", "roster-link.mjs")).href);
+  for (const fn of [
+    "rosterTargetOf",
+    "hasExplicitRosterTarget",
+    "buildRosterIndex",
+    "describeRosterLink",
+    "summarizeRosterLinks",
+    "buildRosterProfile",
+    "planRosterLink",
+    "planRosterBatch",
+  ]) {
+    must(typeof r[fn] === "function", `roster-link 缺少导出 ${fn}`);
   }
-  return "引擎 + 2 条路由";
+  must(r.ROSTER_LINK_STATUS.LINKED === "linked", "ROSTER_LINK_STATUS.LINKED 应为 linked");
+  // 隐式 target = 员工 id；显式字段优先
+  must(r.rosterTargetOf({ id: "emp-a" }) === "emp-a", "隐式关联应回落到员工 id");
+  must(r.rosterTargetOf({ id: "emp-a", rosterTarget: "doc-writer" }) === "doc-writer", "显式 rosterTarget 应优先");
+  // 只补空字段：已有 displayName/title 不被覆盖
+  const profile = r.buildRosterProfile({ id: "emp-a", displayName: "平面设计", title: "平面设计师" });
+  const plan = r.planRosterLink({ target: "emp-a", displayName: "人工名", title: "人工岗位", duties: [], skills: [], note: "人工备注" }, profile);
+  must(plan.action === "noop", "已有档案字段时不应覆盖（期望 noop）");
+  must(r.planRosterLink({ target: "emp-a", displayName: "emp-a" }, profile).patch.displayName === "平面设计", "空 displayName 应可补");
+  // CLI + 文档存在
+  must(existsSync(path.join(REPO, "scripts", "roster-link.mjs")), "缺少 scripts/roster-link.mjs");
+  must(existsSync(path.join(REPO, "docs", "26-公司与名册关联契约.md")), "缺少 docs/26-公司与名册关联契约.md");
+  // v0.3.3：新建部门/员工后自动登记（配置默认开 + 创建路径已接线）
+  const cfg = await import(pathToFileURL(path.join(REPO, "src", "shared", "company-config.mjs")).href);
+  must(cfg.resolveCompanyConfig(undefined).config.autoLinkRoster === true, "company.autoLinkRoster 默认应为 true");
+  must(cfg.resolveCompanyConfig({ autoLinkRoster: false }).config.autoLinkRoster === false, "company.autoLinkRoster=false 应生效");
+  const runtimeSrc = readFileSync(path.join(REPO, "src", "host", "company-runtime.mjs"), "utf8");
+  must(runtimeSrc.includes("autoLinkRosterFor"), "company-runtime 缺少 autoLinkRosterFor（自动登记实现）");
+  for (const marker of ["auto:hire", "auto:admin:createEmployee", "auto:panel:createEmployee"]) {
+    must(runtimeSrc.includes(marker), `创建路径未接入自动登记：${marker}`);
+  }
+  return "8 导出 + 只补空字段 + 自动登记默认开 + CLI";
 });
 await check("总架构组织架构图字样", () => {
   const client = readFileSync(path.join(REPO, "lib", "client.js"), "utf8");
@@ -144,18 +214,13 @@ await check("总架构组织架构图字样", () => {
     "company/op",
     "cpTab",
     "cpEmployeeCenter",
-    "tabGame",
-    "大亨",
-    "Tycoon",
-    "GamePanel",
-    "company/game",
-    "gameStep",
-    "gameWonBanner",
-    "gameFormat",
     "ocFoldIdle",
     "ocFoldHide",
     "cpModalChart",
     "cpModalMembers",
+    "cpModalPreset",
+    "cpPresetApply",
+    "游戏开发模式",
     "cpNewDept",
     "cpPreviewDept",
     "cpEmpTitle",
@@ -267,6 +332,20 @@ await check("共享内核导出", async () => {
     "company-ledger": ["createOrder", "transitionOrder", "isOrderReady"],
     "company-router": ["routeTypeToDept", "selectEmployee"],
     "company-store": ["CompanyStore"],
+    "company-presets": [
+      "PRESET_SCHEMA_VERSION",
+      "DEFAULT_PRESET_ID",
+      "GAME_DEV_PRESET",
+      "PRESETS",
+      "listPresets",
+      "getPreset",
+      "normalizePresetRef",
+      "validatePresetRef",
+      "applyPresetToDepartment",
+      "clearPresetFromDepartment",
+      "matchPresetRoles",
+      "resolveDepartmentPreset",
+    ],
   };
   const report = [];
   for (const [mod, names] of Object.entries(mods)) {

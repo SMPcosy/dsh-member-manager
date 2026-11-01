@@ -19,20 +19,33 @@ export function createEmployeeSessionManager({ runtime, logger }) {
   }
 
   function buildAgentOptions(employee) {
+    const options = {};
     if (employee.provider && employee.model) {
-      return { provider: employee.provider, model: employee.model };
+      options.provider = employee.provider;
+      options.model = employee.model;
     }
-    return undefined;
+    // 参照 agent-teams：同一模型路由下再压一档推理强度；未配置则由宿主取默认。
+    if (employee.reasoningEffort) options.reasoningEffort = employee.reasoningEffort;
+    return Object.keys(options).length ? options : undefined;
   }
 
-  function setupAgentContext(agent, line) {
+  /** 工具黑名单连宿主标准工具一起管：deny 命中的名字一律拒，deny 优先于岗位白名单。 */
+  function deniedBy(employee, name) {
+    const list = employee?.toolPolicy?.deny;
+    if (!Array.isArray(list) || list.length === 0) return false;
+    return list.includes(name) || list.includes("*");
+  }
+
+  function setupAgentContext(agent, line, employee) {
     if (!agent || !agent.ctx) return;
     const allowed = LINE_TOOLS[line] || [];
     // 行隔离只约束公司化工具（company_*）：员工仍保有宿主标准工具（读写文件 / bash 等）才能完成真实工作。
     try {
       guardTools(agent.ctx, (exec) => {
         const name = exec?.tool?.name || exec?.name;
-        if (!name || !String(name).startsWith("company_")) return undefined;
+        if (!name) return undefined;
+        if (deniedBy(employee, name)) return `E_TOOL_POLICY: ${name} 在该成员的工具黑名单中`;
+        if (!String(name).startsWith("company_")) return undefined;
         const sid = exec?.agent?.session?.id;
         const tools = runtime.sessionTools;
         if (!sid || !tools) return "无法识别会话身份";
@@ -71,8 +84,11 @@ export function createEmployeeSessionManager({ runtime, logger }) {
     let sessionId = null;
 
     // resident 优先 resume；resume 失败则新建
-    if (employee.sessionPolicy === SESSION_POLICY.RESIDENT && agents && typeof agents.resume === "function") {
-      const resumeSessionId = existing?.sessionId || `resident-${employee.id}`;
+    // 只在「真的有过会话 id」时才 resume：以前用 `resident-${employee.id}` 兜底，
+    // 那是个从不存在的合成 id，每次冷启动必然抛 `session "resident-xxx" not found`，
+    // 白白多一次失败唤醒（还会在 subagent 投影里制造无 verdict 的 turn 边界）。
+    if (employee.sessionPolicy === SESSION_POLICY.RESIDENT && existing?.sessionId && agents && typeof agents.resume === "function") {
+      const resumeSessionId = existing.sessionId;
       try {
         const agentOptions = buildAgentOptions(employee);
         const resumeArgs = { resumeSessionId, parentAgent: parentAgent?.agent || parentAgent, cwd };
@@ -119,10 +135,10 @@ export function createEmployeeSessionManager({ runtime, logger }) {
         throw err;
       }
 
-      // 同步从 agents 服务取已发布的 agent 对象
+      // 同步从 agents 服务取已发布的 agent 对象（可能是 Promise，必须 await，否则 guard/用量全部挂不上）
       if (agents && typeof agents.get === "function") {
         try {
-          agent = agents.get(sessionId);
+          agent = await agents.get(sessionId);
         } catch (err) {
           logger?.warn?.(`agents.get 失败: ${err.message}`);
         }
@@ -132,7 +148,7 @@ export function createEmployeeSessionManager({ runtime, logger }) {
       }
     }
 
-    if (agent?.ctx) setupAgentContext(agent, allowedLine(employee.role));
+    if (agent?.ctx) setupAgentContext(agent, allowedLine(employee.role), employee);
     attachUsage(agent, employee, orderId);
 
     const session = {
@@ -245,7 +261,13 @@ export function buildPromptFor(employee, orderId, runtime) {
   const isWindow = employee.role === EMPLOYEE_ROLE.WINDOW;
   const roleName = isManager ? "经理" : isWindow ? "窗口" : "员工";
   const line = isManager ? TOOL_LINES.MANAGER : isWindow ? TOOL_LINES.WINDOW : TOOL_LINES.STAFF;
-  const toolList = `本角色白名单（越权调用会被拒绝）：${(LINE_TOOLS[line] || []).join("、")}`;
+  // 白名单只约束公司化工具（company_*）：宿主标准工具（读写文件、bash、子代理等）照常可用。
+  // 文案必须写清这一点，否则员工会误判自己「没有文件与 shell 能力」而直接求助停工
+  // ——历史上已经发生过三次（E0001 / E0023 / E0017），每次都是读了这段提示就不敢动手。
+  const toolList = [
+    `本角色白名单（只约束公司化工具 company_*，越权调用会被拒绝）：${(LINE_TOOLS[line] || []).join("、")}`,
+    "宿主标准工具（文件读写、命令执行、子代理等）不在上述白名单之内，照常可用；只有你自己的工具黑名单（toolPolicy.deny）会禁掉某个具体名字。",
+  ].join("\n- ");
   const dept = runtime.company?.departments?.find((d) => d.id === employee.department);
   const channelDescs = describeEmployeeChannels(employee, runtime.config?.levels);
   const primaryCh = channelDescs.find((c) => c.primary);
@@ -255,6 +277,13 @@ export function buildPromptFor(employee, orderId, runtime) {
     return (a.channel === b.channel ? 0 : a.channel.localeCompare(b.channel));
   });
   const identityLine = `工号：${employee.code || ""} · 等级：${sortedDescs.map((c) => `${c.level}（${c.levelName}，${c.channel}）`).join("、")} · 部门：${dept?.name || "未分配"}（${dept?.code || "-"}）`;
+  // 雇佣类型 / 推理强度 / 派生方式：都写进身份区块，成员自己知道自己是临时工还是正式工。
+  const kindText = employee.kind === "temp" ? "临时工（按任务计次，任务上限到达后自动退场）" : employee.kind === "shared" ? "共享池成员（按需借调）" : "正式员工";
+  const attrs = [`雇佣类型：${kindText}`];
+  if (employee.reasoningEffort) attrs.push(`推理强度：${employee.reasoningEffort}`);
+  if (employee.memberProvider) attrs.push(`派生方式：${employee.memberProvider}`);
+  if (Number.isFinite(Number(employee.maxDepth)) && Number(employee.maxDepth) === 0) attrs.push("子代理：不得开启");
+  const deny = Array.isArray(employee.toolPolicy?.deny) ? employee.toolPolicy.deny.filter(Boolean) : [];
   const duties = isWindow
     ? [
         "- 你负责接单、查询进度与催办：company_order / company_status / company_ask / company_cancel。",
@@ -282,13 +311,16 @@ export function buildPromptFor(employee, orderId, runtime) {
 
 ${identityLine}
 
-你是公司运行时的 ${roleName}（${employee.displayName || employee.id}）。
+  你是公司运行时的 ${roleName}（${employee.displayName || employee.id}）。
+
+${attrs.map((a) => `- ${a}`).join("\n")}
 
 ## 核心职责
 ${duties.join("\n")}
 
 ## 可使用的工具
 - ${toolList}
+${deny.length ? `- 公司已对你禁用：${deny.join("、")}（调用会被拒绝）` : ""}
 
 ## 成本约定
 - 记录本次 attempt 的预估/实际 token 消耗。

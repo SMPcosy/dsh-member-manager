@@ -20,6 +20,11 @@ const limitDefaults = Object.freeze({
   budgetTokensPerDay: 5000000,
   attemptTimeoutMs: 1800000,
   lostReportGraceMs: 120000,
+  // 调度器轮询间隔：多久扫一次 queued/routed 订单。
+  // 注意与 staleAttemptMs 的区别——后者是「一个 attempt 多久没有任何动静算僵死」的判定阈值（默认 1 小时）。
+  // v0.5.0 修：过去 createScheduler 误把 staleAttemptMs 当作轮询间隔传入，导致调度器每小时才跑一次，
+  // 依赖解锁（DAG 下游）与改派后的重试全部要等一小时，表现为「并行任务永远卡在排队」。
+  schedulerIntervalMs: 5000,
   staleAttemptMs: 3600000,
 });
 
@@ -126,6 +131,14 @@ export function resolveCompanyConfig(raw) {
   const enabled = enabledSigned.value !== false;
 
   const autoBoot = withDefault(readField("autoBoot", root).value, true, "autoBoot", warnings, (v) => isBoolish(v)).value;
+  // v0.3.3：新建员工/新建部门后自动把员工登记进名册（名册可用时，best-effort）；默认开。
+  const autoLinkRoster = withDefault(
+    readField("autoLinkRoster", root).value,
+    true,
+    "autoLinkRoster",
+    warnings,
+    (v) => isBoolish(v),
+  ).value;
   const managerActsAsStaff = withDefault(
     readField("managerActsAsStaff", root).value,
     false,
@@ -285,6 +298,7 @@ export function resolveCompanyConfig(raw) {
   const config = {
     enabled,
     autoBoot,
+    autoLinkRoster,
     defaultSessionPolicy,
     managerActsAsStaff,
     defaultOrderMode,

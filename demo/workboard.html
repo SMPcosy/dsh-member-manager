@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>成员管理 · 工作网（调度看板）</title>
+<style>
+  :root{
+    --line:rgba(31,35,40,.14);
+    --muted:#6b747e;
+    --ink:#1f2328;
+    --ink2:#57606a;
+    --blue:#2f6feb;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:#f6f7f9;color:var(--ink);
+    font:13px/1.5 ui-sans-serif,system-ui,"Segoe UI","Microsoft YaHei",sans-serif;
+    display:flex;flex-direction:column;
+  }
+  .topbar{
+    flex:none;height:38px;display:flex;align-items:center;gap:8px;
+    padding:0 14px;border-bottom:1px solid var(--line);background:#fff;
+    font-size:12px;color:#57606a;
+  }
+  .topbar b{color:var(--ink);font-weight:600}
+  .topbar .dot{width:7px;height:7px;border-radius:50%;background:#1a7f37}
+  .topbar .tag{margin-left:auto;font-size:11px;color:#8c959f}
+
+  .board{flex:1;min-height:0;display:flex;flex-direction:column;padding:10px 12px;gap:8px}
+  .board-head{flex:none;display:flex;align-items:center;gap:8px}
+  .board-title{font-size:13px;font-weight:600;color:var(--ink)}
+  .sched{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#1a7f37}
+  .sched::before{content:'';width:7px;height:7px;border-radius:50%;background:#1a7f37}
+  .btn{font:11px/1.4 inherit;padding:4px 10px;border-radius:7px;border:1px solid var(--line);
+    background:#fff;color:var(--ink2);cursor:default;white-space:nowrap}
+  .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
+  .head-spacer{margin-left:auto}
+
+  .lanes{flex:1;min-height:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;align-items:start}
+  .lane{display:flex;flex-direction:column;gap:5px;min-width:0;
+    background:rgba(127,127,127,.05);border:1px solid rgba(127,127,127,.14);border-radius:10px;padding:6px}
+  .lane-head{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--ink2);padding:0 2px}
+  .lane-head .g{width:6px;height:6px;border-radius:50%;flex:none;background:var(--muted)}
+  .lane[data-lane='routed'] .lane-head .g{background:#7d5300}
+  .lane[data-lane='running'] .lane-head .g{background:var(--blue)}
+  .lane[data-lane='done'] .lane-head .g{background:#1a7f37}
+  .lane[data-lane='abnormal'] .lane-head .g{background:#b42318}
+  .lane-count{margin-left:auto;min-width:18px;text-align:center;font-family:ui-monospace,Consolas,monospace;
+    font-size:10px;color:var(--muted);font-weight:600}
+  .lane-body{display:flex;flex-direction:column;gap:5px;min-height:8px}
+
+  .order{background:#fff;border:1px solid rgba(31,35,40,.09);border-radius:8px;padding:6px 8px}
+  .order .t{font-size:11.5px;font-weight:600;color:var(--ink);line-height:1.4;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .order .meta{display:flex;gap:5px;flex-wrap:wrap;font-size:10px;color:var(--muted);margin-top:2px;opacity:.82}
+  .order .badge{font-size:9px;color:var(--blue);background:rgba(47,111,235,.1);
+    border-radius:4px;padding:0 4px;white-space:nowrap}
+  .order .err{font-size:9.5px;color:#b42318;margin-top:2px;white-space:normal;line-height:1.35}
+  .order .model{color:var(--blue)}
+
+  /* 异常记录 fold */
+  .fold{margin-top:6px;display:flex;flex-direction:column;gap:5px}
+  .fold-head{display:flex;align-items:center;gap:5px;font-size:10px;font-weight:600;color:var(--muted)}
+  .fold-head .clear{margin-left:auto;font:10px/1.4 inherit;padding:2px 7px;border-radius:6px;
+    border:1px solid rgba(180,35,24,.35);background:#fff;color:#b42318;cursor:default}
+  .fold-item{background:rgba(255,255,255,.55);border:1px dashed rgba(127,127,127,.24);
+    border-radius:7px;padding:4px 7px;font-size:10px;color:var(--muted)}
+  .fold-item .st{color:#b42318}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <span class="dot"></span>
+    <b>成员管理</b>
+    <span>工作网 · 调度看板</span>
+    <span class="tag">实时任务 · 调度器运行中</span>
+  </div>
+
+  <div class="board">
+    <div class="board-head">
+      <span class="board-title">调度 · 任务流</span>
+      <span class="sched">调度器运行中</span>
+      <span class="head-spacer"></span>
+      <button class="btn">立即调度</button>
+      <button class="btn primary">＋ 下达工单</button>
+    </div>
+
+    <div class="lanes">
+      <!-- 排队 -->
+      <div class="lane" data-lane="queued">
+        <div class="lane-head"><span class="g"></span>排队<span class="lane-count">2</span></div>
+        <div class="lane-body">
+          <div class="order">
+            <div class="t">补齐发版前的 CHANGELOG 与版本号</div>
+            <div class="meta"><span class="badge">#v0.5.0·发布补课</span><span>bugfix</span></div>
+          </div>
+          <div class="order">
+            <div class="t">竞品调研报告入库共享库</div>
+            <div class="meta"><span>doc</span><span>kb-dept</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 已路由 -->
+      <div class="lane" data-lane="routed">
+        <div class="lane-head"><span class="g"></span>已路由<span class="lane-count">1</span></div>
+        <div class="lane-body">
+          <div class="order">
+            <div class="t">修复 company_order 返回值 lossless JSON</div>
+            <div class="meta"><span>plugin-builder</span><span>待接受</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 执行中 -->
+      <div class="lane" data-lane="running">
+        <div class="lane-head"><span class="g"></span>执行中<span class="lane-count">3</span></div>
+        <div class="lane-body">
+          <div class="order">
+            <div class="t">组织架构页成本归因重构</div>
+            <div class="meta"><span class="badge">#并行复验·a</span><span>plugin-arch</span><span class="model">deepseek-v4</span><span>3m</span></div>
+          </div>
+          <div class="order">
+            <div class="t">UI 规范工具包 gate 门禁</div>
+            <div class="meta"><span class="badge">#并行复验·b</span><span>plugin-smith</span><span class="model">deepseek-v4</span><span>8m</span></div>
+          </div>
+          <div class="order">
+            <div class="t">Moli 浏览器落地调研</div>
+            <div class="meta"><span>doc-writer</span><span class="model">deepseek-v4</span><span>2m</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 已完成 -->
+      <div class="lane" data-lane="done">
+        <div class="lane-head"><span class="g"></span>已完成<span class="lane-count">4</span></div>
+        <div class="lane-body">
+          <div class="order"><div class="t">修复同一员工连派两单</div><div class="meta"><span>bugfix</span></div></div>
+          <div class="order"><div class="t">工作网详情面板点外部关闭</div><div class="meta"><span>bugfix</span></div></div>
+          <div class="order"><div class="t">异常泳道死锁修复</div><div class="meta"><span>bugfix</span></div></div>
+          <div class="order"><div class="t">小白使用教程 v0.5</div><div class="meta"><span>doc</span></div></div>
+        </div>
+      </div>
+
+      <!-- 异常 -->
+      <div class="lane" data-lane="abnormal">
+        <div class="lane-head"><span class="g"></span>异常<span class="lane-count">1</span></div>
+        <div class="lane-body">
+          <div class="order">
+            <div class="t">制作宣传图 3–4 张</div>
+            <div class="meta"><span>D01 内容部</span><span>平面设计</span></div>
+            <div class="err">E_TOOL_LINE：该工具不在当前岗位白名单中</div>
+          </div>
+          <div class="fold">
+            <div class="fold-head">异常记录<span class="clear">清理 2 条</span></div>
+            <div class="fold-item"><span class="st">已取消</span> · 旧版宣传图任务（超时）</div>
+            <div class="fold-item"><span class="st">已取消</span> · lossless 真机验证单</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

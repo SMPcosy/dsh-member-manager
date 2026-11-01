@@ -3,7 +3,11 @@
  * 组织架构纯函数数据模型（零 DSH 依赖）。
  * 负责人：plugin-arch；本实现为最小化 stub 以满足既有测试并支持 P2 运行时联调。
  * 0.3.0 增量（task-7）：M/P 双通道等级 + 员工/部门编号体系（docs/16-MP双通道等级与编号契约.md §1）。
+ * 0.3.1 增量（docs/24-游戏开发模式预设契约.md §4）：部门可套用/清除流程预设。
  */
+
+import { applyPresetToDepartment, clearPresetFromDepartment } from "./company-presets.mjs";
+import { isValidMemberName } from "./registry-core.mjs";
 
 export const COMPANY_VERSION = 1;
 export const COMPANY_NAME_DEFAULT = "我的公司";
@@ -32,6 +36,8 @@ export const EMPLOYEE_STATE = Object.freeze({
   WORKING: "working",
   COLD: "cold",
   FIRED: "fired",
+  // 临时工到期/做满约定次数后自动退场（保留记录与历史，不再参与派工）
+  RETIRED: "retired",
 });
 
 export const EMPLOYEE_DUTIES_MAX = 8;
@@ -242,6 +248,28 @@ export function normalizeCompany(raw, now = new Date().toISOString()) {
         model: typeof emp.model === "string" ? emp.model.trim() : "",
         provider: typeof emp.provider === "string" ? emp.provider.trim() : "",
       };
+      // v0.4：成员属性必须跟着落盘走一遍再回来（withLedger 每次都会 store.load() 重建员工对象，
+      // 这里漏字段 = 临时工计次/推理强度/工具黑名单/当前派工在第一次操作后凭空消失）。
+      if (typeof emp.reasoningEffort === "string" && emp.reasoningEffort) e.reasoningEffort = emp.reasoningEffort;
+      if (emp.memberProvider === "spawn" || emp.memberProvider === "fork") e.memberProvider = emp.memberProvider;
+      if (Number.isInteger(emp.maxDepth) && emp.maxDepth >= 0) e.maxDepth = emp.maxDepth;
+      if (emp.toolPolicy && typeof emp.toolPolicy === "object" && !Array.isArray(emp.toolPolicy)) {
+        e.toolPolicy = {
+          allow: Array.isArray(emp.toolPolicy.allow) ? emp.toolPolicy.allow.filter((x) => typeof x === "string") : [],
+          deny: Array.isArray(emp.toolPolicy.deny) ? emp.toolPolicy.deny.filter((x) => typeof x === "string") : [],
+        };
+      }
+      if (emp.currentOrderId) e.currentOrderId = String(emp.currentOrderId);
+      if (emp.currentAttemptId) e.currentAttemptId = String(emp.currentAttemptId);
+      if (emp.lastActiveAt != null) e.lastActiveAt = emp.lastActiveAt;
+      if (typeof emp.notes === "string" && emp.notes) e.notes = emp.notes;
+      if (typeof emp.tempHiredAt === "string" && emp.tempHiredAt) e.tempHiredAt = emp.tempHiredAt;
+      if (emp.tempMaxTasks != null) e.tempMaxTasks = Math.max(0, Math.floor(Number(emp.tempMaxTasks) || 0));
+      if (emp.tempCompleted != null) e.tempCompleted = Math.max(0, Math.floor(Number(emp.tempCompleted) || 0));
+      if (typeof emp.tempExpiresAt === "string" && emp.tempExpiresAt) e.tempExpiresAt = emp.tempExpiresAt;
+      // v0.3.2：显式名册关联（缺省不写字段，把「员工 id 即名册 target」留作隐式约定）
+      const rosterTarget = typeof emp.rosterTarget === "string" ? emp.rosterTarget.trim() : "";
+      if (rosterTarget) e.rosterTarget = rosterTarget;
       // 等级迁移：非法 level/channel 回退默认 + warning，不丢员工（docs/16 §1.3）。
       try {
         migrateIdentity(emp, e, warnings);
@@ -659,7 +687,7 @@ export function ensureCompanyCodes(company, { levels = DEFAULT_LEVELS, numbering
 /* 部门（docs/16 §1.2）                                                 */
 /* ------------------------------------------------------------------ */
 
-export function createDepartment(company, { id, name, accepts = [], capacity = 4, borrowPolicy = {}, charter, code }) {
+export function createDepartment(company, { id, name, accepts = [], capacity = 4, borrowPolicy = {}, charter, code, preset }) {
   const c = clone(company);
   if (findDepartment(c, id)) throw new OrgError(`部门 ${id} 已存在`);
   const usedCodes = new Set(c.departments.map((d) => d.code).filter(Boolean));
@@ -681,7 +709,9 @@ export function createDepartment(company, { id, name, accepts = [], capacity = 4
     borrowPolicy,
     charter,
   });
-  return c;
+  if (preset === undefined || preset === null) return c;
+  // 创建即套用（docs/24 §4）：默认 appliedBy=owner；非法/未知预设抛 E_UNKNOWN_PRESET/E_INVALID_PRESET。
+  return applyPresetToDepartment(c, id, preset, { appliedBy: "owner" });
 }
 
 export function updateDepartment(company, id, patch) {
@@ -697,6 +727,14 @@ export function updateDepartment(company, id, patch) {
     } else {
       dept[key] = patch[key];
     }
+  }
+  // preset 单独处理（docs/24 §4）：undefined 不动；null/"" 清除；其余值套用/切换。
+  if (patch.preset !== undefined) {
+    if (patch.preset === null || patch.preset === "") return clearPresetFromDepartment(c, id);
+    return applyPresetToDepartment(c, id, patch.preset, {
+      appliedAt: new Date().toISOString(),
+      appliedBy: "owner",
+    });
   }
   return c;
 }
@@ -770,7 +808,7 @@ export function createEmployee(
         })
       : normalizeCodeInput(code, "员工", usedCodes);
 
-  c.employees.push({
+  const record = {
     id,
     displayName: displayName || id,
     kind: k,
@@ -788,19 +826,75 @@ export function createEmployee(
     duties: normalizeDuties(rest.duties),
     model: typeof rest.model === "string" ? rest.model.trim() : "",
     provider: typeof rest.provider === "string" ? rest.provider.trim() : "",
-  });
+  };
+  // v0.3.2：显式名册 target（缺省不写，员工 id 即隐式 target）
+  const rosterTarget = typeof rest.rosterTarget === "string" ? rest.rosterTarget.trim() : "";
+  if (rosterTarget) record.rosterTarget = rosterTarget;
+
+  // v0.4：向 agent-teams 对齐的运行时属性（都存在才写，保持旧数据形状不变）
+  if (typeof rest.reasoningEffort === "string" && rest.reasoningEffort) record.reasoningEffort = rest.reasoningEffort;
+  if (rest.memberProvider === "spawn" || rest.memberProvider === "fork") record.memberProvider = rest.memberProvider;
+  if (rest.maxDepth !== undefined) record.maxDepth = Math.max(0, Math.floor(Number(rest.maxDepth) || 0));
+  if (rest.toolPolicy && typeof rest.toolPolicy === "object") {
+    record.toolPolicy = {
+      allow: Array.isArray(rest.toolPolicy.allow) ? rest.toolPolicy.allow.map(String) : [],
+      deny: Array.isArray(rest.toolPolicy.deny) ? rest.toolPolicy.deny.map(String) : [],
+    };
+  }
+  // 临时工：按次/按到期时间自动退场
+  if (k === EMPLOYEE_KIND.TEMP) {
+    record.tempHiredAt = typeof rest.tempHiredAt === "string" ? rest.tempHiredAt : new Date().toISOString();
+    record.tempMaxTasks = Math.max(0, Math.floor(Number(rest.tempMaxTasks) || 0));
+    record.tempCompleted = 0;
+    if (typeof rest.tempExpiresAt === "string" && rest.tempExpiresAt) record.tempExpiresAt = rest.tempExpiresAt;
+  }
+  c.employees.push(record);
   return c;
 }
+
+const EMPLOYEE_PATCH_FIELDS = [
+  "displayName",
+  "state",
+  "skills",
+  "lastUsed",
+  "sessionPolicy",
+  "title",
+  "model",
+  "provider",
+  "reasoningEffort",
+  "memberProvider",
+  "maxDepth",
+  "toolPolicy",
+  "currentOrderId",
+  "currentAttemptId",
+  "lastActiveAt",
+  "tempMaxTasks",
+  "tempCompleted",
+  "tempExpiresAt",
+  "notes",
+];
 
 export function updateEmployee(company, id, patch) {
   const c = clone(company);
   const emp = findEmployee(c, id);
   if (!emp) throw new OrgError(`员工 ${id} 不存在`);
-  const allowed = ["displayName", "state", "skills", "lastUsed", "sessionPolicy", "title", "model", "provider"];
+  const allowed = EMPLOYEE_PATCH_FIELDS;
   for (const key of allowed) {
     if (patch[key] !== undefined) emp[key] = patch[key];
   }
   if (patch.duties !== undefined) emp.duties = normalizeDuties(patch.duties);
+  // v0.3.2：显式名册 target；空串表示清除（回到「员工 id 即 target」的隐式约定）
+  if (patch.rosterTarget !== undefined) {
+    const value = typeof patch.rosterTarget === "string" ? patch.rosterTarget.trim() : "";
+    if (value) {
+      if (!isValidMemberName(value)) {
+        throw new OrgError(`名册成员名不合法：${value}（小写字母/数字/连字符，1-64 位）`);
+      }
+      emp.rosterTarget = value;
+    } else {
+      delete emp.rosterTarget;
+    }
+  }
   return c;
 }
 

@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { createCompanyRuntime, TOOL_NAMES } from "../src/host/company-runtime.mjs";
 import { resolveDefaultLlmOptions } from "../src/host/company-compat.mjs";
 import { buildPromptFor } from "../src/host/company-employees.mjs";
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { RegistryStore } from "../src/shared/registry-store.mjs";
+import { TeamService } from "../src/shared/team-service.mjs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 function makeCtx(opts = {}) {
@@ -397,57 +400,6 @@ test("company_hire 指向不存在部门返回 E_NOT_FOUND 且不写文件/员�
   assert.equal(r2.code, "E_NOT_FOUND");
   assert.equal(rt.view().org.employees.length, 0);
   await rt.shutdown();
-});
-
-function findGameRoutes(rt) {
-  return {
-    get: rt.routes.find((r) => r.method === "GET" && r.path === "/company/game"),
-    op: rt.routes.find((r) => r.method === "POST" && r.path === "/company/game/op"),
-  };
-}
-
-test("公司大亨：GET /company/game 开局快照 + POST op 操作 + 存档跨重启", async () => {
-  const dataDir = `/tmp/test-dsh-member-manager-game-${Date.now()}`;
-  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
-  await rt.boot();
-  const routes = findGameRoutes(rt);
-  assert.ok(routes.get && routes.op, "游戏路由应注册");
-  const url = new URL("http://localhost/company/game");
-
-  const snap = await routes.get.handler({}, url);
-  assert.equal(snap.version, 1);
-  assert.equal(snap.status, "playing");
-  assert.equal(snap.turn, 1);
-  assert.ok(snap.coins > 0);
-  assert.ok(Array.isArray(snap.departments) && snap.departments.length >= 1);
-  assert.ok(Array.isArray(snap.employees) && snap.employees.length >= 1);
-  assert.ok(snap.nextCosts && typeof snap.nextCosts.hire === "number");
-
-  const deptId = snap.departments[0].id;
-  const orderId = snap.orders[0].id;
-  const assigned = await routes.op.handler({}, url, { action: "assign", args: { orderId, departmentId: deptId } });
-  assert.equal(assigned.orders.find((o) => o.id === orderId).deptId, deptId);
-
-  const stepped = await routes.op.handler({}, url, { action: "step", args: {} });
-  assert.equal(stepped.turn, 2);
-  assert.ok(stepped.log.length >= 1);
-
-  const bad = await routes.op.handler({}, url, { action: "nope" });
-  assert.equal(bad.ok, false);
-  assert.equal(bad.code, "E_UNKNOWN_ACTION");
-
-  const replayed = await routes.op.handler({}, url, { action: "new", args: { seed: 5 } });
-  assert.equal(replayed.turn, 1);
-  assert.equal(replayed.status, "playing");
-  await rt.shutdown();
-
-  // 存档：新运行时读同一数据目录，游戏应接着上一局（new 之后的回合 1）
-  const rt2 = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
-  await rt2.boot();
-  const snap2 = await findGameRoutes(rt2).get.handler({}, url);
-  assert.equal(snap2.turn, 1, "重启后应读到已保存的存档");
-  assert.equal(snap2.version, 1);
-  await rt2.shutdown();
 });
 
 function findOpRoute(rt) {
@@ -1253,6 +1205,288 @@ function readAudit(dataDir) {
     .map((line) => JSON.parse(line));
 }
 
+/* ------------------------------------------------------------------ */
+/* 部门流程预设（docs/24 §5，追加用例）                                 */
+/* ------------------------------------------------------------------ */
+
+function findPresetRoute(rt) {
+  return rt.routes.find((r) => r.method === "GET" && r.path === "/company/presets");
+}
+
+function ownerExecOf(rt) {
+  return { exec: { agent: { session: { id: rt.ownerSessionId } } } };
+}
+
+async function withPresetRuntime(fn) {
+  const dataDir = mkdtempSync(path.join(os.tmpdir(), "dsh-preset-rt-"));
+  const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  try {
+    return await fn(rt, dataDir);
+  } finally {
+    await rt.shutdown();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+}
+
+const D04_PEOPLE = [
+  { id: "e0016", code: "E0016", displayName: "主策划", title: "主策划（玩法与数值）", duties: ["玩法与关卡设计", "数值与经济系统设计"], skills: ["domain-modeling"], channels: [{ channel: "P", level: "P4" }] },
+  { id: "e0017", code: "E0017", displayName: "系统策划", title: "系统策划", duties: ["系统规则与数据结构设计"], skills: ["domain-modeling"], channels: [{ channel: "P", level: "P3" }] },
+  { id: "e0018", code: "E0018", displayName: "客户端工程师", title: "Unity 客户端工程师", duties: ["客户端功能开发", "配合策划做交互"], skills: ["implement"], channels: [{ channel: "P", level: "P3" }] },
+  { id: "e0019", code: "E0019", displayName: "服务端工程师", title: "服务端工程师", duties: ["服务端逻辑与接口开发"], skills: ["implement"], channels: [{ channel: "P", level: "P3" }] },
+  { id: "e0020", code: "E0020", displayName: "美术设计师", title: "游戏美术与 UI 设计师", duties: ["UI 视觉与界面规范"], skills: ["prototype"], channels: [{ channel: "P", level: "P3" }] },
+  { id: "e0021", code: "E0021", displayName: "测试工程师", title: "游戏测试工程师", duties: ["测试计划与用例设计"], skills: ["tdd"], channels: [{ channel: "P", level: "P2" }] },
+  { id: "e0022", code: "E0022", displayName: "游戏制作人", title: "制作人（项目负责人）", role: "manager", duties: ["版本目标与里程碑管理"], skills: ["chief-of-staff"], channels: [{ channel: "M", level: "M2" }] },
+];
+
+async function seedD04(rt) {
+  const op = findOpRoute(rt);
+  const dept = await op.handler({}, new URL("http://localhost/company/op"), {
+    action: "createDepartment",
+    args: { id: "d04", name: "游戏开发", code: "D04" },
+  });
+  assert.equal(dept.ok, true);
+  for (const person of D04_PEOPLE) {
+    const res = await op.handler({}, new URL("http://localhost/company/op"), {
+      action: "createEmployee",
+      args: { ...person, department: "d04" },
+    });
+    assert.equal(res.ok, true, `创建员工 ${person.id} 失败: ${JSON.stringify(res)}`);
+  }
+}
+
+test("view 暴露 presets 注册表，未套用预设的部门 preset 为 null", async () => {
+  await withPresetRuntime(async (rt) => {
+    const v = rt.view();
+    assert.ok(Array.isArray(v.presets));
+    const gameDev = v.presets.find((p) => p.id === "game-dev");
+    assert.ok(gameDev, "view.presets 应含 game-dev");
+    assert.equal(gameDev.stageCount, 7);
+    assert.equal(gameDev.roleCount, 7);
+    for (const dept of v.org.departments) assert.equal(dept.preset, null);
+  });
+});
+
+test("GET /company/presets 返回注册表摘要", async () => {
+  await withPresetRuntime(async (rt) => {
+    const route = findPresetRoute(rt);
+    assert.ok(route, "应注册 GET /company/presets");
+    const payload = await route.handler({}, new URL("http://localhost/company/presets"));
+    assert.deepEqual(payload, rt.view().presets);
+    assert.ok(payload.some((p) => p.id === "game-dev"));
+  });
+});
+
+test("company_admin applyDepartmentPreset 成功：写入 preset、审计、view 可解析", async () => {
+  await withPresetRuntime(async (rt, dataDir) => {
+    const op = findOpRoute(rt);
+    await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d04", name: "游戏开发" } });
+    const admin = rt.tools.find((t) => t.name === "company_admin");
+    const res = await admin.execute({ action: "applyDepartmentPreset", args: { departmentId: "d04", presetId: "game-dev" } }, ownerExecOf(rt));
+    assert.equal(res.ok, true);
+    assert.equal(res.departmentId, "d04");
+    assert.equal(res.preset.id, "game-dev");
+    assert.equal(res.preset.version, 1);
+    assert.equal(res.preset.appliedBy, "owner");
+    assert.match(res.preset.appliedAt, /^\d{4}-\d{2}-\d{2}T/);
+
+    const dept = rt.view().org.departments.find((d) => d.id === "d04");
+    assert.equal(dept.preset.id, "game-dev");
+    assert.equal(dept.preset.roles.length, 7);
+    assert.equal(dept.preset.stages.length, 7);
+    for (const role of dept.preset.roles) assert.equal(role.employee, null, "无员工时槽位应为 null");
+
+    const audit = readAudit(dataDir);
+    const row = audit.find((a) => a.type === "department.preset.applied");
+    assert.ok(row, "应写套用预设审计");
+    assert.equal(row.departmentId, "d04");
+    assert.equal(row.presetId, "game-dev");
+    assert.equal(row.version, 1);
+  });
+});
+
+test("company_admin applyDepartmentPreset 错误：未知预设/部门不存在/缺参", async () => {
+  await withPresetRuntime(async (rt) => {
+    const op = findOpRoute(rt);
+    await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d04", name: "游戏开发" } });
+    const admin = rt.tools.find((t) => t.name === "company_admin");
+    const unknown = await admin.execute({ action: "applyDepartmentPreset", args: { departmentId: "d04", presetId: "nope" } }, ownerExecOf(rt));
+    assert.equal(unknown.ok, false);
+    assert.equal(unknown.code, "E_UNKNOWN_PRESET");
+    const missingDept = await admin.execute({ action: "applyDepartmentPreset", args: { departmentId: "ghost", presetId: "game-dev" } }, ownerExecOf(rt));
+    assert.equal(missingDept.ok, false);
+    assert.equal(missingDept.code, "E_NOT_FOUND");
+    assert.match(missingDept.message, /部门不存在/);
+    const empty = await admin.execute({ action: "applyDepartmentPreset", args: { departmentId: "d04" } }, ownerExecOf(rt));
+    assert.equal(empty.ok, false);
+    assert.equal(empty.code, "E_INVALID_PRESET");
+  });
+});
+
+test("company_admin clearDepartmentPreset 清除预设并审计，幂等", async () => {
+  await withPresetRuntime(async (rt, dataDir) => {
+    const op = findOpRoute(rt);
+    await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d04", name: "游戏开发", preset: "game-dev" } });
+    const admin = rt.tools.find((t) => t.name === "company_admin");
+    const res = await admin.execute({ action: "clearDepartmentPreset", args: { departmentId: "d04" } }, ownerExecOf(rt));
+    assert.equal(res.ok, true);
+    assert.equal(rt.view().org.departments.find((d) => d.id === "d04").preset, null);
+    const again = await admin.execute({ action: "clearDepartmentPreset", args: { departmentId: "d04" } }, ownerExecOf(rt));
+    assert.equal(again.ok, true);
+    const audit = readAudit(dataDir);
+    assert.ok(audit.some((a) => a.type === "department.preset.cleared" && a.departmentId === "d04"));
+  });
+});
+
+test("POST /company/op applyDepartmentPreset / clearDepartmentPreset 与工具同语义", async () => {
+  await withPresetRuntime(async (rt, dataDir) => {
+    const op = findOpRoute(rt);
+    await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d04", name: "游戏开发" } });
+    const applied = await op.handler({}, new URL("http://localhost/company/op"), { action: "applyDepartmentPreset", args: { departmentId: "d04", presetId: "game-dev" } });
+    assert.equal(applied.ok, true);
+    assert.equal(applied.preset.id, "game-dev");
+    const audit = readAudit(dataDir);
+    assert.ok(audit.some((a) => a.type === "department.preset.applied" && a.presetId === "game-dev" && a.version === 1));
+
+    const missing = await op.handler({}, new URL("http://localhost/company/op"), { action: "applyDepartmentPreset", args: { presetId: "game-dev" } });
+    assert.equal(missing.ok, false);
+    assert.equal(missing.code, "E_INVALID_INPUT");
+
+    const cleared = await op.handler({}, new URL("http://localhost/company/op"), { action: "clearDepartmentPreset", args: { departmentId: "d04" } });
+    assert.equal(cleared.ok, true);
+    assert.equal(rt.view().org.departments.find((d) => d.id === "d04").preset, null);
+    const unknown = await op.handler({}, new URL("http://localhost/company/op"), { action: "applyDepartmentPreset", args: { departmentId: "d04", presetId: "nope" } });
+    assert.equal(unknown.ok, false);
+    assert.equal(unknown.code, "E_UNKNOWN_PRESET");
+  });
+});
+
+test("POST /company/op createDepartment/updateDepartment 透传 preset，update null/空串清除", async () => {
+  await withPresetRuntime(async (rt) => {
+    const op = findOpRoute(rt);
+    const created = await op.handler({}, new URL("http://localhost/company/op"), {
+      action: "createDepartment",
+      args: { id: "d04", name: "游戏开发", preset: "game-dev" },
+    });
+    assert.equal(created.ok, true);
+    assert.equal(rt.view().org.departments.find((d) => d.id === "d04").preset.id, "game-dev");
+
+    const cleared = await op.handler({}, new URL("http://localhost/company/op"), {
+      action: "updateDepartment",
+      args: { departmentId: "d04", preset: null },
+    });
+    assert.equal(cleared.ok, true);
+    assert.equal(rt.view().org.departments.find((d) => d.id === "d04").preset, null);
+
+    const applied = await op.handler({}, new URL("http://localhost/company/op"), {
+      action: "updateDepartment",
+      args: { departmentId: "d04", preset: "game-dev" },
+    });
+    assert.equal(applied.ok, true);
+    assert.equal(rt.view().org.departments.find((d) => d.id === "d04").preset.id, "game-dev");
+
+    const bad = await op.handler({}, new URL("http://localhost/company/op"), {
+      action: "createDepartment",
+      args: { name: "坏预设", preset: "nope" },
+    });
+    assert.equal(bad.ok, false);
+    assert.equal(bad.code, "E_UNKNOWN_PRESET");
+  });
+});
+
+test("company_admin createDepartment/updateDepartment 透传 preset", async () => {
+  await withPresetRuntime(async (rt) => {
+    const admin = rt.tools.find((t) => t.name === "company_admin");
+    const created = await admin.execute({ action: "createDepartment", args: { id: "d04", name: "游戏开发", preset: "game-dev" } }, ownerExecOf(rt));
+    assert.equal(created.ok, true);
+    assert.equal(rt.view().org.departments.find((d) => d.id === "d04").preset.id, "game-dev");
+    const cleared = await admin.execute({ action: "updateDepartment", args: { id: "d04", preset: null } }, ownerExecOf(rt));
+    assert.equal(cleared.ok, true);
+    assert.equal(rt.view().org.departments.find((d) => d.id === "d04").preset, null);
+  });
+});
+
+test("预设套用持久化：重启后 view 仍解析出已套用预设", async () => {
+  const dataDir = mkdtempSync(path.join(os.tmpdir(), "dsh-preset-persist-"));
+  let rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+  await rt.boot();
+  try {
+    const op = findOpRoute(rt);
+    await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "d04", name: "游戏开发" } });
+    const applied = await op.handler({}, new URL("http://localhost/company/op"), { action: "applyDepartmentPreset", args: { departmentId: "d04", presetId: "game-dev" } });
+    assert.equal(applied.ok, true);
+    await rt.shutdown();
+
+    rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+    await rt.boot();
+    const dept = rt.view().org.departments.find((d) => d.id === "d04");
+    assert.equal(dept.preset.id, "game-dev");
+    assert.equal(dept.preset.outdated, false);
+    assert.equal(dept.preset.appliedBy, "owner");
+    await rt.shutdown();
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("D04 端到端：7 名真实员工套用 game-dev → 7/7 岗位映射", async () => {
+  await withPresetRuntime(async (rt) => {
+    await seedD04(rt);
+    const admin = rt.tools.find((t) => t.name === "company_admin");
+    const applied = await admin.execute({ action: "applyDepartmentPreset", args: { departmentId: "d04", presetId: "game-dev" } }, ownerExecOf(rt));
+    assert.equal(applied.ok, true);
+
+    const preset = rt.view().org.departments.find((d) => d.id === "d04").preset;
+    const expected = {
+      director: "E0022",
+      "lead-planner": "E0016",
+      "system-planner": "E0017",
+      "client-dev": "E0018",
+      "server-dev": "E0019",
+      artist: "E0020",
+      qa: "E0021",
+    };
+    assert.equal(preset.roles.length, 7);
+    for (const role of preset.roles) {
+      assert.ok(role.employee, `岗位 ${role.key} 未匹配员工`);
+      assert.equal(role.employee.code, expected[role.key], `岗位 ${role.key} 映射错误`);
+    }
+    for (const stage of preset.stages) {
+      assert.ok(stage.owner.employee, `阶段 ${stage.key} owner 未分配`);
+      for (const participant of stage.participants) assert.ok(participant.employee);
+      for (const gate of stage.gates) assert.ok(gate.approverName);
+    }
+  });
+});
+
+test("历史数据无 preset（兼容）：boot 正常且 view preset 为 null", async () => {
+  const dataDir = mkdtempSync(path.join(os.tmpdir(), "dsh-preset-legacy-"));
+  try {
+    mkdirSync(path.join(dataDir, "company"), { recursive: true });
+    writeFileSync(
+      path.join(dataDir, "company", "company.json"),
+      JSON.stringify({
+        company: {
+          version: 1,
+          status: "idle",
+          departments: [{ id: "legacy", name: "老部门" }],
+          employees: [],
+        },
+      }),
+      "utf8",
+    );
+    const rt = createCompanyRuntime(makeCtx(), { dataDir, config: { fake: true } });
+    const booted = await rt.boot();
+    assert.equal(booted.ok, true);
+    const dept = rt.view().org.departments.find((d) => d.id === "legacy");
+    assert.equal(dept.preset, null);
+    assert.ok(rt.view().presets.some((p) => p.id === "game-dev"));
+    await rt.shutdown();
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
 test("boot 消费 pending-migration.json：小组→部门、active 成员→员工、档案补空、删除标记", async () => {
   const dataDir = `/tmp/test-dsh-member-manager-migrate-${Date.now()}`;
   mkdirSync(path.join(dataDir, "company"), { recursive: true });
@@ -1343,4 +1577,141 @@ test("pending-migration.json 损坏时不阻塞 boot（warnings 记录）", asyn
   assert.equal(res.ok, true);
   assert.equal(res.migration, null);
   await rt.shutdown();
+});
+
+// ---------------------------------------------------------------------------
+// v0.3.3：新建部门/新建员工后自动登记名册（company.autoLinkRoster，默认开）
+// ---------------------------------------------------------------------------
+
+function makeRosterBridge(dir) {
+  const file = path.join(dir, "registry.json");
+  const store = new RegistryStore({ file, now: () => "2026-01-01T00:00:00.000Z" });
+  const service = new TeamService({ store, liveTargets: () => [], now: () => "2026-01-01T00:00:00.000Z" });
+  return {
+    store,
+    service,
+    bridge: {
+      service: () => service,
+      members: () => {
+        try {
+          const loaded = store.load();
+          return loaded && Array.isArray(loaded.registry.members) ? loaded.registry.members : null;
+        } catch {
+          return null;
+        }
+      },
+    },
+    members: () => store.load().registry.members,
+  };
+}
+
+test("v0.3.3 新建部门后逐员工自动登记名册（面板 op 路径）", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "dsh-mm-autolink-op-"));
+  try {
+    const roster = makeRosterBridge(dir);
+    const rt = createCompanyRuntime(makeCtx(), {
+      dataDir: path.join(dir, "data"),
+      config: { fake: true },
+      roster: roster.bridge,
+    });
+    await rt.boot();
+    const op = findOpRoute(rt);
+
+    const deptRes = await op.handler({}, new URL("http://localhost/company/op"), { action: "createDepartment", args: { id: "dept-auto", name: "自动登记部", code: "D09" } });
+    assert.equal(deptRes.ok, true);
+    assert.equal(deptRes.roster.ok, true);
+    assert.equal(deptRes.roster.created, 0); // 新部门还没有员工
+
+    const empRes = await op.handler({}, new URL("http://localhost/company/op"), { action: "createEmployee", args: { id: "emp-auto-1", displayName: "自动一号", department: "dept-auto", role: "staff" } });
+    assert.equal(empRes.ok, true);
+    assert.equal(empRes.roster.ok, true);
+    assert.equal(empRes.roster.created, 1);
+    assert.equal(empRes.roster.updated, 0);
+
+    const members = roster.members();
+    assert.equal(members.length, 1);
+    const linked = members.find((m) => m.target === "emp-auto-1");
+    assert.ok(linked);
+    assert.equal(linked.displayName, "自动一号");
+    assert.equal(linked.status, "active");
+    assert.match(linked.note, /公司员工 emp-auto-1/);
+    assert.match(linked.note, /D09 自动登记部/);
+
+    // 面板视图能看到「已登记」状态
+    const view = rt.view();
+    const emp = view.org.employees.find((e) => e.id === "emp-auto-1");
+    assert.equal(emp.roster.status, "linked");
+    assert.equal(view.roster.available, true);
+    assert.equal(view.roster.linked, 1);
+    await rt.shutdown();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("v0.3.3 company_hire 建员工也自动登记名册", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "dsh-mm-autolink-hire-"));
+  try {
+    const roster = makeRosterBridge(dir);
+    const rt = createCompanyRuntime(makeCtx(), {
+      dataDir: path.join(dir, "data"),
+      config: { fake: true, departments: [{ id: "dev", name: "研发部" }] },
+      roster: roster.bridge,
+    });
+    await rt.boot();
+    const ownerExec = { agent: { session: { id: rt.ownerSessionId } } };
+    const hired = await rt.tools.find((t) => t.name === "company_hire").execute({ id: "h1", displayName: "雇佣一号", role: "staff", kind: "permanent", department: "dev" }, ownerExec);
+    assert.equal(hired.ok, true);
+    assert.equal(hired.roster.ok, true);
+    assert.equal(hired.roster.created, 1);
+    assert.ok(roster.members().some((m) => m.target === "h1" && m.displayName === "雇佣一号"));
+    await rt.shutdown();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("v0.3.3 autoLinkRoster=false 时只建员工不登记名册", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "dsh-mm-autolink-off-"));
+  try {
+    const roster = makeRosterBridge(dir);
+    const rt = createCompanyRuntime(makeCtx(), {
+      dataDir: path.join(dir, "data"),
+      config: { fake: true, autoLinkRoster: false },
+      roster: roster.bridge,
+    });
+    await rt.boot();
+    const admin = rt.tools.find((t) => t.name === "company_admin");
+    await admin.execute({ action: "createDepartment", args: { id: "dept-off", name: "关闭部" } }, {});
+    const emp = await admin.execute({ action: "createEmployee", args: { id: "emp-off-1", displayName: "不登记", department: "dept-off", role: "staff" } }, {});
+    assert.equal(emp.ok, true);
+    assert.equal(emp.roster.ok, true);
+    assert.equal(emp.roster.disabled, true);
+    assert.equal(emp.roster.created, 0);
+    assert.equal(roster.members().length, 0);
+    // 面板仍显示「未登记」，可手动点「登记到名册」补齐
+    const view = rt.view();
+    assert.equal(view.org.employees.find((e) => e.id === "emp-off-1").roster.status, "unlinked");
+    await rt.shutdown();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("v0.3.3 名册不可用时创建员工仍成功（roster.ok=false 但不阻塞）", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "dsh-mm-autolink-noroster-"));
+  try {
+    const rt = createCompanyRuntime(makeCtx(), { dataDir: path.join(dir, "data"), config: { fake: true } });
+    await rt.boot();
+    const admin = rt.tools.find((t) => t.name === "company_admin");
+    await admin.execute({ action: "createDepartment", args: { id: "dept-nr", name: "无册部" } }, {});
+    const emp = await admin.execute({ action: "createEmployee", args: { id: "emp-nr-1", displayName: "无册员工", department: "dept-nr", role: "staff" } }, {});
+    assert.equal(emp.ok, true);
+    assert.equal(emp.roster.ok, false);
+    assert.equal(emp.roster.code, "E_NO_ROSTER");
+    assert.equal(rt.view().org.employees.some((e) => e.id === "emp-nr-1"), true);
+    await rt.shutdown();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

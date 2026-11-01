@@ -604,11 +604,11 @@ test("源码：v5 总架构结构——默认 company、管理层节点、/compa
   // 默认 tab = company；页签 4 个，顺序 company → employees → workflow → maintain；部门架构不再占页签
   assert.match(src, /const \[tab, setTab\] = useState\("company"\)/);
   assert.ok(src.indexOf('tabBtn("company"') >= 0, "源码应注册 company 页签");
-  assert.ok(src.indexOf('tabBtn("game"') >= 0, "源码应注册 game 页签");
-  assert.ok(src.indexOf('tabBtn("company"') < src.indexOf('tabBtn("game"'), "大亨页签应排在总架构之后");
-  assert.ok(src.indexOf('tabBtn("game"') < src.indexOf('tabBtn("employees"'), "员工中心页签应排在大亨之后");
+  assert.ok(src.indexOf('tabBtn("company"') < src.indexOf('tabBtn("employees"'), "员工中心页签应排在总架构之后");
   assert.ok(src.indexOf('tabBtn("employees"') < src.indexOf('tabBtn("workflow"'), "工作流页签应排在员工中心之后");
   assert.ok(src.indexOf('tabBtn("workflow"') < src.indexOf('tabBtn("maintain"'), "备份与更新应排在工作流之后");
+  assert.equal(src.includes('tabBtn("game"'), false, "大亨页签应移除");
+  assert.equal(src.includes("tabGame"), false, "tabGame 文案应移除");
   assert.equal(src.includes('tabBtn("retired"'), false, "已停用页签应移除");
   assert.equal(src.includes('tabBtn("unregistered"'), false, "未登记页签应移除");
   assert.equal(src.includes("tabRetired"), false, "tabRetired 文案应移除");
@@ -640,13 +640,9 @@ test("源码：v5 总架构结构——默认 company、管理层节点、/compa
   // task-24：员工中心仍是独立页签（v5 从总架构图中移除它的紧凑节点与「查看全部」）
   assert.match(src, /function EmployeeCenterPanel\(props\)/);
   assert.match(src, /EmployeeCenterPanel: EmployeeCenterPanel/);
-  assert.match(src, /tabGame: "大亨"/);
-  assert.match(src, /tabGame: "Tycoon"/);
-  assert.match(src, /function GamePanel\(props\)/);
-  assert.match(src, /GamePanel: GamePanel/);
-  assert.match(src, /api\("\/company\/game"\)/);
-  assert.match(src, /api\("\/company\/game\/op"/);
-  assert.match(src, /h\("div", \{ style: GAME_STYLE\.layout \}, deptCol, orderCol, logCol\)/);
+  assert.equal(src.includes("GamePanel"), false, "大亨面板应整体移除");
+  assert.equal(src.includes("/company/game"), false, "大亨路由调用应移除");
+  assert.equal(src.includes("GAME_STYLE"), false, "大亨样式应移除");
   assert.equal(src.includes('t("cpViewAll")'), false, "「查看全部」按钮应移除");
   assert.equal(src.includes("onOpenEmployees"), false, "onOpenEmployees 回调应移除");
   assert.equal(src.includes("const employeeCenterCard"), false, "员工中心紧凑节点应移除");
@@ -724,18 +720,11 @@ test("字典：v5 文案 zh/en 严格对称，中文与 docs/21 §4.3 一致", (
   assert.equal(zh.tabOrg, "部门架构");
   assert.equal(en.tabOrg, "Department org");
 
-  // v6：公司大亨页签与游戏文案
-  assert.equal(zh.tabGame, "大亨");
-  assert.equal(en.tabGame, "Tycoon");
-  assert.equal(zh.gameStep, "推进一回合");
-  assert.equal(en.gameStep, "Next turn");
-  const zhGame = Object.keys(zh).filter((k) => k.startsWith("game")).sort();
-  const enGame = Object.keys(en).filter((k) => k.startsWith("game")).sort();
-  assert.deepEqual(zhGame, enGame);
-  assert.ok(zhGame.length >= 30, `game* 文案过少：${zhGame.length}`);
-  for (const key of zhGame) {
-    assert.doesNotMatch(String(en[key]), /[\u4e00-\u9fff]/, `en.${key} 含中文：${en[key]}`);
-  }
+  // 大亨（内置小游戏）已整体移除：不应再有任何 game* 文案或 tabGame
+  const zhGame = Object.keys(zh).filter((k) => k.startsWith("game") || k === "tabGame").sort();
+  const enGame = Object.keys(en).filter((k) => k.startsWith("game") || k === "tabGame").sort();
+  assert.deepEqual(zhGame, [], "zh 不应残留 game* 文案：" + zhGame.join(","));
+  assert.deepEqual(enGame, [], "en 不应残留 game* 文案：" + enGame.join(","));
 
   // 架构图与员工中心
   assert.equal(zh.cpEmployeeCenter, "员工中心");
@@ -866,16 +855,17 @@ function renderPanel({ view = sampleView(), tab = "company", calls = [] } = {}) 
   return { t, seed, react, tree, internals: exports.__internals };
 }
 
-test("Panel：默认总架构，页签恰 5 个且顺序为 总架构→大亨→员工中心→工作流→备份与更新", () => {
+test("Panel：默认总架构，页签恰 4 个且顺序为 总架构→员工中心→工作流→备份与更新", () => {
   const { t, tree, internals } = renderPanel();
-  const expected = [t("cpTab"), t("tabGame"), t("cpEmployeeCenter"), t("tabWorkflow"), t("tabMaintain")];
+  const expected = [t("cpTab"), t("cpEmployeeCenter"), t("tabWorkflow"), t("tabMaintain")];
   const labels = collectButtons(tree)
     .map((button) => button.label)
     .filter((label) => expected.includes(label));
 
   assert.deepEqual(labels, expected);
-  assert.equal(labels.length, 5);
+  assert.equal(labels.length, 4);
   assert.equal(labels.includes(t("tabOrg")), false, "部门架构不应再占页签");
+  assert.equal(labels.includes("大亨"), false, "大亨页签已移除");
   assert.equal(collectElements(tree, (node) => node.type === internals.CompanyOrgPanel).length, 1, "默认应渲染 CompanyOrgPanel");
   assert.equal(findModal(tree).overlay, null, "默认不应出现部门弹层");
 });
@@ -1005,11 +995,11 @@ test("EmployeeCenterPanel：默认全员，排序 = 部门编号升序 → M 前
   // 未启用员工带状态小字
   assert.match(text, new RegExp(t("cpStateFired")));
 
-  // 筛选下拉：全体员工 / 各部门 [编号] 名称 / 未启用成员
+  // 筛选下拉：全体员工 / 各部门 [编号] 名称 / 未启用成员 / 已关联名册 / 未关联名册
   const select = collectElements(tree, (node) => node.type === "select")[0];
   assert.ok(select, "应有部门筛选下拉");
   const optionTexts = (select.children || []).map((opt) => textOf(opt));
-  assert.deepEqual(optionTexts, ["全体员工", "[D01] 插件组", "[D02] 文档组", "未启用成员"]);
+  assert.deepEqual(optionTexts, ["全体员工", "[D01] 插件组", "[D02] 文档组", "未启用成员", "已关联名册", "未关联名册"]);
   assert.equal(select.props.value, "all", "默认筛选项应为全体员工");
 });
 
@@ -1045,12 +1035,12 @@ test("EmployeeCenterPanel：部门下拉在工具栏、位于刷新按钮之前"
   assert.ok(selectIdx < refreshIdx, "下拉应在刷新按钮之前");
 });
 
-test("EmployeeCenterPanel：空组织 = cpECEmpty 空态，下拉只剩全体员工/未启用成员", () => {
+test("EmployeeCenterPanel：空组织 = cpECEmpty 空态，下拉只剩固定选项", () => {
   const { t, tree } = renderEmployees({ overview: emptyOrgFixture() });
   assert.match(treeText(tree), new RegExp(t("cpECEmpty")));
   const select = collectElements(tree, (node) => node.type === "select")[0];
   const optionTexts = (select.children || []).map((opt) => textOf(opt));
-  assert.deepEqual(optionTexts, ["全体员工", "未启用成员"]);
+  assert.deepEqual(optionTexts, ["全体员工", "未启用成员", "已关联名册", "未关联名册"]);
 });
 
 test("EmployeeCenterPanel：刷新按钮立即拉取 overview，完成后 busy 复位", async () => {
@@ -2645,244 +2635,278 @@ test("部门弹层：部门编辑 → POST updateDepartment 带 borrowPolicy/acc
   assert.equal(made.seed[20], false);
 });
 
-/* ==================== ⑩ v6 公司大亨页签 ==================== */
+/* ==================== ⑦ 开发模式预设（docs/24 §3.2 / §6） ==================== */
 
-const GAME_URL = "/api/dsh-member-manager/company/game";
-const GAME_OP_URL = "/api/dsh-member-manager/company/game/op";
-
-/** 公司大亨 fixture：与 src/host/company-game.mjs viewGame() 的返回形状一致 */
-function gameFixture(patch = {}) {
-  const base = {
-    version: 1,
-    companyName: "DSH 工作室",
-    turn: 3,
-    turnLimit: 30,
-    coins: 620,
-    reputation: 12,
-    status: "playing",
-    rating: null,
-    departments: [
-      { id: "dept-design", name: "设计部", mul: 1.15, upgrades: 1, capacity: 4, employees: ["g-1", "g-2"] },
-      { id: "dept-dev", name: "开发部", mul: 1, upgrades: 0, capacity: 2, employees: ["g-3"] },
-    ],
-    employees: [
-      { id: "g-1", name: "陈默", code: "E1001", channel: "P", level: 4, deptId: "dept-design", output: 34, salary: 15, fromCompany: true },
-      { id: "g-2", name: "林小满", code: "E1002", channel: "M", level: 2, deptId: "dept-design", output: 28, salary: 13, fromCompany: false },
-      { id: "g-3", name: "赵一鸣", code: "E1003", channel: "P", level: 2, deptId: "dept-dev", output: 16, salary: 7, fromCompany: false },
-    ],
-    orders: [
-      { id: "ord-1", title: "品牌视觉升级", need: 40, progress: 10, reward: 120, reputation: 2, deptId: null, status: "open" },
-      { id: "ord-2", title: "官网改版", need: 60, progress: 60, reward: 180, reputation: 3, deptId: "dept-dev", status: "active" },
-      { id: "ord-3", title: "新品海报", need: 20, progress: 20, reward: 60, reputation: 1, deptId: "dept-design", status: "done" },
-    ],
-    log: [
-      { turn: 3, text: "第 3 回合结算：收入 120，支出 30" },
-      { turn: 2, text: "完成订单：官网改版" },
-    ],
-    nextCosts: { hire: 300, upgradeDepartment: { "dept-design": 450, "dept-dev": 300 }, upgradeEmployee: { "g-1": 200, "g-2": 150, "g-3": 150 } },
-  };
-  return Object.assign(base, patch);
-}
-
-/** 游戏接口 fetch 替身：GET → view；POST /company/game/op → opData（成功 view 或 {ok:false,...}）。 */
-function gameFetch(calls = [], options = {}) {
-  const view = options.view || gameFixture();
-  return async (url, init) => {
-    const u = String(url);
-    const body = init && init.body ? JSON.parse(init.body) : null;
-    calls.push({ url: u, method: (init && init.method) || "GET", body: body });
-    if (u.endsWith("/company/game/op")) {
-      const data = options.opData !== undefined ? options.opData : options.opView || view;
-      return { ok: true, status: 200, json: async () => ({ ok: true, data: data }) };
-    }
-    return { ok: true, status: 200, json: async () => ({ ok: true, data: view }) };
-  };
-}
-
-/** GamePanel 的 useState 顺序：0 view / 1 error / 2 busy / 3 orderDrafts / 4 hireDept */
-function gameSeed(options = {}) {
-  return [
-    options.view === undefined ? gameFixture() : options.view,
-    options.error || null,
-    options.busy || false,
-    options.orderDrafts || {},
-    options.hireDept || "",
+/**
+ * 部门预设 fixture：D01 已套用旧版「游戏开发模式」（version 1 < currentVersion 2 → 可更新），
+ * D02 无预设（老数据）；overview.presets 为可套用目录两项。
+ */
+function presetFixture() {
+  const data = overviewFixture();
+  const stageNames = ["目标", "策划", "原型", "开发", "测试", "发布", "复盘"];
+  data.presets = [
+    { id: "game-dev", name: "游戏开发模式", version: 2, description: "七阶段游戏开发流程", stageCount: 7, roleCount: 2 },
+    { id: "web-dev", name: "Web 开发模式", version: 1, description: "", stageCount: 3, roleCount: 1 },
   ];
+  data.org.departments = [
+    {
+      id: "dept-plugin",
+      code: "D01",
+      name: "插件组",
+      capacity: 4,
+      employeeCount: 3,
+      managerId: "emp-lead",
+      accepts: true,
+      preset: {
+        id: "game-dev",
+        name: "游戏开发模式",
+        version: 1,
+        currentVersion: 2,
+        description: "七阶段游戏开发流程",
+        appliedAt: "2026-08-01T10:00:00.000Z",
+        appliedBy: "emp-lead",
+        roles: [
+          { key: "producer", name: "制作人", channel: "M", level: "M3", titleHint: "统筹全局", employee: { id: "emp-lead", code: "E0001", displayName: "插件组负责人", level: "M2" } },
+          { key: "engineer", name: "工程师", channel: "P", level: "P4", titleHint: "", employee: null },
+        ],
+        stages: stageNames.map((name, index) => ({
+          key: "stage-" + (index + 1),
+          index: index + 1,
+          name: name,
+          goal: index === 0 ? "明确立项目标" : "",
+          owner:
+            index === 0
+              ? { roleKey: "producer", roleName: "制作人", employee: { id: "emp-lead", code: "E0001", displayName: "插件组负责人" } }
+              : { roleKey: "engineer", roleName: "工程师", employee: null },
+          participants: index === 0 ? [{ roleKey: "engineer", roleName: "工程师", employee: null }] : [],
+          deliverables: index === 0 ? [{ key: "brief", name: "立项书", description: "一页纸立项" }] : [],
+          gates: index === 0 ? [{ key: "g1", name: "立项评审", approverRole: "producer", description: "经理复核" }] : [],
+        })),
+      },
+    },
+    { id: "dept-doc", code: "D02", name: "文档组", capacity: 2, employeeCount: 1, managerId: null, accepts: true },
+  ];
+  return data;
 }
 
-function renderGame(options = {}) {
-  const t = translator(options.lang || "zh");
-  const seed = gameSeed(options);
-  const react = makeReact(seed, { mutable: true });
-  const { exports } = loadBundle(react, { fetch: options.fetch || gameFetch(), confirm: options.confirm });
-  const render = () => exports.__internals.GamePanel({ t });
-  return {
-    t,
-    seed,
-    react,
-    internals: exports.__internals,
-    tree: render(),
-    rerender() {
-      react.reset();
-      return render();
-    },
-  };
-}
+test("cpNormalizeDeptPreset：异常输入返回 null；缺字段用空值兜底不抛错", () => {
+  const internals = loadBundle(makeReact()).exports.__internals;
+  assert.equal(internals.cpNormalizeDeptPreset(null), null);
+  assert.equal(internals.cpNormalizeDeptPreset(undefined), null);
+  assert.equal(internals.cpNormalizeDeptPreset("game-dev"), null);
+  assert.equal(internals.cpNormalizeDeptPreset({}), null);
+  assert.equal(internals.cpNormalizeDeptPreset({ name: "" }), null);
+  assert.equal(internals.cpNormalizeDeptPreset({ id: "x", stages: "oops", roles: 5 }).stages.length, 0, "非数组 stages 兜底空数组");
+});
 
-/** 能跑 effect 的渲染：打开时真正发 GET，并记录是否注册定时器。 */
-async function renderGameLive(options = {}) {
-  const t = translator(options.lang || "zh");
-  const react = makeReactLive();
-  const timers = [];
-  const calls = options.calls || [];
-  const { exports } = loadBundle(react, {
-    fetch: options.fetch || gameFetch(calls),
-    setInterval: (fn, ms) => {
-      timers.push({ fn, ms });
-      return timers.length;
-    },
-    clearInterval: () => {},
+test("cpNormalizeDeptPreset：规范化 §3.2 结构——版本落后标可更新、阶段按 index 升序、空槽位丢弃", () => {
+  const internals = loadBundle(makeReact()).exports.__internals;
+  const bare = internals.cpNormalizeDeptPreset({ id: "game-dev" });
+  assert.equal(bare.id, "game-dev");
+  assert.equal(bare.name, "game-dev", "缺 name 时用 id 兜底");
+  assert.equal(bare.version, null);
+  assert.equal(bare.outdated, false);
+  assert.equal(bare.roles.length, 0, "缺 roles 兜底空数组");
+  assert.equal(bare.stages.length, 0, "缺 stages 兜底空数组");
+
+  const preset = internals.cpNormalizeDeptPreset({
+    id: "game-dev",
+    name: "游戏开发模式",
+    version: 1,
+    currentVersion: 2,
+    description: "七阶段",
+    appliedAt: "2026-08-01T10:00:00.000Z",
+    roles: [
+      { key: "producer", name: "制作人", channel: "M", level: "M3", employee: { id: "emp-lead", code: "E0001", displayName: "插件组负责人" } },
+      { name: "" },
+    ],
+    stages: [
+      {
+        key: "b",
+        index: 2,
+        name: "开发",
+        owner: { roleKey: "producer", roleName: "制作人", employee: null },
+        participants: [{ roleKey: "engineer", roleName: "工程师" }],
+        deliverables: [{ name: "代码", description: "可运行" }, { name: "" }],
+        gates: [{ name: "代码评审", approverRole: "producer", description: "组长复核" }, { name: "" }],
+      },
+      { key: "a", index: 1, name: "目标" },
+    ],
   });
+  assert.equal(preset.id, "game-dev");
+  assert.equal(preset.name, "游戏开发模式");
+  assert.equal(preset.outdated, true, "version 落后 currentVersion 应标可更新");
+  assert.equal(preset.appliedAt, "2026-08-01T10:00:00.000Z");
+  assert.equal(preset.roles.length, 1, "空 key/name 的角色槽位应被丢弃");
+  assert.equal(preset.stages.map((s) => s.name).join(","), "目标,开发", "阶段按 index 升序（vm 沙箱数组与宿主不同源，用 join 比较）");
+  assert.equal(preset.stages[1].deliverables.map((d) => d.name).join(","), "代码");
+  assert.equal(preset.stages[1].gates.map((g) => g.name).join(","), "代码评审");
+  assert.equal(preset.stages[1].participants.length, 1);
+  assert.equal(preset.stages[0].index, 1);
+});
+
+test("cpPresetRoleLabel：角色槽位渲染「角色 · 员工」，缺员工时用未分配兜底", () => {
+  const internals = loadBundle(makeReact()).exports.__internals;
+  const t = translator("zh");
+  const unassigned = t("cpPresetUnassigned");
+  assert.equal(
+    internals.cpPresetRoleLabel({ roleName: "制作人", employee: { displayName: "插件组负责人", code: "E0001" } }, unassigned),
+    "制作人 · 插件组负责人 E0001",
+  );
+  assert.equal(internals.cpPresetRoleLabel({ name: "工程师", employee: null }, unassigned), "工程师 · 未分配");
+  assert.equal(internals.cpPresetRoleLabel({}, unassigned), "未分配");
+  assert.equal(internals.cpPresetRoleLabel(null, "未指派"), "未指派");
+  assert.equal(
+    internals.cpPresetRoleLabel({ roleName: "制作人", employee: { id: "emp-1" } }, unassigned),
+    "制作人 · 未分配",
+    "员工没有姓名/编号时也应显示未分配",
+  );
+});
+
+test("buildCompanyOrgView：部门卡带 preset，无 preset 的部门为 null，目录字段缺失兜底空数组", () => {
+  const internals = loadBundle(makeReact()).exports.__internals;
+  const view = internals.buildCompanyOrgView(presetFixture());
+  // 无部门归属的员工会单独成卡（dept=null），这里只看有编号的部门卡
+  const byCode = Object.fromEntries(view.cards.filter((card) => card.dept).map((card) => [card.dept.code, card]));
+  assert.equal(byCode.D01.preset.name, "游戏开发模式");
+  assert.equal(byCode.D01.preset.outdated, true);
+  assert.equal(byCode.D01.preset.stages.length, 7);
+  assert.equal(byCode.D02.preset, null, "老数据无 preset 时卡片必须是 null");
+  assert.equal(view.presets.map((p) => p.id).join(","), "game-dev,web-dev");
+
+  const bare = internals.buildCompanyOrgView(overviewFixture());
+  assert.equal(bare.presets.length, 0, "缺 presets 字段时兜底空目录");
+  assert.equal(bare.cards[0].preset, null);
+});
+
+test("CompanyOrgPanel：已套用预设的部门卡显示「游戏开发模式 · 可更新」徽章", () => {
+  const { t, tree } = renderCompany({ overview: presetFixture() });
+  const text = treeText(tree);
+  assert.ok(text.includes("游戏开发模式"));
+  assert.ok(text.includes("游戏开发模式 · " + t("cpPresetOutdated")), "版本落后应追加 · 可更新");
+});
+
+test("部门弹层 preset 页签：展示头部/岗位槽位/七阶段 goal·负责人·参与·交付物·门禁", () => {
+  const { t, tree, react, internals } = renderCompany({ overview: presetFixture(), deptModal: "dept-plugin", modalTab: "preset" });
+  assert.ok(tree);
   react.reset();
-  let tree = exports.__internals.GamePanel({ t });
-  const loadingText = treeText(tree);
-  const cleanups = react.flushEffects();
-  await tick();
-  const render = () => {
-    react.reset();
-    return exports.__internals.GamePanel({ t });
-  };
-  tree = render();
-  return {
-    t,
-    react,
-    internals: exports.__internals,
-    tree,
-    loadingText,
-    timers,
-    calls,
-    cleanups,
-    rerender: render,
-  };
-}
+  const modalTree = internals.CompanyOrgPanel({ t });
+  const text = treeText(modalTree);
 
-test("GamePanel：打开时 GET /company/game 一次并渲染公司名/金币/回合/部门/员工/订单/日志", async () => {
-  const calls = [];
-  const made = await renderGameLive({ fetch: gameFetch(calls) });
-
-  assert.match(made.loadingText, new RegExp(made.t("gameLoading")), "首次渲染（尚未拉到数据）显示加载中");
-  assert.equal(calls.filter((c) => c.url === GAME_URL).length, 1, "打开时应 GET 一次 /company/game");
-  assert.equal(calls.filter((c) => c.method === "POST").length, 0, "仅打开不应发写操作");
-  assert.equal(made.timers.length, 0, "大亨页不轮询：不注册定时器");
-
-  const text = treeText(made.tree);
-  assert.ok(text.includes("DSH 工作室"), "应渲染公司名");
-  assert.ok(text.includes("620"), "应渲染金币");
-  assert.ok(text.includes("3/30"), "应渲染回合 3/30");
-  assert.ok(text.includes("设计部"), "应渲染部门名");
-  assert.ok(text.includes("陈默"), "应渲染员工名");
-  assert.ok(text.includes("品牌视觉升级"), "应渲染订单标题");
-  assert.ok(text.includes("第 3 回合结算"), "应渲染日志");
-  assert.ok(
-    text.includes(made.t("gameDeptUpgrade") + " · 450"),
-    "部门升级按钮应显示 nextCosts 费用：" + text.slice(0, 200),
-  );
-  assert.ok(
-    text.includes(made.t("gameEmployeeUpgrade") + " · 200"),
-    "员工晋升按钮应显示 nextCosts 费用",
-  );
+  assert.equal(buttonByLabel(modalTree, t("cpModalPreset")).length, 1, "应有第三个「开发模式」页签");
+  assert.equal(buttonByLabel(modalTree, t("cpPresetApply")).length, 1, "应有套用按钮");
+  assert.equal(buttonByLabel(modalTree, t("cpPresetClear")).length, 1, "已有预设应有清除按钮");
+  assert.ok(text.includes("游戏开发模式"), "应显示预设名");
+  assert.ok(text.includes("v1"), "应显示已套用版本");
+  assert.ok(text.includes(t("cpPresetOutdated")), "版本落后应显示可更新");
+  assert.ok(text.includes("制作人 · 插件组负责人 E0001"), "岗位槽位应显示已分配员工");
+  assert.ok(text.includes("工程师 · 未分配"), "空缺岗位应显示未分配");
+  assert.ok(text.includes(t("cpPresetStage") + " 7"), "应显示七个阶段");
+  for (const name of ["目标", "策划", "原型", "开发", "测试", "发布", "复盘"]) {
+    assert.ok(text.includes(name), `应渲染阶段名：${name}`);
+  }
+  assert.ok(text.includes("明确立项目标"), "应渲染阶段 goal");
+  assert.ok(text.includes(t("cpPresetOwner") + "：制作人 · 插件组负责人 E0001"), "应渲染阶段负责人");
+  assert.ok(text.includes(t("cpPresetParticipants") + "：工程师 · 未分配"), "应渲染阶段参与角色");
+  assert.ok(text.includes("立项书"), "应渲染交付物名称");
+  assert.ok(text.includes("立项评审 — 经理复核"), "应渲染验收门禁名称与说明");
 });
 
-test("GamePanel：点「推进一回合」发出 {action:\"step\"}，用返回 view 更新（回合 +1，不再重新 GET）", async () => {
-  const calls = [];
-  const nextView = gameFixture({ turn: 4, coins: 700, log: [{ turn: 4, text: "第 4 回合结算" }] });
-  const made = await renderGameLive({ fetch: gameFetch(calls, { opView: nextView }) });
-
-  const step = buttonByLabel(made.tree, made.t("gameStep"))[0];
-  assert.ok(step, "应有「推进一回合」按钮");
-  await step.onClick();
-  await tick();
-
-  const ops = calls.filter((c) => c.url === GAME_OP_URL);
-  assert.equal(ops.length, 1, "应 POST 一次 /company/game/op");
-  assert.equal(ops[0].method, "POST");
-  assert.deepEqual(ops[0].body, { action: "step", args: {} });
-
-  const text = treeText(made.rerender());
-  assert.ok(text.includes("4/30"), "回合应更新为 4/30：" + text.slice(0, 160));
-  assert.ok(text.includes("700"), "金币应更新为 700");
-  assert.ok(text.includes("第 4 回合结算"), "日志应更新");
-  assert.equal(calls.filter((c) => c.url === GAME_URL).length, 1, "操作后用返回 view 更新，不再重新 GET");
+test("部门弹层 preset 页签：无预设显示空态与套用入口，老数据不抛错", () => {
+  const { t, tree, react, internals } = renderCompany({ overview: overviewFixture(), deptModal: "dept-doc", modalTab: "preset" });
+  assert.ok(tree);
+  react.reset();
+  const modalTree = internals.CompanyOrgPanel({ t });
+  const text = treeText(modalTree);
+  assert.ok(text.includes(t("cpPresetEmpty")), "应显示空态文案");
+  assert.ok(text.includes(t("cpPresetHint")), "应显示套用提示");
+  assert.equal(buttonByLabel(modalTree, t("cpPresetClear")).length, 0, "无预设不应出现清除按钮");
+  const apply = buttonByLabel(modalTree, t("cpPresetApply"));
+  assert.equal(apply.length, 1);
+  assert.equal(apply[0].disabled, true, "目录为空时套用按钮应禁用");
+  assert.ok(!text.includes(" · " + t("cpPresetOutdated")), "无预设不应出现可更新徽章");
 });
 
-test("GamePanel：失败响应显示 code + message（E_NO_COINS），并保留原 view", async () => {
+test("preset 页签：下拉切换预设后点套用 → POST applyDepartmentPreset", async () => {
   const calls = [];
-  const made = await renderGameLive({
-    fetch: gameFetch(calls, { opData: { ok: false, code: "E_NO_COINS", message: "金币不足" } }),
+  const { t, tree, react, internals } = renderCompany({
+    overview: presetFixture(),
+    deptModal: "dept-doc",
+    modalTab: "preset",
+    fetch: companyFetch(calls),
   });
+  assert.ok(tree);
+  react.reset();
+  let modalTree = internals.CompanyOrgPanel({ t });
+  const select = collectElements(modalTree, (n) => n.type === "select")[0];
+  assert.ok(select, "预设目录非空时应有下拉选择");
+  assert.equal(select.props.value, "game-dev", "默认选中目录首项");
+  select.props.onChange({ target: { value: "web-dev" } });
 
-  const upgrade = buttonByLabel(made.tree, made.t("gameDeptUpgrade") + " · 450")[0];
-  assert.ok(upgrade, "应有升级部门按钮");
-  await upgrade.onClick();
+  react.reset();
+  modalTree = internals.CompanyOrgPanel({ t });
+  const apply = primaryButton(modalTree, t("cpPresetApply"));
+  assert.ok(apply, "应有主按钮套用");
+  await apply.onClick();
   await tick();
 
-  const text = treeText(made.rerender());
-  assert.ok(text.includes("E_NO_COINS: 金币不足"), "应显示错误码与信息：" + text.slice(0, 200));
-  assert.ok(text.includes("设计部"), "失败后仍保留原 view（部门仍在）");
+  const posts = calls.filter((c) => c.url === OP_URL && c.method === "POST");
+  assert.equal(posts.length, 1);
+  assert.deepEqual(posts[0].body, { action: "applyDepartmentPreset", args: { departmentId: "dept-doc", presetId: "web-dev" } });
+  assert.ok(calls.some((c) => c.url === OVERVIEW_URL), "成功后应 load() 刷新 overview");
 });
 
-test("GamePanel：结束态 banner——胜利显示评级+金币，破产显示提示，均带「再开一局」", () => {
-  const won = renderGame({ view: gameFixture({ status: "won", rating: "A", turn: 20 }) });
-  const wonText = treeText(won.tree);
-  assert.ok(
-    wonText.includes(won.t("gameWonBanner", { rating: "A", coins: 620 })),
-    "胜利 banner 应显示评级与金币：" + wonText.slice(0, 200),
-  );
-  assert.equal(buttonByLabel(won.tree, won.t("gamePlayAgain")).length, 1, "应提供「再开一局」");
-  assert.equal(buttonByLabel(won.tree, won.t("gameStep"))[0].disabled, true, "结束态不能推进回合");
-
-  const lost = renderGame({ view: gameFixture({ status: "lost", rating: "D", coins: -20, turn: 9 }) });
-  const lostText = treeText(lost.tree);
-  assert.ok(
-    lostText.includes(lost.t("gameLostBanner", { turn: 9, limit: 30 })),
-    "破产 banner 应显示回合与上限：" + lostText.slice(0, 200),
-  );
-  assert.ok(lostText.includes(lost.t("gameStatusLost")), "状态胶囊应显示破产");
-});
-
-test("GamePanel：订单派单——选择部门后发出 {action:\"assign\"}，载荷含 orderId/departmentId", async () => {
+test("preset 页签：点清除 → POST clearDepartmentPreset 并刷新", async () => {
   const calls = [];
-  const made = await renderGameLive({ fetch: gameFetch(calls) });
-
-  const selects = collectElements(made.tree, (node) => node.type === "select");
-  const assignSelect = selects.find((node) => String(node.props.value) === "");
-  assert.ok(assignSelect, "待派单订单应有部门下拉");
-  assignSelect.props.onChange({ target: { value: "dept-design" } });
-
-  const after = made.rerender();
-  const assignBtn = buttonByLabel(after, made.t("gameAssign"))[0];
-  assert.ok(assignBtn, "应有派单按钮");
-  assert.equal(assignBtn.disabled, false, "选好部门后派单按钮可用");
-  await assignBtn.onClick();
+  const { t, tree, react, internals } = renderCompany({
+    overview: presetFixture(),
+    deptModal: "dept-plugin",
+    modalTab: "preset",
+    fetch: companyFetch(calls),
+  });
+  assert.ok(tree);
+  react.reset();
+  const modalTree = internals.CompanyOrgPanel({ t });
+  const clear = buttonByLabel(modalTree, t("cpPresetClear"))[0];
+  assert.ok(clear, "已有预设应有清除按钮");
+  await clear.onClick();
   await tick();
 
-  const ops = calls.filter((c) => c.url === GAME_OP_URL);
-  assert.equal(ops.length, 1);
-  assert.deepEqual(ops[0].body, { action: "assign", args: { orderId: "ord-1", departmentId: "dept-design" } });
+  const posts = calls.filter((c) => c.url === OP_URL && c.method === "POST");
+  assert.equal(posts.length, 1);
+  assert.deepEqual(posts[0].body, { action: "clearDepartmentPreset", args: { departmentId: "dept-plugin" } });
+  assert.ok(calls.some((c) => c.url === OVERVIEW_URL), "成功后应 load() 刷新 overview");
 });
 
-test("GamePanel：底部招聘显示费用，点击发出 {action:\"hire\"} 并带部门", async () => {
-  const calls = [];
-  const made = await renderGameLive({ fetch: gameFetch(calls) });
+/* ==================== 选择器锚点（S3）：防止退回「元素级按钮选择器」 ====================
+ * 背景：第一版用 `.mm-panel button{...}` + `button:hover{background:...!important}` 这类元素级规则，
+ * 结果把没挂 .mm-btn 的页签一起打，选中页签一碰就塌成灰块。修法是把颜色四态收到类级，
+ * 元素级只留尺寸。这组断言钉住三件容易复发的事：
+ *   1. 面板根必须带 .mm-panel（CSS 作用域入口，掉了整套主题失效且无报错）
+ *   2. 主按钮必须带 .mm-btn-p（否则主次不分：主按钮退回灰框）
+ *   3. 页签必须输出 data-on（CSS 靠它区分「选中不塌」与「未选中给 hover」）
+ */
+test("锚点：面板根 .mm-panel / 主按钮 .mm-btn-p / 页签 data-on", () => {
+  // 作用域挂在 Panel 外壳（Panel 是这个插件的唯一挂载根），
+  // CompanyOrgPanel / EmployeeCenterPanel 都是它的子节点，靠 DOM 祖先继承作用域。
+  const t = translator("zh");
+  const react = makeReact(cpSeed({}), { mutable: true });
+  const { exports } = loadBundle(react, { fetch: overviewFetch() });
+  const tree = exports.__internals.Panel({ t });
+  const rootPanels = collectElements(tree, (n) => String((n.props && n.props.className) || "") === "mm-panel");
+  assert.equal(rootPanels.length, 1, "面板根必须带 .mm-panel，实际 " + rootPanels.length);
 
-  const text = treeText(made.tree);
-  assert.ok(text.includes(made.t("gameCost") + " 300"), "应显示招聘费用 300");
-  const hire = primaryButton(made.tree, made.t("gameHire"));
-  assert.ok(hire, "应有招聘主按钮");
-  await hire.onClick();
-  await tick();
+  const primary = collectElements(
+    tree,
+    (n) => n.type === "button" && String((n.props && n.props.className) || "").includes("mm-btn-p")
+  );
+  assert.ok(primary.length >= 1, "至少要有一个 .mm-btn-p 主按钮");
 
-  const ops = calls.filter((c) => c.url === GAME_OP_URL);
-  assert.equal(ops.length, 1);
-  assert.deepEqual(ops[0].body, { action: "hire", args: { departmentId: "dept-design" } });
+  // 页签的 data-on 在 Panel 首帧走的是 loading 分支（测试壳不跑 effect，state 为空）拿不到真实页签，
+  // 因此这条按源码契约断言：JS 必须落 data-on，CSS 必须有「未选中才给 hover」的规则，
+  // 且不得再有元素级 button:hover —— 那正是当初页签塌陷的根因。
+  const src = fs.readFileSync(BUNDLE, "utf8");
+  assert.match(src, /"data-on": tab === key \? "1" : "0"/, "页签必须输出 data-on");
+  assert.match(src, /\[data-on='0'\]:hover\{background/, "未选中页签要有 hover");
+  assert.doesNotMatch(src, /\.mm-panel button:hover\{/, "不得存在元素级 button:hover");
 });
