@@ -6,7 +6,7 @@
 
 **给 DeepSeek Harness（DSH）加一层可运行的公司化组织**：部门与工号、M/P 双通道等级、工单派工与验收、任务图（DAG）并行派发、审计与成本归因；名册覆盖层负责显示名 / 岗位 / 职责 / 技能 / 模型覆盖。
 
-`dsh-member-manager` · **v0.5.0** · MIT · Node ≥ 22.19 · 零运行时依赖
+`dsh-member-manager` · **v0.5.1** · MIT · Node ≥ 22.19 · 零运行时依赖
 
 > 新手先看 [docs/28-新手使用教程.md](./docs/28-新手使用教程.md)。
 
@@ -30,15 +30,15 @@ Click a heading below to view **English** or **中文** .
 
 ## 界面一览
 
-![组织架构](demo/org-chart-overlay.png)
+![组织架构](https://raw.githubusercontent.com/SMPcosy/dsh-member-manager/main/demo/org-chart-overlay.png)
 
 *组织架构：管理层 → 部门/小组 → 成员拓扑，按会话（任务）切换（独立演示渲染）*
 
-![工作流面板](demo/workflow-panel.png)
+![工作流面板](https://raw.githubusercontent.com/SMPcosy/dsh-member-manager/main/demo/workflow-panel.png)
 
 *工作流面板：成员工作状态、任务板与统计（独立演示渲染）*
 
-![工作网看板](demo/workboard.png)
+![工作网看板](https://raw.githubusercontent.com/SMPcosy/dsh-member-manager/main/demo/workboard.png)
 
 *工作网调度看板：排队 / 已路由 / 执行中 / 已完成 / 异常 五条泳道，异常泳道含异常记录与清理（独立演示渲染）*
 
@@ -86,7 +86,7 @@ Click a heading below to view **English** or **中文** .
 **方式 A：npm（`dsh-member-manager`）**
 
 ```bash
-dsh plugin --profile desktop add dsh-member-manager@0.5.0
+dsh plugin --profile desktop add dsh-member-manager@0.5.1
 ```
 
 **方式 B：本地源码**
@@ -232,21 +232,21 @@ MIT（见 [LICENSE](./LICENSE)）；第三方许可见 [THIRD-PARTY-NOTICES.md](
 
 **A runnable "company" layer for DeepSeek Harness (DSH)**: departments and employee codes, dual M/P career channels, order dispatch with accept/report/review, task-graph (DAG) parallel dispatch, an audit trail and cost attribution. A roster overlay keeps display names, titles, duties, skills and per-member model overrides.
 
-- Version **0.5.0** · MIT · Node ≥ 22.19 · zero runtime dependencies
+- Version **0.5.1** · MIT · Node ≥ 22.19 · zero runtime dependencies
 - Data: `~/.dsh/storages/member-manager/`
 - Entry points: Settings → "Member Manager" panel; `member_*` (16) and `company_*` (14) host tools
 
 ## Screenshots
 
-![Organization chart](demo/org-chart-overlay.png)
+![Organization chart](https://raw.githubusercontent.com/SMPcosy/dsh-member-manager/main/demo/org-chart-overlay.png)
 
 *Organization chart: management → departments/groups → members, switchable by session/task (standalone demo render).*
 
-![Workflow panel](demo/workflow-panel.png)
+![Workflow panel](https://raw.githubusercontent.com/SMPcosy/dsh-member-manager/main/demo/workflow-panel.png)
 
 *Workflow panel: member work status, task board and stats (standalone demo render).*
 
-![Work board](demo/workboard.png)
+![Work board](https://raw.githubusercontent.com/SMPcosy/dsh-member-manager/main/demo/workboard.png)
 
 *Work board (scheduling kanban): queued / routed / running / done / abnormal lanes; the abnormal lane carries exception history + one-click clear (standalone demo render).*
 
@@ -292,7 +292,7 @@ MIT（见 [LICENSE](./LICENSE)）；第三方许可见 [THIRD-PARTY-NOTICES.md](
 **Option A — npm (`dsh-member-manager`)**
 
 ```bash
-dsh plugin --profile desktop add dsh-member-manager@0.5.0
+dsh plugin --profile desktop add dsh-member-manager@0.5.1
 ```
 
 **Option B — local source**

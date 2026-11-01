@@ -1,6 +1,6 @@
 {
   "name": "dsh-member-manager",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "type": "module",
   "description": "Manage the DSH member roster from a local registry overlay AND run members like a company: departments, order dispatch, attempt credentials, audit ledger and cost accounting on top of ctx.agents/subagents — no native team layer required.",
   "keywords": [
