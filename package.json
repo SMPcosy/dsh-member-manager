@@ -31,7 +31,8 @@
     "docs",
     "demo/*.png",
     "icon.png",
-    "scripts"
+    "scripts",
+    "CHANGELOG.md"
   ],
   "dsh": {
     "bundle": {
