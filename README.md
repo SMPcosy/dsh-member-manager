@@ -6,7 +6,7 @@
 
 **给 DeepSeek Harness（DSH）加一层可运行的公司化组织**：部门与工号、M/P 双通道等级、工单派工与验收、任务图（DAG）并行派发、审计与成本归因；名册覆盖层负责显示名 / 岗位 / 职责 / 技能 / 模型覆盖。
 
-`dsh-member-manager` · **v0.5.1** · MIT · Node ≥ 22.19 · 零运行时依赖
+`dsh-member-manager` · **v0.5.2** · MIT · Node ≥ 22.19 · 零运行时依赖
 
 > 新手先看 [docs/28-新手使用教程.md](./docs/28-新手使用教程.md)。
 
@@ -86,7 +86,7 @@ Click a heading below to view **English** or **中文** .
 **方式 A：npm（`dsh-member-manager`）**
 
 ```bash
-dsh plugin --profile desktop add dsh-member-manager@0.5.1
+dsh plugin --profile desktop add dsh-member-manager@0.5.2
 ```
 
 **方式 B：本地源码**
@@ -232,7 +232,7 @@ MIT（见 [LICENSE](./LICENSE)）；第三方许可见 [THIRD-PARTY-NOTICES.md](
 
 **A runnable "company" layer for DeepSeek Harness (DSH)**: departments and employee codes, dual M/P career channels, order dispatch with accept/report/review, task-graph (DAG) parallel dispatch, an audit trail and cost attribution. A roster overlay keeps display names, titles, duties, skills and per-member model overrides.
 
-- Version **0.5.1** · MIT · Node ≥ 22.19 · zero runtime dependencies
+- Version **0.5.2** · MIT · Node ≥ 22.19 · zero runtime dependencies
 - Data: `~/.dsh/storages/member-manager/`
 - Entry points: Settings → "Member Manager" panel; `member_*` (16) and `company_*` (14) host tools
 
@@ -292,7 +292,7 @@ MIT（见 [LICENSE](./LICENSE)）；第三方许可见 [THIRD-PARTY-NOTICES.md](
 **Option A — npm (`dsh-member-manager`)**
 
 ```bash
-dsh plugin --profile desktop add dsh-member-manager@0.5.1
+dsh plugin --profile desktop add dsh-member-manager@0.5.2
 ```
 
 **Option B — local source**

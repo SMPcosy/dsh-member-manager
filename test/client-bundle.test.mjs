@@ -2016,3 +2016,61 @@ test("工作网看板：点击卡片展开详情，点击详情外部关闭详�
 
   overlay.destroy();
 });
+
+/* ---------------- v0.5.2 已完成跟随会话归档 ---------------- */
+test("v0.5.2 已完成按会话归档：只显示本会话、保持服务端倒序，切换后显示全部", async () => {
+  const fixture = Object.assign({}, BOARD_FIXTURE, {
+    task: { id: "s1", title: "会话一" },
+    orders: [
+      { id: "d-new", title: "刚交的活", state: "done", sessionId: "s1", sessionTitle: "会话一", createdAt: "2026-10-21T06:00:00.000Z", endedAt: "2026-10-21T09:00:00.000Z" },
+      { id: "d-old", title: "早交的活", state: "done", sessionId: "s1", sessionTitle: "会话一", createdAt: "2026-10-21T05:00:00.000Z", endedAt: "2026-10-21T07:00:00.000Z" },
+      { id: "d-other", title: "别的会话交的", state: "done", sessionId: "s2", sessionTitle: "会话二", createdAt: "2026-10-21T04:00:00.000Z", endedAt: "2026-10-21T08:00:00.000Z" },
+    ],
+    pipeline: { queued: [], routed: [], running: [], done: ["d-new", "d-old", "d-other"], abnormal: [] },
+  });
+  const { overlay, board } = await mountBoardV04(fixture);
+  const doneLane = () => mmoLanes(board).children[3].children[1];
+  assert.deepEqual(
+    doneLane().children.map((c) => c.getAttribute("data-order")),
+    ["d-new", "d-old"],
+    "默认只显示本会话，且服务端「最新在前」的顺序不被客户端反转",
+  );
+  const doneKpi = mmoHead(board).children.find((c) => String(c.className).includes("mmo-kpi") && c.getAttribute("data-k") === "done");
+  assert.equal(doneKpi.textContent, "wbLaneDone 2", "KPI 与泳道口径一致");
+
+  const scopeBtn = mmoHead(board).children.find((c) => c.getAttribute("data-mm-scope"));
+  assert.ok(scopeBtn, "看板头应有会话范围开关");
+  assert.equal(scopeBtn.getAttribute("data-archived"), "1", "归档单数要如实标出");
+  scopeBtn.dispatchEvent({ type: "click" });
+  assert.deepEqual(
+    doneLane().children.map((c) => c.getAttribute("data-order")),
+    ["d-new", "d-old", "d-other"],
+    "切到全部会话后，其他会话的归档单要回来",
+  );
+  overlay.destroy();
+});
+
+test("v0.5.2 异常记录：清理按钮两段式确认，第二段带当前会话 id", async () => {
+  const fixture = Object.assign({}, BOARD_FIXTURE, {
+    task: { id: "s1", title: "会话一" },
+    orders: [
+      { id: "x-cancel", title: "被取消的单", state: "cancelled", sessionId: "s1", createdAt: "2026-10-21T06:00:00.000Z", endedAt: "2026-10-21T06:30:00.000Z" },
+    ],
+    pipeline: { queued: [], routed: [], running: [], done: [], abnormal: ["x-cancel"] },
+  });
+  const { overlay, board, calls } = await mountBoardV04(fixture);
+  const clearBtn = findBtnByText(board, "wbClearHistory")[0];
+  assert.ok(clearBtn, "异常记录区应有清理按钮");
+
+  clearBtn.dispatchEvent({ type: "click" });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(posts(calls).length, 0, "第一次点击只上膛，不发请求");
+  assert.equal(clearBtn.getAttribute("data-armed"), "1", "上膛后按钮要显示二次确认态");
+
+  clearBtn.dispatchEvent({ type: "click" });
+  assert.ok(await waitFor(() => posts(calls).length === 1), "第二次点击才真正清理");
+  const body = JSON.parse(posts(calls)[0].init.body);
+  assert.equal(body.action, "clearExceptionHistory");
+  assert.equal(body.args.sessionId, "s1", "只看本会话时清理要带上会话范围，别误删别的对话");
+  overlay.destroy();
+});

@@ -257,8 +257,46 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
     };
   }
 
+  /**
+   * 会话归档所需的归属信息：root 会话 id + 会话标题快照。
+   *
+   * 为什么要取 parentSession：teammate 子会话不是看板的作用域（看板按 root 任务选），
+   * 用子会话 id 归档会永远匹配不上 `?task=`，完成单就再也回不到发起它的会话。
+   * 标题取快照而不是每次回查：会话归档后 sessionTitle 服务查不到历史标题，
+   * 快照能保证「这条单当时属于哪个对话」长期可读。
+   */
+  function sessionStamp(exec) {
+    const session = exec?.agent?.session || null;
+    if (!session) return {};
+    const sid = typeof session.id === "string" ? session.id : "";
+    const parent = session?.header?.parentSession || "";
+    const root = parent || sid;
+    if (!root) return {};
+    let title = "";
+    try {
+      const svc = ctx.get("sessionTitle");
+      if (svc && typeof svc.get === "function") {
+        const snap = svc.get(session);
+        const raw = snap && (typeof snap === "string" ? snap : snap.title || snap.text);
+        title = typeof raw === "string" ? raw : "";
+      }
+    } catch {
+      title = "";
+    }
+    return { sessionId: root, sessionTitle: title || "" };
+  }
+
+  /** 工具入参 + 会话归属；调用方显式给的值优先（面板/脚本可代填）。 */
+  function withSessionStamp(args, exec) {
+    const stamp = sessionStamp(exec);
+    if (!stamp.sessionId) return args || {};
+    const out = { ...(args || {}), sessionId: (args && args.sessionId) || stamp.sessionId };
+    if (stamp.sessionTitle) out.sessionTitle = (args && args.sessionTitle) || stamp.sessionTitle;
+    return out;
+  }
+
   async function company_order(args, { exec }) {
-    const res = await dispatcher.placeOrder(args);
+    const res = await dispatcher.placeOrder(withSessionStamp(args, exec));
     // 下完单立刻推一次调度，不等 interval（「下达任务后真的能分到人」的体感来源）
     if (res?.ok && res.orderId) {
       try { scheduler.kick(0); } catch {}
@@ -267,7 +305,7 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
   }
 
   async function company_plan(args, { exec }) {
-    const res = await dispatcher.placePlan(args);
+    const res = await dispatcher.placePlan(withSessionStamp(args, exec));
     // 建完图立刻推一次调度：第一层没有依赖，当轮就能并行派出去。
     if (res?.ok && res.count) {
       try { scheduler.kick(0); } catch {}
@@ -1276,6 +1314,9 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         }
         case "assignOrder": {
           // 带 employeeId = 手动指定；不带 = 交给调度器按路由规则挑人
+          // 面板派活没有 agent 上下文，会话 id 由看板把当前 task 带进来：补写归属，
+          // 让「在看板直接派活」的订单也跟随会话归档，而不是永远无主的全局单。
+          if (args.sessionId) await dispatcher.stampSession(args.orderId, args.sessionId, args.sessionTitle);
           const res = await dispatcher.dispatchOrder(args.orderId, args.employeeId || null);
           if (!res?.ok && res?.code) scheduler.kick(0);
           return res;
@@ -1338,21 +1379,42 @@ export function createCompanyRuntime(ctx, { dataDir, config: rawConfig = {}, log
         }
         case "clearExceptionHistory": {
           // 清理已关闭的异常订单（cancelled / lost / failed），从活账本移除并写入审计。
-          return await withLedger(async () => {
+          //
+          // 0.5.2 修：这段以前调用了 runtime 作用域里根本不存在的 withLedger/persist/append，
+          // 每次点击都抛 ReferenceError → 落进外层 catch 变成 {ok:false,E_INTERNAL}，
+          // 账本一条没删，所以「异常状态永远清不掉」。现在直接用 store 的事务锁 + saveLedger。
+          //
+          // 口径：终态即异常历史，不再要求 failed 必须带 endedAt。老账本里存在
+          // state=failed 但没有 endedAt 的单（手工改库/旧版本遗留），按旧口径既不算
+          // 「活异常」也不算「已关闭异常」，于是永远卡在看板上——这才是真正的僵尸单。
+          const scope = typeof args.sessionId === "string" ? args.sessionId.trim() : "";
+          return await store.withLock(async () => {
+            const loaded = await store.load();
+            runtime.ledger = loaded.ledger || runtime.ledger;
+            const keep = [];
             const removed = [];
-            runtime.ledger = {
-              ...runtime.ledger,
-              orders: runtime.ledger.orders.filter((o) => {
-                if (o.state === "cancelled" || o.state === "lost" || o.state === "failed") {
-                  removed.push(o.id);
-                  return false;
-                }
-                return true;
-              }),
-            };
-            await persist();
-            await append("exception_history_cleared", { count: removed.length, orderIds: removed });
-            return { ok: true, count: removed.length };
+            for (const o of runtime.ledger.orders || []) {
+              const closed = o.state === "cancelled" || o.state === "lost" || o.state === "failed";
+              // 指定会话时只清该会话的异常单：别的对话的失败单不该被这个对话一键清掉。
+              // 无 sessionId 的老单视为「本机遗留」，跟随当前会话一起清 —— 否则它们永远
+              // 停在看板上，正是用户反馈的「异常怎么都清不掉」。
+              if (closed && (!scope || !o.sessionId || o.sessionId === scope)) {
+                removed.push(o.id);
+                continue;
+              }
+              keep.push(o);
+            }
+            runtime.ledger = { ...runtime.ledger, orders: keep };
+            await store.saveLedger(runtime.ledger);
+            await store.appendAudit({
+              type: "exception_history_cleared",
+              count: removed.length,
+              orderIds: removed,
+              sessionId: scope || null,
+            });
+            // 账本删掉的单不能再留在内存索引里，否则调度器还会拿孤儿 attempt 去唤醒员工。
+            try { dispatcher.rebuildIndexFromLedger(); } catch { /* 索引重建失败不影响清理结果 */ }
+            return { ok: true, count: removed.length, sessionId: scope || null };
           });
         }
         case "startScheduler": {

@@ -101,6 +101,10 @@ export function createDispatcher({ runtime, store, employeeManager, logger }) {
       // 任务图专用：批次号与图内键。company_order 不传这两项，stripUndefined 会把它们删掉。
       group: typeof args.group === "string" && args.group.trim() !== "" ? args.group.trim() : undefined,
       taskKey: typeof args.taskKey === "string" && args.taskKey.trim() !== "" ? args.taskKey.trim() : undefined,
+      // 会话归档：订单归属的 root 会话。面板派活（没有 agent 上下文）由前端把看板选中的
+      // 会话 id 传进来，这样「看板直接派活」也能跟着会话一起归档。
+      sessionId: typeof args.sessionId === "string" && args.sessionId.trim() !== "" ? args.sessionId.trim() : undefined,
+      sessionTitle: typeof args.sessionTitle === "string" && args.sessionTitle.trim() !== "" ? args.sessionTitle.trim() : undefined,
     };
   }
 
@@ -269,6 +273,25 @@ export function createDispatcher({ runtime, store, employeeManager, logger }) {
   }
 
   /**
+   * 给已存在的订单补会话归属（看板直接派活：会话 id 可能在建单之后才由前端补上）。
+   * 已有 sessionId 不覆盖：归属以第一次写入为准，避免一次跨会话改派把历史单抢到别的对话。
+   */
+  async function stampSession(orderId, sessionId, sessionTitle) {
+    const sid = typeof sessionId === "string" ? sessionId.trim() : "";
+    if (!sid || !orderId) return { ok: true, skipped: true };
+    return withLedger(async () => {
+      const order = getOrder(runtime.ledger, orderId);
+      if (!order) return { ok: false, code: "E_ORDER_NOT_FOUND" };
+      if (order.sessionId) return { ok: true, orderId, sessionId: order.sessionId, kept: true };
+      order.sessionId = sid;
+      if (typeof sessionTitle === "string" && sessionTitle.trim()) order.sessionTitle = sessionTitle.trim();
+      await persist();
+      await append("order_session_stamped", { orderId, sessionId: sid });
+      return { ok: true, orderId, sessionId: sid };
+    });
+  }
+
+  /**
    * 任务图建单：一次提交多个任务与依赖，展开成多张订单。
    *
    * 依赖用图内 key 表达，建单时按拓扑层顺序映射成真实 orderId。第一层没有依赖，
@@ -290,7 +313,15 @@ export function createDispatcher({ runtime, store, employeeManager, logger }) {
           const deps = task.deps.map((key) => keyToOrderId.get(key)).filter(Boolean);
           const res = createOrder(
             runtime.ledger,
-            normalizeInput({ ...task, deps, group, taskKey: task.key }),
+            normalizeInput({
+              ...task,
+              deps,
+              group,
+              taskKey: task.key,
+              // 图级会话归属下发到每一张单：任务图来自哪个对话，整批就归到哪个对话。
+              sessionId: input?.sessionId,
+              sessionTitle: input?.sessionTitle,
+            }),
             now,
           );
           runtime.ledger = res.ledger;
@@ -892,6 +923,7 @@ export function createDispatcher({ runtime, store, employeeManager, logger }) {
 
   return {
     placeOrder,
+    stampSession,
     placePlan,
     routeOrder,
     assignAndWake,

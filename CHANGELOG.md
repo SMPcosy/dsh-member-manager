@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.5.2（2026-11-03）· 工作网看板：异常清理修复 + 已完成随会话归档
+
+### 修复
+
+- **异常记录清不掉（真因）**：`clearExceptionHistory` 分支调用了该文件作用域根本不存在的 `withLedger` / `persist` / `append`，每次点击必抛 `ReferenceError`，被外层 catch 吞成 `{ok:false, code:"E_INTERNAL"}`，账本一条没删。改用 `store.withLock` + `saveLedger` + `appendAudit`。
+- **清理口径**：按终态判定（`cancelled` / `lost` / `failed`），不再要求 `failed` 必须带 `endedAt`。老账本里「failed 无结束时间」的单按旧口径既不算活异常也不进历史区，清理按钮永远 disabled，是真僵尸单。
+- **清理点了像没反应**：去掉 `window.confirm`（宿主 Web 环境会拦截或直接返回 false），改为两段式按钮——首点上膛「再点一次确认」、3 秒自动复位、次点才发请求，成功后提示实际删除条数。
+- **「异常 11 一直清不掉」的观感**：KPI 改用活异常数，历史数挂到范围开关上；chip 加 `title` 说明口径。
+- **已完成顺序反了**：服务端按 `endedAt || createdAt` 降序（该顺序同时决定 `pipeline.done`，只按创建时间会让长任务压住刚交的活），并删掉客户端对 done 泳道的二次 `reverse()`。
+
+### 新增
+
+- **会话归属落账本**：`company_order` / `company_plan` 从 `exec.agent.session` 取 root 会话与标题快照写入订单；看板「新建订单」带当前会话；「手动派工」在派发前补写归属（只补空缺、不覆盖，留 `order_session_stamped` 审计）。
+- **已完成与异常历史按会话归档**：done 泳道与异常记录区默认只显示当前会话；头部开关 `只看本会话 · +N` ⇄ `全部会话`，`N` 是被归档掉的数量，点一下可回看。无会话归属的老单视为本机遗留，留在当前会话（否则既看不见也清不掉）。
+- **卡片带会话徽标与结束时间**：徽标 `会话 <标题前 16 字>`（`title` 含完整标题与 sessionId），结束时间近 24h 显示 `3h12m`、更早显示 `MM-DD HH:mm`。
+- **按会话清理**：清理按钮按当前会话传 `{sessionId}`，只清本会话的异常历史，不误删别的对话；审计写 `exception_history_cleared{count,orderIds,sessionId}`；删单后重建调度索引，避免孤儿 attempt 唤醒员工。
+
+### 兼容性
+
+- **行为变更**：看板「已完成」泳道默认只显示当前会话的单，看全部需点范围开关。
+- 账本新增可选字段 `sessionId` / `sessionTitle` / `endedAt`，旧账本无需迁移；无归属老单按「本机遗留」处理。
+- 异常清理仍是硬删（账本移除），只有 `audit.jsonl` 的 `orderIds` 可追溯，无撤销入口。
+- 已知未修：`view.orders` 仍按账本插入序取尾部 50 单（单量过百后早期未关闭单可能被挤出视图），排在 0.5.3。
+
 ## 0.5.1（2026-11-01）· README 截图改用 GitHub raw
 
 - 修复：README 6 处截图从相对路径 `demo/*.png` 改为 GitHub raw 绝对 URL，修复 npm 页面裂图（npm 渲染 README 不解析包内相对路径图片，只认绝对 URL）。
