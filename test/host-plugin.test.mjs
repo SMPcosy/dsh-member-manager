@@ -1135,6 +1135,9 @@ function fakeAgent(id) {
   return {
     id,
     _handlers: handlers,
+    // 0.5.3 起模型覆盖只作用于子 agent（delegationDepth > 0）；
+    // 这些用例测的正是「派出去的员工按名册用模型」，所以给一个子 agent 会话头。
+    session: { header: { delegationDepth: 1, origin: "subagent" } },
     ctx: {
       on(evt, fn) {
         if (!handlers.has(evt)) handlers.set(evt, []);

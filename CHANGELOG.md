@@ -1,5 +1,96 @@
 # Changelog
 
+## 0.5.3（2026-11-05）· DSH 0.2.2 适配：模型覆盖改走 `agent.model.select()`
+
+### 兼容性（宿主破坏性变更）
+
+DSH 0.2.2 起，`agent/request` 的返回值必须与 pre-step 固定的 selection 逐字段一致，
+不一致会直接抛错：
+
+> agent/request proposed "X/Y" after step preparation fixed "A/B"; use agent.model.select() before step preparation
+
+本插件原先正是在 `agent/request` 里改写 `provider` / `model` 来实现成员模型覆盖的，
+所以 0.2.2 上会让该成员的**每一次请求都失败**，而不是悄悄不生效。0.5.2 在 0.2.2 上不可用。
+
+### 硬规则：根会话身份（lead）不参与模型覆盖
+
+0.*.* 都不引入这个概念 —— `lead` 就是用户直接对话的那个会话，模型由用户在会话框里自己选。
+
+- 判定两条，任一成立即算：① 活着的 agent 里同名且是顶层会话（没有
+  `delegationDepth` / `origin`）；② 团队内核里该成员角色是 `lead`。
+- `member_set_model` 对这类成员**直接拒绝**，返回 `ROOT_IDENTITY_NO_OVERRIDE`
+  与原因，而不是「接受但永不生效」（后者会让面板显示一个假值）。
+- 面板的 `setModel` 操作同一条规则，返回同样的明确错误。
+- **清除**（`model: ""`）仍然允许，用于清掉历史残留。
+- 根 agent 不落 selection、也不装提示词变量钩子：名册里就算残留 `model` 也不生效。
+
+### 修复
+
+- **模型覆盖按宿主能力分流**：
+  - 有 `agent.model.select()`（0.2.2 起）：在 agent 创建时**提前**把 selection
+    写进 session 投影，**不再挂 `agent/request`**；
+  - 没有（0.2.1 及更早）：保持原 `agent/request` 返回覆写路径。
+- **只在子 agent 上自动落覆盖**：名册成员分两类 ——
+  **子 agent**（`delegationDepth > 0` / `origin === "subagent"`，派出去干活的员工）
+  没有输入框，名册模型就是它唯一的模型来源；**根 agent**（顶层会话）的模型用户
+  随时能在会话框里自己选。所以自动覆盖只给子 agent，根 agent 一律跳过
+  （`modelOverride.skippedRoot` 计数）。
+  真实事故：把 `lead` 覆盖成不支持 vision 的模型后，主会话每轮请求都被 400 拒绝。
+- **只在 agent 创建时落覆盖，`agent/status` 不碰**：之前 `agent/status` 每轮都重落，
+  等于把用户手选的模型改回去。现在只有 `agent/created`（以及显式的 `member_set_model`）
+  会写 selection。
+- **不再为根 agent 装提示词变量钩子**：`system-prompt/assemble` 只对子 agent 安装。
+  根 agent 既不落 selection，也不该让提示词声称它在用名册里的模型；顺带省掉每步一次的
+  名册查询。
+- **`modelOverrideFor` 不做根身份判定**：那条判定要遍历 live agents 与团队名册，
+  而它跑在每步都会触发的水位上。根身份判定只在两处付代价：装钩子时算一次、
+  写名册时对 target 判一次。
+- **幂等**：selection 已等于目标值时跳过，不再每轮 `select` + `applied+1` + 打日志。
+- **只回滚本插件改过的**：清除覆盖时，只有此前确实被本插件落过 selection 的 agent 才拉回
+  默认路由；从未覆盖过的成员一律不碰。记账**按 `agent.ctx`**（不是 agent 包装对象）——
+  同一个 ctx 可能在不同事件里被不同包装对象送出，按对象记账会让「清除覆盖」静默失效。
+- **只对名册成员动模型**：非成员 agent（含临时子代理）一律不碰。
+- **`member_set_model` 立即生效**：写完名册后若目标成员有活着的 agent，立刻强制落一次
+  selection（`force`），不必等下一次生命周期事件；返回值新增 `selectionApplied`。
+
+### 已知限制：模型能力不跟随
+
+覆盖只改 provider/model，**不校验该模型的能力**。真实事故（2026-11-05）：
+把 `lead` 覆盖成 `tokenrhythm/deepseek-v4-pro-0813` 后，主会话因为历史里带图片，
+每次请求都被服务端以 400 拒绝：
+
+```
+MODEL_CAPABILITY_NOT_SUPPORTED: 当前模型不支持该能力：vision
+```
+
+表现为会话反复失败、日志里 `model-override-applied` 与 `agent/request-error` 交替出现。
+处置：给会承载图片的成员（尤其主会话身份）配支持 vision 的模型，或干脆不设覆盖。
+错误现在会被记进 `modelOverride.lastError`，便于定位。
+
+- `system-prompt/assemble` 钩子保持不变：它只改提示词里的 provider/model 变量，
+  不参与请求路由校验。
+
+### 可观测性
+
+`member_diagnose` 的模型覆盖统计新增：
+
+| 字段 | 含义 |
+| --- | --- |
+| `path` | 当前生效的能力：`model-select` / `legacy-hook` |
+| `cleared` | 清除覆盖后回到默认路由的次数 |
+| `errors` / `lastError` | select 抛错次数与最近一次错误 |
+| `history[].via` | 每条审计记录标明走的是哪条路径 |
+
+### 测试
+
+新增 `test/model-select-022.test.mjs`（17 例）：
+
+1. 有 `agent.model.select` → 只落 selection，断言**没有**注册 `agent/request`；
+2. 没有 `agent.model` → 仍注册 `agent/request`；
+3. 清除覆盖 → selection 回到默认路由。
+
+全量 677 例通过。
+
 ## 0.5.2（2026-11-03）· 工作网看板：异常清理修复 + 已完成随会话归档
 
 ### 修复

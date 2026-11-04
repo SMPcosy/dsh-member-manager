@@ -6,7 +6,7 @@
 
 **给 DeepSeek Harness（DSH）加一层可运行的公司化组织**：部门与工号、M/P 双通道等级、工单派工与验收、任务图（DAG）并行派发、审计与成本归因；名册覆盖层负责显示名 / 岗位 / 职责 / 技能 / 模型覆盖。
 
-`dsh-member-manager` · **v0.5.2** · MIT · Node ≥ 22.19 · 零运行时依赖
+`dsh-member-manager` · **v0.5.3** · MIT · Node ≥ 22.19 · 零运行时依赖
 
 > 新手先看 [docs/28-新手使用教程.md](./docs/28-新手使用教程.md)。
 
@@ -86,7 +86,7 @@ Click a heading below to view **English** or **中文** .
 **方式 A：npm（`dsh-member-manager`）**
 
 ```bash
-dsh plugin --profile desktop add dsh-member-manager@0.5.2
+dsh plugin --profile desktop add dsh-member-manager@0.5.3
 ```
 
 **方式 B：本地源码**
@@ -173,6 +173,47 @@ npm 没有包名重定向。发布新包后建议对旧包执行 `npm deprecate 
 | `company.departments` / `routingRules` / `toolPolicies` | `[]` / `[]` / `{}` | 种子部门 / 下单路由 / 分线工具策略 |
 | `company.levels` / `numbering` | 内置 M1–M5、P1–P6 / `E{seq:4}`、`D{seq:2}` | 等级目录 / 编号模板（非法回退默认 + warning） |
 
+## 模型覆盖如何生效
+
+DSH 两代宿主用两套机制，插件按能力自动分流：
+
+| 宿主 | 机制 | 时机 |
+| --- | --- | --- |
+| 0.2.2 起 | `agent.model.select({ provider, model })` 写 session 投影 | 子 agent 创建时落一次；`member_set_model` 显式改时强制重落 |
+| 0.2.1 及更早 | `agent/request` 水位改写返回值 | 每次请求前（同样只对子 agent） |
+
+### 硬规则：lead 没有「覆盖」这个概念
+
+`lead` 是用户直接对话的那个会话，它的模型在会话框里由用户自己选。
+所以 **0.\*.\* 都不给根会话身份做模型覆盖**：
+
+- `member_set_model` 对这类成员**直接拒绝**，返回 `ROOT_IDENTITY_NO_OVERRIDE`；
+- 面板改模型同一条规则，返回同样的错误；
+- 名册里就算残留 `model` 也不生效：根 agent 不落 selection，子 agent 不会以 lead 身份出现；
+- 只有「清除」（`model: ""`）允许，用于清掉历史残留。
+
+判定两条，任一成立即算：活着的 agent 里同名且是顶层会话（没有 `delegationDepth` /
+`origin`）；或团队内核里该成员角色是 `lead`。
+
+### 覆盖只作用于子 agent
+
+- **子 agent**（`delegationDepth > 0` / `origin === "subagent"`）：派出去干活的员工，
+  没有输入框，名册里的模型就是它唯一的模型来源 —— 「不同岗位用不同模型」落在它们身上。
+- **根 agent**（顶层会话）：不自动覆盖，模型归用户。
+
+`modelOverride.skippedRoot` 记录被跳过的次数。
+
+为什么 0.2.2 不能再用老写法：agent-loop 在 pre-step 就把 selection 固定，随后用
+waterfall 拿到 proposedConfig 逐字段比对，不一致直接抛错 ——
+
+> agent/request proposed "X/Y" after step preparation fixed "A/B"; use agent.model.select() before step preparation
+
+所以 0.2.2 上**不会**注册 `agent/request`。`system-prompt/assemble` 仍然保留：
+它只改提示词里的 provider/model 变量，不参与路由校验。
+
+`member_diagnose` 的 `modelOverride` 段会给出 `path`（`model-select` / `legacy-hook`）、
+`cleared` / `unchanged` / `skippedRoot` / `errors`。
+
 ## 工具
 
 **名册工具（16 个，覆盖层，兼容保留）**
@@ -232,7 +273,7 @@ MIT（见 [LICENSE](./LICENSE)）；第三方许可见 [THIRD-PARTY-NOTICES.md](
 
 **A runnable "company" layer for DeepSeek Harness (DSH)**: departments and employee codes, dual M/P career channels, order dispatch with accept/report/review, task-graph (DAG) parallel dispatch, an audit trail and cost attribution. A roster overlay keeps display names, titles, duties, skills and per-member model overrides.
 
-- Version **0.5.2** · MIT · Node ≥ 22.19 · zero runtime dependencies
+- Version **0.5.3** · MIT · Node ≥ 22.19 · zero runtime dependencies
 - Data: `~/.dsh/storages/member-manager/`
 - Entry points: Settings → "Member Manager" panel; `member_*` (16) and `company_*` (14) host tools
 
@@ -292,7 +333,7 @@ MIT（见 [LICENSE](./LICENSE)）；第三方许可见 [THIRD-PARTY-NOTICES.md](
 **Option A — npm (`dsh-member-manager`)**
 
 ```bash
-dsh plugin --profile desktop add dsh-member-manager@0.5.2
+dsh plugin --profile desktop add dsh-member-manager@0.5.3
 ```
 
 **Option B — local source**
